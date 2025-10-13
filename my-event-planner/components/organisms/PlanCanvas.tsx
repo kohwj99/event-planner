@@ -3,6 +3,7 @@
 
 import { Stage, Layer, Rect, Circle } from "react-konva";
 import { useState } from "react";
+import Counter from "../molecules/Counter";
 
 export default function PlanCanvas() {
   const [scale, setScale] = useState(1);
@@ -27,6 +28,8 @@ export default function PlanCanvas() {
 
   return (
     <div className="border rounded-lg overflow-hidden bg-gray-50 w-full h-[80vh]">
+
+      <Counter/>
       <Stage
         width={window.innerWidth}
         height={window.innerHeight * 0.8}
