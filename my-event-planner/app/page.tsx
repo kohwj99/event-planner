@@ -1,6 +1,4 @@
-import PlanCanvas from "@/components/organisms/PlanCanvas";
 import SeatingPage from "@/components/pages/SeatingPage";
-import Counter from "@/components/molecules/Counter";
 
 export default function Home() {
   return (

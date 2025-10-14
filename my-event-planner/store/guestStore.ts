@@ -1,35 +1,67 @@
-import { create } from 'zustand';
-import { devtools, persist } from 'zustand/middleware';
-import { Guest, hostGuests, externalGuests } from '@/data/guestData';
+import { create } from "zustand";
+import { devtools, persist } from "zustand/middleware";
+
+export interface Guest {
+  id: string;
+  name: string;
+  gender: "Male" | "Female" | "Other";
+  salutation: string;
+  country: string;
+  company: string;
+  title: string;
+  ranking: number;      // 1–10 (1–4 are VIPs)
+  fromHost: boolean;    // true = host company attendee
+  deleted?: boolean;    // soft-delete flag
+}
 
 interface GuestStoreState {
   hostGuests: Guest[];
   externalGuests: Guest[];
-  setHostGuests: (guests: Guest[]) => void;
-  setExternalGuests: (guests: Guest[]) => void;
-  addHostGuest: (guest: Guest) => void;
-  addExternalGuest: (guest: Guest) => void;
+  addGuest: (guest: Guest) => void;
+  updateGuest: (id: string, guest: Partial<Guest>) => void;
+  toggleDeleted: (id: string, fromHost: boolean) => void;
   resetGuests: () => void;
 }
 
 export const useGuestStore = create<GuestStoreState>()(
   devtools(
     persist(
-      (set) => ({
-        hostGuests,
-        externalGuests,
-        setHostGuests: (guests) => set({ hostGuests: guests }),
-        setExternalGuests: (guests) => set({ externalGuests: guests }),
-        addHostGuest: (guest) =>
-          set((state) => ({ hostGuests: [...state.hostGuests, guest] })),
-        addExternalGuest: (guest) =>
-          set((state) => ({ externalGuests: [...state.externalGuests, guest] })),
-        resetGuests: () => set({ hostGuests, externalGuests }),
+      (set, get) => ({
+        hostGuests: [],
+        externalGuests: [],
+
+        addGuest: (guest) =>
+          set((state) => {
+            const list = guest.fromHost ? state.hostGuests : state.externalGuests;
+            const key = guest.fromHost ? "hostGuests" : "externalGuests";
+            return { [key]: [...list, guest] } as any;
+          }),
+
+        updateGuest: (id, guest) =>
+          set((state) => ({
+            hostGuests: state.hostGuests.map((g) =>
+              g.id === id ? { ...g, ...guest } : g
+            ),
+            externalGuests: state.externalGuests.map((g) =>
+              g.id === id ? { ...g, ...guest } : g
+            ),
+          })),
+
+        toggleDeleted: (id, fromHost) =>
+          set((state) => {
+            const key = fromHost ? "hostGuests" : "externalGuests";
+            const list = fromHost ? state.hostGuests : state.externalGuests;
+            return {
+              [key]: list.map((g) =>
+                g.id === id ? { ...g, deleted: !g.deleted } : g
+              ),
+            } as any;
+          }),
+
+        resetGuests: () => set({ hostGuests: [], externalGuests: [] }),
       }),
-      {
-        name: 'guest-storage', // localStorage key
-      }
+      { name: "guest-list-store" }
     ),
-    { name: 'GuestStore' } // <-- name to identify in DevTools
+    { name: "GuestStore" }
   )
 );

@@ -1,4 +1,3 @@
-// app/seating/components/Table.tsx
 "use client";
 
 import { Rect, Circle, Group } from "react-konva";

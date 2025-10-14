@@ -16,11 +16,15 @@
     "@mui/material": "^7.3.4",
     "@mui/material-nextjs": "^7.3.3",
     "d3": "^7.9.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^3.0.3",
     "konva": "^10.0.2",
     "next": "15.5.4",
+    "pptxgenjs": "^4.0.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-konva": "^19.0.10",
+    "uuid": "^13.0.0",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
