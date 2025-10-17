@@ -1,261 +1,144 @@
-// /* src/utils/exportToPPTX.ts */
-// import PptxGenJS from "pptxgenjs";
-// import { Table } from "@/store/seatStore";
-
-// /**
-//  * Exports tables to an editable PowerPoint slide.
-//  * Properly converts px -> inches (96 DPI) and scales content to fit slide.
-//  *
-//  * @param tables array from seatStore
-//  * @param filename optional
-//  */
-// export async function exportToPPTX(tables: Table[], filename = "SeatPlan.pptx") {
-//   if (!tables || tables.length === 0) {
-//     console.warn("exportToPPTX: no tables provided");
-//     return;
-//   }
-
-//   const pptx = new PptxGenJS();
-
-//   // PPTX slide dimensions in inches (default)
-//   const SLIDE_W_IN = 10; // inches
-//   const SLIDE_H_IN = 5.625; // inches
-//   const DPI = 96; // px per inch
-
-//   // Convert tables px positions into a bounding box
-//   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-//   tables.forEach(t => {
-//     const left = t.x - t.radius - 20; // seat offset margin
-//     const right = t.x + t.radius + 20;
-//     const top = t.y - t.radius - 20;
-//     const bottom = t.y + t.radius + 20;
-//     minX = Math.min(minX, left);
-//     minY = Math.min(minY, top);
-//     maxX = Math.max(maxX, right);
-//     maxY = Math.max(maxY, bottom);
-//   });
-//   // fallback if NaN
-//   if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 800; maxY = 600; }
-
-//   const contentW_px = Math.max(1, maxX - minX);
-//   const contentH_px = Math.max(1, maxY - minY);
-
-//   // slide dims in px
-//   const slideW_px = SLIDE_W_IN * DPI;
-//   const slideH_px = SLIDE_H_IN * DPI;
-
-//   const margin_px = 24; // small margin in px
-//   const scale = Math.min(
-//     (slideW_px - margin_px * 2) / contentW_px,
-//     (slideH_px - margin_px * 2) / contentH_px,
-//     1
-//   );
-
-//   // compute offset to center
-//   const offsetX_px = (slideW_px - contentW_px * scale) / 2 - minX * scale;
-//   const offsetY_px = (slideH_px - contentH_px * scale) / 2 - minY * scale;
-
-//   const slide = pptx.addSlide();
-//   slide.background = { color: "FFFFFF" };
-
-//   // helper px -> inches
-//   const pxToIn = (px: number) => px / DPI;
-
-//   for (const t of tables) {
-//     const cx_px = t.x * scale + offsetX_px;
-//     const cy_px = t.y * scale + offsetY_px;
-
-//     // draw table
-//     if (t.shape === "round") {
-//       const w_px = t.radius * 2 * scale;
-//       const h_px = w_px;
-//       slide.addShape(pptx.ShapeType.ellipse, {
-//         x: pxToIn(cx_px - w_px / 2),
-//         y: pxToIn(cy_px - h_px / 2),
-//         w: pxToIn(w_px),
-//         h: pxToIn(h_px),
-//         fill: { color: "1976D2" },
-//         line: { color: "0D47A1", width: 1 },
-//       });
-//     } else {
-//       const w_px = (t.radius * 2 + 20) * scale;
-//       const h_px = (t.radius * 2 + 20) * scale;
-//       slide.addShape(pptx.ShapeType.rect, {
-//         x: pxToIn(cx_px - w_px / 2),
-//         y: pxToIn(cy_px - h_px / 2),
-//         w: pxToIn(w_px),
-//         h: pxToIn(h_px),
-//         fill: { color: "1976D2" },
-//         line: { color: "0D47A1", width: 1 },
-//       });
-//     }
-
-//     // table label (centered)
-//     slide.addText(t.label || "", {
-//       x: pxToIn(cx_px - (t.radius * scale)),
-//       y: pxToIn(cy_px - (t.radius * scale) / 2),
-//       w: pxToIn((t.radius * 2) * scale),
-//       h: 0.3,
-//       fontSize: 12,
-//       color: "FFFFFF",
-//       align: "center",
-//     });
-
-//     // seats
-//     for (const s of t.seats) {
-//       const sx_px = s.x * scale + offsetX_px;
-//       const sy_px = s.y * scale + offsetY_px;
-//       const sw_px = s.radius * 2 * scale;
-//       const sh_px = sw_px;
-
-//       slide.addShape(pptx.ShapeType.ellipse, {
-//         x: pxToIn(sx_px - sw_px / 2),
-//         y: pxToIn(sy_px - sh_px / 2),
-//         w: pxToIn(sw_px),
-//         h: pxToIn(sh_px),
-//         fill: { color: "90CAF9" },
-//         line: { color: "1565C0", width: 0.5 },
-//       });
-
-//       // seat label (small)
-//       slide.addText(String(s.label || ""), {
-//         x: pxToIn(sx_px - sw_px / 2),
-//         y: pxToIn(sy_px - sh_px / 2),
-//         w: pxToIn(sw_px),
-//         h: pxToIn(sh_px),
-//         fontSize: 8,
-//         color: "0D47A1",
-//         align: "center",
-//         valign: "middle",
-//       });
-//     }
-//   }
-
-//   await pptx.writeFile({ fileName: filename });
-// }
-
-
+// src/utils/exportToPPTX.ts
 import PptxGenJS from "pptxgenjs";
-import { Table } from "@/store/seatStore";
+import { useSeatStore, CHUNK_WIDTH, CHUNK_HEIGHT, Table } from "@/store/seatStore";
 
 /**
- * Converts the tables and seats into an editable PowerPoint slide.
- * Maintains proper scaling and layout for different screen sizes.
+ * Exports each chunk as one editable PowerPoint slide.
+ * Each chunk fits content into a single slide; final slide is an overview.
  */
-export async function exportToPPTX(tables: Table[], filename = "SeatPlan.pptx") {
-  if (!tables || tables.length === 0) {
-    console.warn("exportToPPTX: no tables provided");
-    return;
-  }
-
+export async function exportToPPTX(allTables: Table[], filename = "SeatPlan.pptx") {
+  const store = useSeatStore.getState();
+  const chunks = store.getAllChunksSorted();
   const pptx = new PptxGenJS();
-  const slide = pptx.addSlide();
 
-  // Slide config
+  // slide dims & DPI
   const SLIDE_W_IN = 10;
   const SLIDE_H_IN = 5.625;
   const DPI = 96;
-
-  // Compute bounding box
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  tables.forEach(t => {
-    const left = t.x - t.radius - 40;
-    const right = t.x + t.radius + 40;
-    const top = t.y - t.radius - 40;
-    const bottom = t.y + t.radius + 40;
-    minX = Math.min(minX, left);
-    minY = Math.min(minY, top);
-    maxX = Math.max(maxX, right);
-    maxY = Math.max(maxY, bottom);
-  });
-
-  if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 800; maxY = 600; }
-
-  const contentW = maxX - minX;
-  const contentH = maxY - minY;
-
-  const slideW_px = SLIDE_W_IN * DPI;
-  const slideH_px = SLIDE_H_IN * DPI;
-
-  const scale = Math.min(
-    (slideW_px - 80) / contentW,
-    (slideH_px - 80) / contentH,
-    1
-  );
-
-  const offsetX = (slideW_px - contentW * scale) / 2 - minX * scale;
-  const offsetY = (slideH_px - contentH * scale) / 2 - minY * scale;
-
+  const SLIDE_W_PX = SLIDE_W_IN * DPI;
+  const SLIDE_H_PX = SLIDE_H_IN * DPI;
   const pxToIn = (px: number) => px / DPI;
 
-  slide.background = { color: "FFFFFF" };
-
-  // --- Draw tables ---
-  for (const t of tables) {
-    const cx = t.x * scale + offsetX;
-    const cy = t.y * scale + offsetY;
-    const diameter = t.radius * 2 * scale;
-    const fillColor = "1976D2";
-
-    if (t.shape === "round") {
-      slide.addShape(pptx.ShapeType.ellipse, {
-        x: pxToIn(cx - t.radius * scale),
-        y: pxToIn(cy - t.radius * scale),
-        w: pxToIn(diameter),
-        h: pxToIn(diameter),
-        fill: { color: fillColor },
-        line: { color: "0D47A1", width: 1 },
-      });
-    } else {
-      slide.addShape(pptx.ShapeType.rect, {
-        x: pxToIn(cx - t.radius * scale),
-        y: pxToIn(cy - t.radius * scale),
-        w: pxToIn(diameter),
-        h: pxToIn(diameter),
-        fill: { color: fillColor },
-        line: { color: "0D47A1", width: 1 },
-      });
-    }
-
-    // Label
-    slide.addText(t.label || "", {
-      x: pxToIn(cx - t.radius * scale),
-      y: pxToIn(cy - 0.15 * DPI * scale),
-      w: pxToIn(diameter),
-      h: 0.3,
-      fontSize: 12,
-      color: "FFFFFF",
-      align: "center",
-    });
-
-    // --- Seats ---
-    for (const s of t.seats) {
-      const sx = s.x * scale + offsetX;
-      const sy = s.y * scale + offsetY;
-      const sr = s.radius * scale;
-      const seatColor = s.locked ? "B0BEC5" : "90CAF9";
-
-      slide.addShape(pptx.ShapeType.ellipse, {
-        x: pxToIn(sx - sr),
-        y: pxToIn(sy - sr),
-        w: pxToIn(sr * 2),
-        h: pxToIn(sr * 2),
-        fill: { color: seatColor },
-        line: { color: "1565C0", width: 0.5 },
-      });
-
-      slide.addText(String(s.label || s.seatNumber || ""), {
-        x: pxToIn(sx - sr),
-        y: pxToIn(sy - sr),
-        w: pxToIn(sr * 2),
-        h: pxToIn(sr * 2),
-        fontSize: 8,
-        color: "0D47A1",
-        align: "center",
-        valign: "middle",
-      });
-    }
+  if (!chunks || chunks.length === 0) {
+    // fallback: render everything onto one slide
+    addSlideWithTables(pptx.addSlide(), allTables);
+    await pptx.writeFile({ fileName: filename });
+    return;
   }
 
+  // for each chunk -> one slide
+  for (const c of chunks) {
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    slide.addText(`Chunk R${c.row}C${c.col}`, { x: 0.2, y: 0.15, fontSize: 12, bold: true });
+
+    // tables whose center lies inside this chunk rectangle
+    const tablesInChunk = allTables.filter((t) => {
+      return (
+        t.x >= c.col * CHUNK_WIDTH &&
+        t.x < (c.col + 1) * CHUNK_WIDTH &&
+        t.y >= c.row * CHUNK_HEIGHT &&
+        t.y < (c.row + 1) * CHUNK_HEIGHT
+      );
+    });
+
+    addSlideWithTables(slide, tablesInChunk, c);
+  }
+
+  // overview slide with all tables
+  const overview = pptx.addSlide();
+  overview.background = { color: "FFFFFF" };
+  overview.addText("Full Map Overview", { x: 0.2, y: 0.15, fontSize: 12, bold: true });
+  addSlideWithTables(overview, allTables);
+
   await pptx.writeFile({ fileName: filename });
+
+  function addSlideWithTables(slide: any, list: Table[], chunk?: { row: number; col: number }) {
+    if (!list || list.length === 0) {
+      slide.addText("No tables in this chunk", { x: 1, y: 2, fontSize: 12, color: "888888" });
+      return;
+    }
+
+    // Determine bounds from list (or if chunk given, use chunk area)
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+
+    if (chunk) {
+      minX = chunk.col * CHUNK_WIDTH;
+      minY = chunk.row * CHUNK_HEIGHT;
+      maxX = minX + CHUNK_WIDTH;
+      maxY = minY + CHUNK_HEIGHT;
+    } else {
+      list.forEach((t) => {
+        minX = Math.min(minX, t.x - t.radius);
+        minY = Math.min(minY, t.y - t.radius);
+        maxX = Math.max(maxX, t.x + t.radius);
+        maxY = Math.max(maxY, t.y + t.radius);
+      });
+      if (!isFinite(minX)) {
+        minX = 0; minY = 0; maxX = 1000; maxY = 800;
+      }
+    }
+
+    const contentW = Math.max(1, maxX - minX);
+    const contentH = Math.max(1, maxY - minY);
+    const scale = Math.min((SLIDE_W_PX - 80) / contentW, (SLIDE_H_PX - 80) / contentH, 1);
+    const offsetX = (SLIDE_W_PX - contentW * scale) / 2 - minX * scale;
+    const offsetY = (SLIDE_H_PX - contentH * scale) / 2 - minY * scale;
+
+    for (const t of list) {
+      const cx = t.x * scale + offsetX;
+      const cy = t.y * scale + offsetY;
+      const diameter = t.radius * 2 * scale;
+
+      const shapeType = t.shape === "round" ? "ellipse" : "rect";
+      slide.addShape(shapeType, {
+        x: pxToIn(cx - t.radius * scale),
+        y: pxToIn(cy - t.radius * scale),
+        w: pxToIn(diameter),
+        h: pxToIn(diameter),
+        fill: { color: "1976D2" },
+        line: { color: "0D47A1", width: 1 },
+      });
+
+      slide.addText(t.label || "", {
+        x: pxToIn(cx - t.radius * scale),
+        y: pxToIn(cy - 0.15 * DPI * scale),
+        w: pxToIn(diameter),
+        h: 0.3,
+        fontSize: 12,
+        color: "FFFFFF",
+        align: "center",
+      });
+
+      for (const s of t.seats) {
+        const sx = s.x * scale + offsetX;
+        const sy = s.y * scale + offsetY;
+        const sr = s.radius * scale;
+        const seatColor = s.locked ? "B0BEC5" : "90CAF9";
+
+        slide.addShape("ellipse", {
+          x: pxToIn(sx - sr),
+          y: pxToIn(sy - sr),
+          w: pxToIn(sr * 2),
+          h: pxToIn(sr * 2),
+          fill: { color: seatColor },
+          line: { color: "1565C0", width: 0.5 },
+        });
+
+        slide.addText(String(s.label || s.seatNumber || ""), {
+          x: pxToIn(sx - sr),
+          y: pxToIn(sy - sr),
+          w: pxToIn(sr * 2),
+          h: pxToIn(sr * 2),
+          fontSize: 8,
+          color: "0D47A1",
+          align: "center",
+          valign: "middle",
+        });
+      }
+    }
+  }
 }

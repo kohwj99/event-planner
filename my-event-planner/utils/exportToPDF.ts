@@ -1,228 +1,176 @@
-// /* src/utils/exportToPDF.ts */
-// import jsPDF from "jspdf";
-// import html2canvas from "html2canvas";
-
-// /**
-//  * Convert an SVG element (or an HTML container) to a PDF.
-//  * Tries to serialize SVG(s) to a PNG via <image> draw on canvas (more reliable),
-//  * and falls back to html2canvas if serialization doesn't work.
-//  *
-//  * @param elementId id of wrapper element that contains the playground (should include your svg)
-//  * @param filename optional output filename
-//  */
-// export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") {
-//   const el = document.getElementById(elementId);
-//   if (!el) {
-//     console.error("exportToPDF: element not found:", elementId);
-//     return;
-//   }
-
-//   // Helper: serialize first SVG child into dataURL
-//   async function svgToPngDataUrl(svgEl: SVGSVGElement, scale = 2) {
-//     // Inline computed styles for the SVG (basic method)
-//     const copy = svgEl.cloneNode(true) as SVGSVGElement;
-//     const serializer = new XMLSerializer();
-//     const svgStr = serializer.serializeToString(copy);
-//     const svg64 = btoa(unescape(encodeURIComponent(svgStr)));
-//     const dataUrl = `data:image/svg+xml;base64,${svg64}`;
-
-//     // Load into Image, draw onto canvas
-//     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-//       const image = new Image();
-//       image.onload = () => resolve(image);
-//       image.onerror = (e) => reject(e);
-//       // Use CORS friendly - same-origin or inline svg avoids CORS
-//       image.crossOrigin = "anonymous";
-//       image.src = dataUrl;
-//     });
-
-//     const w = img.width * scale;
-//     const h = img.height * scale;
-//     const canvas = document.createElement("canvas");
-//     canvas.width = w;
-//     canvas.height = h;
-//     const ctx = canvas.getContext("2d");
-//     if (!ctx) throw new Error("Canvas 2D context not available");
-
-//     // White background
-//     ctx.fillStyle = "#ffffff";
-//     ctx.fillRect(0, 0, w, h);
-//     ctx.drawImage(img, 0, 0, w, h);
-
-//     return canvas.toDataURL("image/png");
-//   }
-
-//   // Try: if the element contains at least one SVG, serialize the first and render that
-//   try {
-//     const svgEl = el.querySelector("svg") as SVGSVGElement | null;
-//     if (svgEl) {
-//       // sometimes svg width/height attributes are missing; ensure they exist
-//       if (!svgEl.getAttribute("width") || !svgEl.getAttribute("height")) {
-//         const bbox = svgEl.getBoundingClientRect();
-//         svgEl.setAttribute("width", `${Math.round(bbox.width)}`);
-//         svgEl.setAttribute("height", `${Math.round(bbox.height)}`);
-//       }
-
-//       // scale for higher-resolution output
-//       const SCALE = 2;
-//       const imgData = await svgToPngDataUrl(svgEl, SCALE);
-
-//       // use jsPDF in landscape A4
-//       const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-//       const pdfW = pdf.internal.pageSize.getWidth();
-//       const pdfH = pdf.internal.pageSize.getHeight();
-
-//       // create temporary image to get pixel dimensions
-//       const tmpImg = new Image();
-//       tmpImg.src = imgData;
-//       await new Promise((res) => (tmpImg.onload = res));
-
-//       const imgW = tmpImg.width;
-//       const imgH = tmpImg.height;
-//       const ratio = Math.min(pdfW / imgW, pdfH / imgH);
-//       const x = (pdfW - imgW * ratio) / 2;
-//       const y = (pdfH - imgH * ratio) / 2;
-
-//       pdf.addImage(imgData, "PNG", x, y, imgW * ratio, imgH * ratio);
-//       pdf.save(filename);
-//       return;
-//     }
-//   } catch (err) {
-//     console.warn("exportToPDF: svg serialization path failed, falling back to html2canvas", err);
-//   }
-
-//   // Fallback: render the full element to canvas using html2canvas
-//   try {
-//     const canvas = await html2canvas(el, {
-//       backgroundColor: "#ffffff",
-//       scale: 2,
-//       useCORS: true,
-//       logging: false,
-//     });
-//     const imgData = canvas.toDataURL("image/png");
-//     const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-//     const pdfW = pdf.internal.pageSize.getWidth();
-//     const pdfH = pdf.internal.pageSize.getHeight();
-//     const imgW = canvas.width;
-//     const imgH = canvas.height;
-//     const ratio = Math.min(pdfW / imgW, pdfH / imgH);
-//     const x = (pdfW - imgW * ratio) / 2;
-//     const y = (pdfH - imgH * ratio) / 2;
-//     pdf.addImage(imgData, "PNG", x, y, imgW * ratio, imgH * ratio);
-//     pdf.save(filename);
-//   } catch (err) {
-//     console.error("exportToPDF failed:", err);
-//   }
-// }
-
-
+// src/utils/exportToPDF.ts
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { useSeatStore, CHUNK_WIDTH, CHUNK_HEIGHT } from "@/store/seatStore";
 
 /**
- * Exports the playground area (SVG inside the given container) to a landscape A4 PDF.
- * Handles both SVG serialization and html2canvas fallback automatically.
- *
- * @param elementId - The DOM id of your playground container (e.g. "playground-canvas")
- * @param filename - Optional filename (default: "SeatPlan.pdf")
+ * Export each chunk as one A4 landscape page (no visual scaling of Playground).
+ * Fixes: resets any zoom transform on the cloned svg before setting viewBox.
  */
 export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") {
-  const el = document.getElementById(elementId);
-  if (!el) {
-    console.error("exportToPDF: element not found:", elementId);
+  const container = document.getElementById(elementId);
+  if (!container) {
+    console.error("exportToPDF: container not found:", elementId);
     return;
   }
 
-  /**
-   * Convert an SVG to PNG dataURL
-   */
-  async function svgToPngDataUrl(svgEl: SVGSVGElement, scale = 2): Promise<string> {
-    const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svgEl);
-    const svg64 = btoa(unescape(encodeURIComponent(svgStr)));
-    const dataUrl = `data:image/svg+xml;base64,${svg64}`;
-
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve(image);
-      image.onerror = reject;
-      image.crossOrigin = "anonymous";
-      image.src = dataUrl;
-    });
-
-    const w = img.width * scale;
-    const h = img.height * scale;
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("2D context not available");
-
-    // white background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-
-    return canvas.toDataURL("image/png");
+  const svg = container.querySelector("svg") as SVGSVGElement | null;
+  if (!svg) {
+    console.error("exportToPDF: svg not found in container");
+    return;
   }
 
-  try {
-    // Try SVG serialization first
-    const svgEl = el.querySelector("svg") as SVGSVGElement | null;
-    if (svgEl) {
-      // Ensure width/height exist
-      if (!svgEl.getAttribute("width") || !svgEl.getAttribute("height")) {
-        const bbox = svgEl.getBoundingClientRect();
-        svgEl.setAttribute("width", `${Math.round(bbox.width)}`);
-        svgEl.setAttribute("height", `${Math.round(bbox.height)}`);
-      }
+  // A4 landscape physical inches
+  const A4_IN_W = 11.6929133858;
+  const A4_IN_H = 8.2677165354;
 
-      const imgData = await svgToPngDataUrl(svgEl, 2);
-      const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  // Choose export DPI (150 recommended for balanced quality/size; use 300 for print)
+  const exportDPI = 150;
+  const pagePxW = Math.round(A4_IN_W * exportDPI);
+  const pagePxH = Math.round(A4_IN_H * exportDPI);
 
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
+  const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const pdfW_pt = pdf.internal.pageSize.getWidth();
+  const pdfH_pt = pdf.internal.pageSize.getHeight();
 
-      const tmpImg = new Image();
-      tmpImg.src = imgData;
-      await new Promise((res) => (tmpImg.onload = res));
+  // px -> points conversion for given DPI
+  const pxToPt = (px: number) => (px * 72) / exportDPI;
 
-      const imgW = tmpImg.width;
-      const imgH = tmpImg.height;
-      const ratio = Math.min(pdfW / imgW, pdfH / imgH);
-      const x = (pdfW - imgW * ratio) / 2;
-      const y = (pdfH - imgH * ratio) / 2;
+  const chunks = useSeatStore.getState().getAllChunksSorted();
+  if (!chunks || chunks.length === 0) {
+    // fallback: capture whole container
+    const canvas = await html2canvas(container, { backgroundColor: "#fff", scale: 1.5, useCORS: true });
+    const img = canvas.toDataURL("image/png");
+    const ratio = Math.min(pdfW_pt / canvas.width, pdfH_pt / canvas.height);
+    const drawW = canvas.width * ratio;
+    const drawH = canvas.height * ratio;
+    const x = (pdfW_pt - drawW) / 2;
+    const y = (pdfH_pt - drawH) / 2;
+    pdf.addImage(img, "PNG", x, y, drawW, drawH);
+    pdf.save(filename);
+    return;
+  }
 
-      pdf.addImage(imgData, "PNG", x, y, imgW * ratio, imgH * ratio);
-      pdf.save(filename);
-      return;
+  // Helper: capture exactly one chunk area into a canvas sized pagePxW x pagePxH
+  async function captureChunkCanvas(row: number, col: number) {
+    const clone = svg!.cloneNode(true) as SVGSVGElement;
+
+    // Important: reset transform on zoom-layer (if present) so viewBox maps to world coords
+    const zoomLayer = clone.querySelector("g.zoom-layer") as SVGGElement | null;
+    if (zoomLayer) {
+      zoomLayer.setAttribute("transform", ""); // clear transform
     }
-  } catch (err) {
-    console.warn("exportToPDF: SVG path failed, fallback to html2canvas", err);
-  }
 
-  // Fallback: html2canvas snapshot
-  try {
-    const canvas = await html2canvas(el, {
+    // set the viewBox exactly to chunk world rect
+    clone.setAttribute("viewBox", `${col * CHUNK_WIDTH} ${row * CHUNK_HEIGHT} ${CHUNK_WIDTH} ${CHUNK_HEIGHT}`);
+
+    // force no aspect-preserve letterboxing
+    clone.setAttribute("preserveAspectRatio", "none");
+
+    // size the clone to page pixel dimensions
+    clone.setAttribute("width", `${pagePxW}px`);
+    clone.setAttribute("height", `${pagePxH}px`);
+    clone.style.width = `${pagePxW}px`;
+    clone.style.height = `${pagePxH}px`;
+    clone.style.display = "block";
+    clone.style.background = "#ffffff";
+
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.left = "-99999px";
+    wrapper.style.top = "-99999px";
+    wrapper.style.width = `${pagePxW}px`;
+    wrapper.style.height = `${pagePxH}px`;
+    wrapper.style.background = "#ffffff";
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    // rasterize (scale 1 because we've sized clone to the exact px dimensions we want)
+    const canvas = await html2canvas(wrapper, {
       backgroundColor: "#ffffff",
-      scale: 2,
+      scale: 1,
       useCORS: true,
       logging: false,
+      allowTaint: true,
     });
 
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    const pdfW = pdf.internal.pageSize.getWidth();
-    const pdfH = pdf.internal.pageSize.getHeight();
-    const imgW = canvas.width;
-    const imgH = canvas.height;
-    const ratio = Math.min(pdfW / imgW, pdfH / imgH);
-    const x = (pdfW - imgW * ratio) / 2;
-    const y = (pdfH - imgH * ratio) / 2;
-
-    pdf.addImage(imgData, "PNG", x, y, imgW * ratio, imgH * ratio);
-    pdf.save(filename);
-  } catch (err) {
-    console.error("exportToPDF failed:", err);
+    document.body.removeChild(wrapper);
+    return canvas;
   }
+
+  // Iterate chunks (top-left -> right -> down)
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    const canvas = await captureChunkCanvas(c.row, c.col);
+    const imgData = canvas.toDataURL("image/png");
+
+    const drawW_pt = pxToPt(canvas.width);
+    const drawH_pt = pxToPt(canvas.height);
+    const offX_pt = (pdfW_pt - drawW_pt) / 2;
+    const offY_pt = (pdfH_pt - drawH_pt) / 2;
+
+    if (i > 0) pdf.addPage("a4", "landscape");
+    pdf.addImage(imgData, "PNG", offX_pt, offY_pt, drawW_pt, drawH_pt);
+    pdf.setFontSize(10);
+    pdf.text(`Chunk R${c.row}C${c.col}`, 10, 14);
+  }
+
+  // Overview: render bounding box for all chunks
+  const minCol = Math.min(...chunks.map((ch) => ch.col));
+  const maxCol = Math.max(...chunks.map((ch) => ch.col));
+  const minRow = Math.min(...chunks.map((ch) => ch.row));
+  const maxRow = Math.max(...chunks.map((ch) => ch.row));
+  const worldX = minCol * CHUNK_WIDTH;
+  const worldY = minRow * CHUNK_HEIGHT;
+  const worldW = (maxCol - minCol + 1) * CHUNK_WIDTH;
+  const worldH = (maxRow - minRow + 1) * CHUNK_HEIGHT;
+
+  // compute px size for overview that fits within pagePxW/H
+  const scaleOverview = Math.min(pagePxW / worldW, pagePxH / worldH, 1);
+  const overviewPxW = Math.max(1, Math.round(worldW * scaleOverview));
+  const overviewPxH = Math.max(1, Math.round(worldH * scaleOverview));
+
+  const overviewClone = svg.cloneNode(true) as SVGSVGElement;
+  const zoomLayer2 = overviewClone.querySelector("g.zoom-layer") as SVGGElement | null;
+  if (zoomLayer2) zoomLayer2.setAttribute("transform", "");
+  overviewClone.setAttribute("viewBox", `${worldX} ${worldY} ${worldW} ${worldH}`);
+  overviewClone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  overviewClone.setAttribute("width", `${overviewPxW}px`);
+  overviewClone.setAttribute("height", `${overviewPxH}px`);
+  overviewClone.style.width = `${overviewPxW}px`;
+  overviewClone.style.height = `${overviewPxH}px`;
+  overviewClone.style.display = "block";
+  overviewClone.style.background = "#ffffff";
+
+  const wrapperOv = document.createElement("div");
+  wrapperOv.style.position = "fixed";
+  wrapperOv.style.left = "-99999px";
+  wrapperOv.style.top = "-99999px";
+  wrapperOv.style.width = `${overviewPxW}px`;
+  wrapperOv.style.height = `${overviewPxH}px`;
+  wrapperOv.style.background = "#ffffff";
+  wrapperOv.appendChild(overviewClone);
+  document.body.appendChild(wrapperOv);
+
+  const overviewCanvas = await html2canvas(wrapperOv, {
+    backgroundColor: "#ffffff",
+    scale: 1,
+    useCORS: true,
+    logging: false,
+    allowTaint: true,
+  });
+  document.body.removeChild(wrapperOv);
+
+  const overviewData = overviewCanvas.toDataURL("image/png");
+  const ovW_pt = pxToPt(overviewCanvas.width);
+  const ovH_pt = pxToPt(overviewCanvas.height);
+  const ovOffsetX = (pdfW_pt - ovW_pt) / 2;
+  const ovOffsetY = (pdfH_pt - ovH_pt) / 2;
+
+  pdf.addPage("a4", "landscape");
+  pdf.addImage(overviewData, "PNG", ovOffsetX, ovOffsetY, ovW_pt, ovH_pt);
+  pdf.setFontSize(12);
+  pdf.text("Full Map Overview", 10, 16);
+
+  pdf.save(filename);
 }
