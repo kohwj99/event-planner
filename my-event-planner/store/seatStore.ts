@@ -22,6 +22,8 @@ export interface Table {
   seats: Seat[];
   label: string;
   shape: "round" | "square" | "rectangle";
+  width?: number;  // for rectangular tables
+  height?: number; // for rectangular tables
 }
 
 /* -------------------- 🧩 Chunk System -------------------- */

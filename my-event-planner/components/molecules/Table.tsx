@@ -1,107 +1,121 @@
 "use client";
 
 import { Rect, Circle, Group } from "react-konva";
-import Seat from "./Seat";
 import * as d3 from "d3";
+import Seat from "./Seat";
 
-type TableType = "circle" | "square" | "rectangle";
+export type TableType = "circle" | "rectangle";
 
-interface TableProps {
+export interface TableProps {
   x: number;
   y: number;
   type: TableType;
-  seatsCount: number;
-  baseWidth?: number;
+  totalSeats: number;
+  seatsPerSide?: {
+    top?: number;
+    right?: number;
+    bottom?: number;
+    left?: number;
+  };
+  baseSize?: number; // Used for circle tables
+  baseWidth?: number; // Used for rectangle tables
   baseHeight?: number;
   onSeatClick?: (id: string) => void;
 }
 
+/**
+ * Renders a table (circle or rectangle) with seats distributed around it.
+ */
 export default function Table({
   x,
   y,
   type,
-  seatsCount,
+  totalSeats,
+  seatsPerSide = { top: 2, right: 2, bottom: 2, left: 2 },
+  baseSize = 60,
   baseWidth = 100,
   baseHeight = 60,
   onSeatClick,
 }: TableProps) {
-  // 1️⃣ Calculate table dimensions
   let width = baseWidth;
   let height = baseHeight;
-  let radius = Math.max(width, height) / 2;
+  let radius = baseSize;
 
+  // Adjust circle size based on number of seats
   if (type === "circle") {
-    radius = 30 + seatsCount * 8; // scale radius by number of seats
-  } else if (type === "square") {
-    const seatsPerSide = Math.ceil(seatsCount / 4);
-    width = baseWidth + seatsPerSide * 20;
-    height = baseHeight + seatsPerSide * 20;
-  } else if (type === "rectangle") {
-    const seatsPerSide = Math.ceil(seatsCount / 4);
-    width = baseWidth + seatsPerSide * 25;
-    height = baseHeight + Math.ceil(seatsPerSide / 2) * 20;
+    radius = Math.max(baseSize, 30 + totalSeats * 6);
   }
 
-  // 2️⃣ Calculate seat positions
-  let seats: { x: number; y: number; id: string }[] = [];
+  // Adjust rectangle size based on seat distribution
+  if (type === "rectangle") {
+    const { top = 0, right = 0, bottom = 0, left = 0 } = seatsPerSide;
+    const horizontalSeats = Math.max(top, bottom);
+    const verticalSeats = Math.max(left, right);
+
+    width = baseWidth + horizontalSeats * 25;
+    height = baseHeight + verticalSeats * 25;
+  }
+
+  // === Seat Position Calculation ===
+  let seats: { id: string; x: number; y: number }[] = [];
 
   if (type === "circle") {
-    seats = d3.range(seatsCount).map((i) => {
-      const angle = (i / seatsCount) * 2 * Math.PI;
+    // Arrange seats evenly around a circle
+    seats = d3.range(totalSeats).map((i) => {
+      const angle = (i / totalSeats) * 2 * Math.PI - Math.PI / 2; // Start from top
       return {
-        x: x + Math.cos(angle) * (radius + 20),
-        y: y + Math.sin(angle) * (radius + 20),
         id: `seat-${i}`,
+        x: x + Math.cos(angle) * (radius + 25),
+        y: y + Math.sin(angle) * (radius + 25),
       };
     });
   } else {
-    // Rectangular or square table
-    const sides = [
-      { x1: 0, y1: 0, x2: width, y2: 0 }, // top
-      { x1: width, y1: 0, x2: width, y2: height }, // right
-      { x1: width, y1: height, x2: 0, y2: height }, // bottom
-      { x1: 0, y1: height, x2: 0, y2: 0 }, // left
-    ];
-    const seatsPerSide = Math.ceil(seatsCount / 4);
-    sides.forEach((side, sIdx) => {
-      for (let i = 0; i < seatsPerSide; i++) {
-        const t = (i + 1) / (seatsPerSide + 1);
-        if (seats.length < seatsCount) {
-          seats.push({
-            x: x + side.x1 + (side.x2 - side.x1) * t,
-            y: y + side.y1 + (side.y2 - side.y1) * t,
-            id: `seat-${seats.length}`,
-          });
-        }
-      }
-    });
+    // Rectangle seats per side
+    const { top = 0, right = 0, bottom = 0, left = 0 } = seatsPerSide;
+    const padding = 10;
+
+    // Top
+    for (let i = 0; i < top; i++) {
+      const posX = x + ((i + 1) * width) / (top + 1);
+      seats.push({ id: `seat-top-${i}`, x: posX, y: y - padding });
+    }
+
+    // Bottom
+    for (let i = 0; i < bottom; i++) {
+      const posX = x + ((i + 1) * width) / (bottom + 1);
+      seats.push({ id: `seat-bottom-${i}`, x: posX, y: y + height + padding });
+    }
+
+    // Left
+    for (let i = 0; i < left; i++) {
+      const posY = y + ((i + 1) * height) / (left + 1);
+      seats.push({ id: `seat-left-${i}`, x: x - padding, y: posY });
+    }
+
+    // Right
+    for (let i = 0; i < right; i++) {
+      const posY = y + ((i + 1) * height) / (right + 1);
+      seats.push({ id: `seat-right-${i}`, x: x + width + padding, y: posY });
+    }
   }
 
-  // 3️⃣ Render Table + Seats
+  // === Render ===
   return (
     <Group x={x} y={y} draggable>
       {type === "circle" && (
         <Circle x={0} y={0} radius={radius} fill="#6C63FF" stroke="black" strokeWidth={2} />
       )}
-      {(type === "square" || type === "rectangle") && (
-        <Rect
-          x={0}
-          y={0}
-          width={width}
-          height={height}
-          fill="#6C63FF"
-          stroke="black"
-          strokeWidth={2}
-          cornerRadius={type === "square" ? 10 : 0}
-        />
+
+      {type === "rectangle" && (
+        <Rect x={0} y={0} width={width} height={height} fill="#6C63FF" stroke="black" strokeWidth={2} />
       )}
 
       {seats.map((seat) => (
         <Seat
           key={seat.id}
-          x={seat.x - x} // adjust relative to Group
-          y={seat.y - y}
           id={seat.id}
+          x={seat.x - x}
+          y={seat.y - y}
           onClick={onSeatClick}
         />
       ))}

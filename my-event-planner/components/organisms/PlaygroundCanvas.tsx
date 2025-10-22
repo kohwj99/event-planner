@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import * as d3 from 'd3';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -14,6 +14,8 @@ import Stack from '@mui/material/Stack';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import SlideshowIcon from '@mui/icons-material/Slideshow';
 
+import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
+
 import {
   useSeatStore,
   Table,
@@ -21,7 +23,7 @@ import {
   CHUNK_WIDTH,
   CHUNK_HEIGHT,
 } from '@/store/seatStore';
-import { createRoundTable } from '@/utils/generateTable';
+import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
 
@@ -55,14 +57,14 @@ export default function PlaygroundCanvas() {
   } = useSeatStore();
 
   /** ---------- INITIAL SETUP ---------- */
-  useEffect(() => {
-    if (tables.length === 0) {
-      const t1 = createRoundTable('t1', 300, 300, 60, 8, 'Table A');
-      const t2 = createRoundTable('t2', 500, 300, 80, 10, 'Table B');
-      addTable(t1);
-      addTable(t2);
-    }
-  }, []);
+  // useEffect(() => {
+  //   if (tables.length === 0) {
+  //     const t1 = createRoundTable('t1', 300, 300, 60, 8, 'Table A');
+  //     const t2 = createRoundTable('t2', 500, 300, 80, 10, 'Table B');
+  //     addTable(t1);
+  //     addTable(t2);
+  //   }
+  // }, []);
 
   /** ---------- SETUP SVG + ZOOM ---------- */
   useEffect(() => {
@@ -195,16 +197,37 @@ export default function PlaygroundCanvas() {
       .attr('transform', (d) => `translate(${d.x},${d.y})`)
       .style('cursor', 'grab');
 
-    enter
-      .append('circle')
-      .attr('r', (d) => d.radius)
-      .attr('fill', (d) => (d.id === selectedTableId ? '#1565c0' : '#1976d2'))
-      .attr('stroke', '#0d47a1')
-      .attr('stroke-width', 2)
-      .on('click', function (event, d) {
-        event.stopPropagation();
-        setSelectedTable(d.id);
-      });
+    // Table shape based on type
+    enter.each(function(this: SVGGElement, d: Table) {
+      const g = d3.select(this);
+      if (d.shape === 'round') {
+        g.append('circle')
+          .attr('r', d.radius)
+          .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
+          .attr('stroke', '#0d47a1')
+          .attr('stroke-width', 2)
+          .on('click', function(this: SVGCircleElement, event: Event) {
+            event.stopPropagation();
+            setSelectedTable(d.id);
+          });
+      } else {
+        // Rectangle table
+        const width = d.width || 160;
+        const height = d.height || 100;
+        g.append('rect')
+          .attr('x', -width/2)
+          .attr('y', -height/2)
+          .attr('width', width)
+          .attr('height', height)
+          .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
+          .attr('stroke', '#0d47a1')
+          .attr('stroke-width', 2)
+          .on('click', function(this: SVGRectElement, event: Event) {
+            event.stopPropagation();
+            setSelectedTable(d.id);
+          });
+      }
+    });
 
     enter
       .append('text')
@@ -223,10 +246,8 @@ export default function PlaygroundCanvas() {
 
     merged.each(function (tableDatum) {
       const group = d3.select(this);
-      const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat').data(
-        tableDatum.seats,
-        (s) => s.id
-      );
+      const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat').data(tableDatum.seats || [], (s) => s.id);
+
 
       seatsSel.exit().remove();
 
@@ -254,7 +275,10 @@ export default function PlaygroundCanvas() {
 
       const seatLabels = group
         .selectAll<SVGTextElement, Seat>('text.seat-number')
-        .data(tableDatum.seats, (s) => s.id);
+        .data(
+          tableDatum.seats || [], // fallback to empty array
+          (s) => s.id
+        );
       seatLabels.exit().remove();
       const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
       seatLabelsEnter
@@ -332,7 +356,13 @@ export default function PlaygroundCanvas() {
   };
 
   /** ---------- ADD TABLE ---------- */
-  const handleAddTable = () => {
+  const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
+
+  const handleAddTableClick = () => {
+    setIsAddTableModalOpen(true);
+  };
+
+  const handleAddTable = (config: TableConfig) => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
     const rect = svgEl.getBoundingClientRect();
@@ -341,14 +371,33 @@ export default function PlaygroundCanvas() {
     const t = d3.zoomTransform(svgEl);
     const worldX = Math.max(0, (centerX - t.x) / t.k);
     const worldY = Math.max(0, (centerY - t.y) / t.k);
-    const id = `t${Date.now()}`;
-    const table = createRoundTable(id, worldX, worldY, 60, 8, `Table ${tables.length + 1}`);
-    addTable(table);
 
-    const row = Math.floor(worldY / CHUNK_HEIGHT);
-    const col = Math.floor(worldX / CHUNK_WIDTH);
-    ensureChunkExists(row, col);
-    assignTableToChunk(id, row, col);
+    for (let i = 0; i < config.quantity; i++) {
+      const id = `t${Date.now()}-${i}`;
+      const label = config.label ? `${config.label} ${tables.length + i + 1}` : `Table ${tables.length + i + 1}`;
+      
+      // Offset each table slightly in a grid pattern
+      const offsetX = (i % 3) * 200;  // 3 tables per row
+      const offsetY = Math.floor(i / 3) * 200;
+      const x = worldX + offsetX;
+      const y = worldY + offsetY;
+
+      let table;
+      if (config.type === 'round') {
+        table = createRoundTable(id, x, y, 60, config.roundSeats || 8, label);
+      } else {
+        const { top, bottom, left, right } = config.rectangleSeats || { top: 2, bottom: 2, left: 1, right: 1 };
+        table = createRectangleTable(id, x, y, top, bottom, left, right, label);
+      }
+
+      addTable(table);
+
+      const row = Math.floor(y / CHUNK_HEIGHT);
+      const col = Math.floor(x / CHUNK_WIDTH);
+      ensureChunkExists(row, col);
+      assignTableToChunk(id, row, col);
+    }
+    
     expandWorldIfNeeded();
   };
 
@@ -372,24 +421,10 @@ export default function PlaygroundCanvas() {
       {/* Floating Controls */}
       <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
         <Tooltip title="Add Table">
-          <Fab color="primary" size="medium" onClick={handleAddTable}>
+          <Fab color="primary" size="medium" onClick={handleAddTableClick}>
             <AddIcon />
           </Fab>
         </Tooltip>
-
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-          <Tooltip title="Export to PDF">
-            <Fab size="small" color="secondary" onClick={() => exportToPDF('playground-canvas')}>
-              <PictureAsPdfIcon fontSize="small" />
-            </Fab>
-          </Tooltip>
-
-          <Tooltip title="Export to PowerPoint">
-            <Fab size="small" color="secondary" onClick={() => exportToPPTX(tables)}>
-              <SlideshowIcon fontSize="small" />
-            </Fab>
-          </Tooltip>
-        </Stack>
 
         {/* Zoom buttons */}
         <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
@@ -412,6 +447,13 @@ export default function PlaygroundCanvas() {
           </Tooltip>
         </Stack>
       </Stack>
+
+      {/* Add Table Modal */}
+      <AddTableModal
+        open={isAddTableModalOpen}
+        onClose={() => setIsAddTableModalOpen(false)}
+        onConfirm={handleAddTable}
+      />
     </div>
   );
 }
