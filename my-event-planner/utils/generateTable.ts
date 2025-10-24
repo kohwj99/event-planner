@@ -1,4 +1,4 @@
-import { Table } from "@/store/seatStore";
+import { Table } from "@/types/Table";
 
 export function createRoundTable(
   id: string,

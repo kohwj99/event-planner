@@ -1,6 +1,8 @@
 // src/utils/exportToPPTX.ts
 import PptxGenJS from "pptxgenjs";
-import { useSeatStore, CHUNK_WIDTH, CHUNK_HEIGHT, Table } from "@/store/seatStore";
+import { useSeatStore } from "@/store/seatStore";
+import { Table } from "@/types/Table";
+import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 
 /**
  * Exports each chunk as one editable PowerPoint slide.

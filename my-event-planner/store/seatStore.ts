@@ -1,48 +1,7 @@
+import { Chunk, CHUNK_HEIGHT, CHUNK_WIDTH, getChunkCoords, getChunkKey } from "@/types/Chunk";
+import { Table } from "@/types/Table";
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
-
-/* -------------------- 🎯 Interfaces -------------------- */
-export interface Seat {
-  id: string;
-  x: number;
-  y: number;
-  radius: number;
-  label: string;
-  seatNumber: number;
-  assignedGuestId?: string | null;
-  locked?: boolean;
-  selected?: boolean;
-}
-
-export interface Table {
-  id: string;
-  x: number;
-  y: number;
-  radius: number;
-  seats: Seat[];
-  label: string;
-  shape: "round" | "square" | "rectangle";
-  width?: number;  // for rectangular tables
-  height?: number; // for rectangular tables
-}
-
-/* -------------------- 🧩 Chunk System -------------------- */
-export interface Chunk {
-  id: string; // e.g. "row:0_col:0"
-  row: number;
-  col: number;
-  tables: string[]; // table IDs within this chunk
-}
-
-export const CHUNK_WIDTH = 2000;
-export const CHUNK_HEIGHT = 1200;
-
-const getChunkKey = (row: number, col: number) => `row:${row}_col:${col}`;
-const getChunkCoords = (x: number, y: number) => {
-  const col = Math.floor(x / CHUNK_WIDTH);
-  const row = Math.floor(y / CHUNK_HEIGHT);
-  return { row, col };
-};
 
 /* -------------------- 🧠 Store Interface -------------------- */
 interface SeatStoreState {

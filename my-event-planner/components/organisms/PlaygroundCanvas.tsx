@@ -11,21 +11,16 @@ import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import AddIcon from '@mui/icons-material/Add';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
-import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
-import SlideshowIcon from '@mui/icons-material/Slideshow';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 
 import {
-  useSeatStore,
-  Table,
-  Seat,
-  CHUNK_WIDTH,
-  CHUNK_HEIGHT,
+  useSeatStore
 } from '@/store/seatStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
-import { exportToPDF } from '@/utils/exportToPDF';
-import { exportToPPTX } from '@/utils/exportToPPTX';
+import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
+import { Table } from '@/types/Table';
+import { Seat } from '@/types/Seat';
 
 /**
  * 🎯 Controlled finite world (chunks expand only right/down)

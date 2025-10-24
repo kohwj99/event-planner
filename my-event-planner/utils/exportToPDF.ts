@@ -1,7 +1,8 @@
 // src/utils/exportToPDF.ts
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-import { useSeatStore, CHUNK_WIDTH, CHUNK_HEIGHT } from "@/store/seatStore";
+import { useSeatStore } from "@/store/seatStore";
+import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 
 /**
  * Export each chunk as one A4 landscape page (no visual scaling of Playground).
