@@ -2,7 +2,7 @@
 
 import { Rect, Circle, Group } from "react-konva";
 import * as d3 from "d3";
-import Seat from "./Seat";
+import Seat from "./SeatUI";
 
 export type TableType = "circle" | "rectangle";
 
@@ -26,7 +26,7 @@ export interface TableProps {
 /**
  * Renders a table (circle or rectangle) with seats distributed around it.
  */
-export default function Table({
+export default function TableUI({
   x,
   y,
   type,

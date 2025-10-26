@@ -11,7 +11,7 @@ interface SeatProps {
   onClick?: (id: string) => void;
 }
 
-export default function Seat({ x, y, radius = 12, color = "#FFD700", id, onClick }: SeatProps) {
+export default function SeatUI({ x, y, radius = 12, color = "#FFD700", id, onClick }: SeatProps) {
   return (
     <Circle
       x={x}
