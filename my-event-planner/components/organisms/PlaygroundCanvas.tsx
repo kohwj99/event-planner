@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import * as d3 from 'd3';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -17,6 +17,7 @@ import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal
 import {
   useSeatStore
 } from '@/store/seatStore';
+import { useGuestStore } from '@/store/guestStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
@@ -51,15 +52,18 @@ export default function PlaygroundCanvas() {
     cleanupEmptyChunks,
   } = useSeatStore();
 
+  // guest lookup
+  const hostGuests = useGuestStore((s) => s.hostGuests);
+  const externalGuests = useGuestStore((s) => s.externalGuests);
+  const guests = useMemo(() => [...hostGuests, ...externalGuests], [hostGuests, externalGuests]);
+  const guestLookup = useMemo(() => {
+    const m: Record<string, any> = {};
+    guests.forEach((g) => (m[g.id] = g));
+    return m;
+  }, [guests]);
+
   /** ---------- INITIAL SETUP ---------- */
-  // useEffect(() => {
-  //   if (tables.length === 0) {
-  //     const t1 = createRoundTable('t1', 300, 300, 60, 8, 'Table A');
-  //     const t2 = createRoundTable('t2', 500, 300, 80, 10, 'Table B');
-  //     addTable(t1);
-  //     addTable(t2);
-  //   }
-  // }, []);
+  // (unchanged)
 
   /** ---------- SETUP SVG + ZOOM ---------- */
   useEffect(() => {
@@ -241,9 +245,9 @@ export default function PlaygroundCanvas() {
 
     merged.each(function (tableDatum) {
       const group = d3.select(this);
+
+      // ----- Seats (circles) -----
       const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat').data(tableDatum.seats || [], (s) => s.id);
-
-
       seatsSel.exit().remove();
 
       const seatsEnter = seatsSel.enter().append('circle').attr('class', 'seat');
@@ -252,7 +256,8 @@ export default function PlaygroundCanvas() {
         .attr('cx', (s) => s.x - tableDatum.x)
         .attr('cy', (s) => s.y - tableDatum.y)
         .attr('r', (s) => s.radius)
-        .attr('fill', (s) => (s.locked ? '#b0bec5' : s.selected ? '#ffb300' : '#90caf9'))
+        // highlight assigned seat slightly - but keep your existing selected/locked priority
+        .attr('fill', (s) => (s.locked ? '#b0bec5' : s.assignedGuestId ? '#66bb6a' : s.selected ? '#ffb300' : '#90caf9'))
         .attr('stroke', '#1565c0')
         .attr('stroke-width', 1)
         .style('cursor', 'pointer')
@@ -262,12 +267,14 @@ export default function PlaygroundCanvas() {
         })
         .on('contextmenu', (event, s) => {
           event.preventDefault();
+          // toggle lock
           lockSeat(tableDatum.id, s.id, !s.locked);
         })
         .on('dblclick', (event, s) => {
           clearSeat(tableDatum.id, s.id);
         });
 
+      // ----- Seat labels (numbers) -----
       const seatLabels = group
         .selectAll<SVGTextElement, Seat>('text.seat-number')
         .data(
@@ -284,6 +291,103 @@ export default function PlaygroundCanvas() {
         .attr('fill', '#0d47a1')
         .attr('font-size', '10px')
         .text((s) => s.seatNumber);
+
+      // ----- Guest boxes: one per seat with assignedGuestId -----
+      // Each guest-box is positioned RELATIVE to the table group (so we reuse the same translate)
+      const guestBoxes = group
+        .selectAll<SVGGElement, Seat>('g.guest-box')
+        .data(tableDatum.seats || [], (s) => s.id);
+
+      guestBoxes.exit().remove();
+
+      const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box')
+        // ensure boxes don't intercept pointer events (so clicks go to seats)
+        .style('pointer-events', 'none');
+
+      // create shape + text
+      guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 6).attr('ry', 6).attr('stroke-width', 1).attr('stroke', '#1565c0');
+      guestBoxesEnter.append('text').attr('class', 'guest-text').attr('font-size', 11).attr('dy', '0.33em').attr('fill', '#0d47a1');
+
+      guestBoxesEnter.merge(guestBoxes as any).each(function (s: Seat) {
+        const gbox = d3.select(this);
+
+        // hide if no guest
+        if (!s.assignedGuestId) {
+          gbox.attr('display', 'none');
+          return;
+        }
+        gbox.attr('display', null);
+
+        // Relative seat position (since the group is translated by tableDatum.x/y)
+        const relX = s.x - tableDatum.x;
+        const relY = s.y - tableDatum.y;
+
+        // Normalized outward vector from table center to seat
+        let vx = relX;
+        let vy = relY;
+        let len = Math.sqrt(vx * vx + vy * vy);
+        if (len === 0) {
+          // fallback if seat is exactly at table center (unlikely)
+          vx = 0;
+          vy = -1;
+          len = 1;
+        }
+        const nx = vx / len;
+        const ny = vy / len;
+
+        // offset distance: place the box just outside the seat circle
+        const offset = (s.radius ?? 8) + 8; // seat radius fallback
+
+        // center of box relative to table group
+        const boxCenterX = relX + nx * offset;
+        const boxCenterY = relY + ny * offset;
+
+        // text to display (use guestLookup)
+        const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
+        const text = guest ? guest.name : 'Unknown';
+
+        // estimate width based on characters (simple heuristic)
+        const paddingX = 8;
+        const paddingY = 6;
+        const charWidth = 7; // approximate per character in px at font-size ~11
+        const estWidth = Math.min(Math.max(60, text.length * charWidth + paddingX * 2), 220);
+        const width = estWidth;
+        const height = 18 + paddingY; // slightly taller
+
+        // anchor left/right based on direction; if nx positive -> box to right, anchor start
+        const anchor = nx >= 0 ? 'start' : 'end';
+
+        // compute top-left depending on anchor
+        const rectX = anchor === 'start' ? boxCenterX : boxCenterX - width;
+        const rectY = boxCenterY - height / 2;
+
+        // set rectangle and text
+        gbox.select('rect.guest-rect')
+          .attr('x', rectX)
+          .attr('y', rectY)
+          .attr('width', width)
+          .attr('height', height)
+          .attr('fill', '#ffffff');
+
+        gbox.select('text.guest-text')
+          .attr('x', anchor === 'start' ? rectX + paddingX : rectX + width - paddingX)
+          .attr('y', rectY + height / 2)
+          .attr('text-anchor', anchor === 'start' ? 'start' : 'end')
+          .text(text)
+          .each(function() {
+            // keep single-line and ellipsize visually by truncating the string if needed
+            const el = d3.select(this);
+            const node = el.node() as SVGTextElement;
+            if (!node) return;
+            let t = text;
+            // rough char limit based on width
+            const charLimit = Math.floor((width - paddingX * 2) / charWidth);
+            if (t.length > charLimit) {
+              t = t.slice(0, Math.max(0, charLimit - 1)) + '…';
+              el.text(t);
+            }
+          });
+      });
     });
 
     /** ---------- DRAG behavior ---------- */
@@ -327,6 +431,9 @@ export default function PlaygroundCanvas() {
     assignTableToChunk,
     expandWorldIfNeeded,
     cleanupEmptyChunks,
+    // keep guest dependencies so boxes update when guests change
+    hostGuests,
+    externalGuests,
   ]);
 
   /** ---------- ZOOM CONTROLS ---------- */

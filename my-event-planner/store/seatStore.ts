@@ -24,6 +24,7 @@ interface SeatStoreState {
   moveTable: (id: string, newX: number, newY: number) => void;
   setSelectedTable: (id: string | null) => void;
   selectSeat: (tableId: string, seatId: string | null) => void;
+  assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => void; // 🆕
   lockSeat: (tableId: string, seatId: string, locked: boolean) => void;
   clearSeat: (tableId: string, seatId: string) => void;
   updateSeatOrder: (tableId: string, newOrder: number[]) => void;
@@ -36,7 +37,12 @@ interface SeatStoreState {
   cleanupEmptyChunks: () => void;
   getWorldSize: () => { width: number; height: number };
   getAllChunksSorted: () => Chunk[];
-  getOccupiedBounds: () => { minRow: number; maxRow: number; minCol: number; maxCol: number } | null;
+  getOccupiedBounds: () => {
+    minRow: number;
+    maxRow: number;
+    minCol: number;
+    maxCol: number;
+  } | null;
 }
 
 /* -------------------- 🧩 Zustand Store -------------------- */
@@ -46,7 +52,12 @@ export const useSeatStore = create<SeatStoreState>()(
       (set, get) => ({
         tables: [],
         chunks: {
-          [getChunkKey(0, 0)]: { id: getChunkKey(0, 0), row: 0, col: 0, tables: [] },
+          [getChunkKey(0, 0)]: {
+            id: getChunkKey(0, 0),
+            row: 0,
+            col: 0,
+            tables: [],
+          },
         },
         selectedTableId: null,
         selectedSeatId: null,
@@ -63,7 +74,9 @@ export const useSeatStore = create<SeatStoreState>()(
 
         updateTable: (id, data) =>
           set((state) => ({
-            tables: state.tables.map((t) => (t.id === id ? { ...t, ...data } : t)),
+            tables: state.tables.map((t) =>
+              t.id === id ? { ...t, ...data } : t
+            ),
           })),
 
         moveTable: (id, newX, newY) => {
@@ -83,7 +96,8 @@ export const useSeatStore = create<SeatStoreState>()(
           });
         },
 
-        setSelectedTable: (id) => set(() => ({ selectedTableId: id, selectedSeatId: null })),
+        setSelectedTable: (id) =>
+          set(() => ({ selectedTableId: id, selectedSeatId: null })),
 
         selectSeat: (tableId, seatId) =>
           set((state) => ({
@@ -91,8 +105,28 @@ export const useSeatStore = create<SeatStoreState>()(
             selectedSeatId: seatId,
             tables: state.tables.map((t) => ({
               ...t,
-              seats: t.seats.map((s) => ({ ...s, selected: t.id === tableId && s.id === seatId })),
+              seats: t.seats.map((s) => ({
+                ...s,
+                selected: t.id === tableId && s.id === seatId,
+              })),
             })),
+          })),
+
+        /* ---------- 🧍 Guest Seat Assignment ---------- */
+        assignGuestToSeat: (tableId, seatId, guestId) =>
+          set((state) => ({
+            tables: state.tables.map((t) =>
+              t.id !== tableId
+                ? t
+                : {
+                    ...t,
+                    seats: t.seats.map((s) =>
+                      s.id === seatId
+                        ? { ...s, assignedGuestId: guestId ?? null }
+                        : s
+                    ),
+                  }
+            ),
           })),
 
         lockSeat: (tableId, seatId, locked) =>
@@ -100,7 +134,12 @@ export const useSeatStore = create<SeatStoreState>()(
             tables: state.tables.map((t) =>
               t.id !== tableId
                 ? t
-                : { ...t, seats: t.seats.map((s) => (s.id === seatId ? { ...s, locked } : s)) }
+                : {
+                    ...t,
+                    seats: t.seats.map((s) =>
+                      s.id === seatId ? { ...s, locked } : s
+                    ),
+                  }
             ),
           })),
 
@@ -112,7 +151,9 @@ export const useSeatStore = create<SeatStoreState>()(
                 : {
                     ...t,
                     seats: t.seats.map((s) =>
-                      s.id === seatId ? { ...s, assignedGuestId: null, locked: false } : s
+                      s.id === seatId
+                        ? { ...s, assignedGuestId: null, locked: false }
+                        : s
                     ),
                   }
             ),
@@ -125,7 +166,10 @@ export const useSeatStore = create<SeatStoreState>()(
                 ? t
                 : {
                     ...t,
-                    seats: t.seats.map((s, i) => ({ ...s, seatNumber: newOrder[i] ?? s.seatNumber })),
+                    seats: t.seats.map((s, i) => ({
+                      ...s,
+                      seatNumber: newOrder[i] ?? s.seatNumber,
+                    })),
                   }
             ),
           })),
@@ -133,7 +177,14 @@ export const useSeatStore = create<SeatStoreState>()(
         resetTables: () =>
           set({
             tables: [],
-            chunks: { [getChunkKey(0, 0)]: { id: getChunkKey(0, 0), row: 0, col: 0, tables: [] } },
+            chunks: {
+              [getChunkKey(0, 0)]: {
+                id: getChunkKey(0, 0),
+                row: 0,
+                col: 0,
+                tables: [],
+              },
+            },
             selectedTableId: null,
             selectedSeatId: null,
           }),
@@ -171,16 +222,20 @@ export const useSeatStore = create<SeatStoreState>()(
             for (let r = 0; r <= maxChunkRow; r++) {
               const c = maxChunkCol + 1;
               const key = getChunkKey(r, c);
-              if (!newChunks[key]) newChunks[key] = { id: key, row: r, col: c, tables: [] };
+              if (!newChunks[key])
+                newChunks[key] = { id: key, row: r, col: c, tables: [] };
             }
           }
 
           if (needNewDown) {
             const newRow = maxChunkRow + 1;
-            const maxColAfter = Math.max(...Object.values(newChunks).map((c) => c.col));
+            const maxColAfter = Math.max(
+              ...Object.values(newChunks).map((c) => c.col)
+            );
             for (let c = 0; c <= maxColAfter; c++) {
               const key = getChunkKey(newRow, c);
-              if (!newChunks[key]) newChunks[key] = { id: key, row: newRow, col: c, tables: [] };
+              if (!newChunks[key])
+                newChunks[key] = { id: key, row: newRow, col: c, tables: [] };
             }
           }
 
@@ -190,11 +245,17 @@ export const useSeatStore = create<SeatStoreState>()(
         cleanupEmptyChunks: () => {
           set((state) => {
             const chunks = { ...state.chunks };
-            const occupied = Object.values(chunks).filter((c) => c.tables.length > 0);
+            const occupied = Object.values(chunks).filter(
+              (c) => c.tables.length > 0
+            );
 
             if (occupied.length === 0) {
               const key0 = getChunkKey(0, 0);
-              return { chunks: { [key0]: { id: key0, row: 0, col: 0, tables: [] } } };
+              return {
+                chunks: {
+                  [key0]: { id: key0, row: 0, col: 0, tables: [] },
+                },
+              };
             }
 
             const minRow = Math.min(...occupied.map((c) => c.row));
@@ -206,13 +267,16 @@ export const useSeatStore = create<SeatStoreState>()(
             for (let r = minRow; r <= maxRow; r++) {
               for (let c = minCol; c <= maxCol; c++) {
                 const key = getChunkKey(r, c);
-                newChunks[key] = chunks[key] ?? { id: key, row: r, col: c, tables: [] };
+                newChunks[key] =
+                  chunks[key] ?? { id: key, row: r, col: c, tables: [] };
               }
             }
 
             Object.values(chunks)
               .filter((ch) => ch.tables.length > 0)
-              .forEach((ch) => (newChunks[getChunkKey(ch.row, ch.col)] = ch));
+              .forEach(
+                (ch) => (newChunks[getChunkKey(ch.row, ch.col)] = ch)
+              );
 
             return { chunks: newChunks };
           });
@@ -222,12 +286,17 @@ export const useSeatStore = create<SeatStoreState>()(
           const chunks = get().chunks;
           const maxRow = Math.max(...Object.values(chunks).map((c) => c.row));
           const maxCol = Math.max(...Object.values(chunks).map((c) => c.col));
-          return { width: (maxCol + 1) * CHUNK_WIDTH, height: (maxRow + 1) * CHUNK_HEIGHT };
+          return {
+            width: (maxCol + 1) * CHUNK_WIDTH,
+            height: (maxRow + 1) * CHUNK_HEIGHT,
+          };
         },
 
         getOccupiedBounds: () => {
           const { chunks } = get();
-          const occupied = Object.values(chunks).filter((c) => c.tables.length > 0);
+          const occupied = Object.values(chunks).filter(
+            (c) => c.tables.length > 0
+          );
           if (occupied.length === 0) return null;
           return {
             minRow: Math.min(...occupied.map((c) => c.row)),
@@ -239,7 +308,9 @@ export const useSeatStore = create<SeatStoreState>()(
 
         getAllChunksSorted: () => {
           const { chunks } = get();
-          return Object.values(chunks).sort((a, b) => (a.row === b.row ? a.col - b.col : a.row - b.row));
+          return Object.values(chunks).sort((a, b) =>
+            a.row === b.row ? a.col - b.col : a.row - b.row
+          );
         },
       }),
       { name: "seat-tables" }
