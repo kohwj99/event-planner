@@ -23,6 +23,9 @@ import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
 
+
+
+
 /**
  * 🎯 Controlled finite world (chunks expand only right/down)
  * - Visible dotted grid
@@ -52,7 +55,7 @@ export default function PlaygroundCanvas() {
     cleanupEmptyChunks,
   } = useSeatStore();
 
-  // guest lookup
+  // Create a lookup table for fast access
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
   const guests = useMemo(() => [...hostGuests, ...externalGuests], [hostGuests, externalGuests]);
@@ -61,9 +64,6 @@ export default function PlaygroundCanvas() {
     guests.forEach((g) => (m[g.id] = g));
     return m;
   }, [guests]);
-
-  /** ---------- INITIAL SETUP ---------- */
-  // (unchanged)
 
   /** ---------- SETUP SVG + ZOOM ---------- */
   useEffect(() => {
@@ -197,7 +197,7 @@ export default function PlaygroundCanvas() {
       .style('cursor', 'grab');
 
     // Table shape based on type
-    enter.each(function(this: SVGGElement, d: Table) {
+    enter.each(function (this: SVGGElement, d: Table) {
       const g = d3.select(this);
       if (d.shape === 'round') {
         g.append('circle')
@@ -205,7 +205,7 @@ export default function PlaygroundCanvas() {
           .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
           .attr('stroke', '#0d47a1')
           .attr('stroke-width', 2)
-          .on('click', function(this: SVGCircleElement, event: Event) {
+          .on('click', function (this: SVGCircleElement, event: Event) {
             event.stopPropagation();
             setSelectedTable(d.id);
           });
@@ -214,14 +214,14 @@ export default function PlaygroundCanvas() {
         const width = d.width || 160;
         const height = d.height || 100;
         g.append('rect')
-          .attr('x', -width/2)
-          .attr('y', -height/2)
+          .attr('x', -width / 2)
+          .attr('y', -height / 2)
           .attr('width', width)
           .attr('height', height)
           .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
           .attr('stroke', '#0d47a1')
           .attr('stroke-width', 2)
-          .on('click', function(this: SVGRectElement, event: Event) {
+          .on('click', function (this: SVGRectElement, event: Event) {
             event.stopPropagation();
             setSelectedTable(d.id);
           });
@@ -246,17 +246,82 @@ export default function PlaygroundCanvas() {
     merged.each(function (tableDatum) {
       const group = d3.select(this);
 
-      // ----- Seats (circles) -----
+      // ---------- CONNECTORS (guaranteed behind everything: keep them in a first-child group) ----------
+      const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
+
+      // ensure we have a connectors layer as the FIRST child of the table group
+      let connectorsLayer = group.select<SVGGElement>('g.connectors-layer');
+      if (connectorsLayer.empty()) {
+        // insert as first child so connectors render behind all other children
+        connectorsLayer = group.insert('g', ':first-child').attr('class', 'connectors-layer') as d3.Selection<SVGGElement, unknown, null, undefined>;
+      }
+
+      // bind data to lines inside the connectors layer (not directly on group)
+      const connectors = connectorsLayer.selectAll<SVGLineElement, Seat>('line.connector-line')
+        .data(seatsWithGuest, (s: any) => s.id);
+
+      // remove stale
+      connectors.exit().remove();
+
+      // enter -> append into connectorsLayer (so they are always inside that first-child group)
+      const connectorsEnter = connectors.enter()
+        .append('line')
+        .attr('class', 'connector-line')
+        .attr('stroke', '#90a4ae')
+        .attr('stroke-width', 1)
+        .attr('pointer-events', 'none');
+
+      // update (enter+update)
+      connectorsEnter
+        .merge(connectors as any)
+        .each(function (s: Seat) {
+          const relX = s.x - tableDatum.x;
+          const relY = s.y - tableDatum.y;
+
+          // compute outward direction (same logic you already use)
+          let nx = 0, ny = 0;
+          if (tableDatum.shape === 'round') {
+            const len = Math.sqrt(relX * relX + relY * relY) || 1;
+            nx = relX / len;
+            ny = relY / len;
+          } else {
+            if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; }
+            else { nx = 0; ny = relY >= 0 ? 1 : -1; }
+          }
+
+          // match the same box sizing/offset you use for guest boxes
+          const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
+          const line1 = guest ? `${guest.salutation || ''} ${guest.name || ''}`.trim() : '';
+          const line2 = guest ? `${guest.country || ''} | ${guest.company || ''}`.trim() : '';
+          const paddingX = 10, paddingY = 6, lineHeight = 14;
+          const charPx = 7;
+          const estTextWidth = Math.max(line1.length, line2.length) * charPx;
+          const maxBoxWidth = 300;
+          const width = Math.min(Math.max(60, estTextWidth + paddingX * 2), maxBoxWidth);
+          const gap = 8;
+          const seatR = s.radius ?? 8;
+          const centerOffset = seatR + gap + width / 2;
+
+          const boxCenterX = relX + nx * centerOffset;
+          const boxCenterY = relY + ny * centerOffset;
+
+          d3.select(this)
+            .attr('x1', relX)
+            .attr('y1', relY)
+            .attr('x2', boxCenterX)
+            .attr('y2', boxCenterY);
+        });
+
+
+      // ---------- SEATS (so they render above connectors) ----------
       const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat').data(tableDatum.seats || [], (s) => s.id);
       seatsSel.exit().remove();
-
       const seatsEnter = seatsSel.enter().append('circle').attr('class', 'seat');
       seatsEnter
         .merge(seatsSel as any)
         .attr('cx', (s) => s.x - tableDatum.x)
         .attr('cy', (s) => s.y - tableDatum.y)
         .attr('r', (s) => s.radius)
-        // highlight assigned seat slightly - but keep your existing selected/locked priority
         .attr('fill', (s) => (s.locked ? '#b0bec5' : s.assignedGuestId ? '#66bb6a' : s.selected ? '#ffb300' : '#90caf9'))
         .attr('stroke', '#1565c0')
         .attr('stroke-width', 1)
@@ -267,20 +332,15 @@ export default function PlaygroundCanvas() {
         })
         .on('contextmenu', (event, s) => {
           event.preventDefault();
-          // toggle lock
           lockSeat(tableDatum.id, s.id, !s.locked);
         })
         .on('dblclick', (event, s) => {
           clearSeat(tableDatum.id, s.id);
         });
 
-      // ----- Seat labels (numbers) -----
-      const seatLabels = group
-        .selectAll<SVGTextElement, Seat>('text.seat-number')
-        .data(
-          tableDatum.seats || [], // fallback to empty array
-          (s) => s.id
-        );
+      // ---------- Seat labels ----------
+      const seatLabels = group.selectAll<SVGTextElement, Seat>('text.seat-number')
+        .data(tableDatum.seats || [], (s) => s.id);
       seatLabels.exit().remove();
       const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
       seatLabelsEnter
@@ -292,108 +352,93 @@ export default function PlaygroundCanvas() {
         .attr('font-size', '10px')
         .text((s) => s.seatNumber);
 
-      // ----- Guest boxes: one per seat with assignedGuestId -----
-      // Each guest-box is positioned RELATIVE to the table group (so we reuse the same translate)
-      const guestBoxes = group
-        .selectAll<SVGGElement, Seat>('g.guest-box')
-        .data(tableDatum.seats || [], (s) => s.id);
-
+      // ---------- GUEST BOXES (draw after connectors & seats so they are on top) ----------
+      const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
       guestBoxes.exit().remove();
+      const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box').style('pointer-events', 'none');
 
-      const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box')
-        // ensure boxes don't intercept pointer events (so clicks go to seats)
-        .style('pointer-events', 'none');
+      // create rect + two text lines inside each g (we won't attach connector here)
+      guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');
+      guestBoxesEnter.append('text').attr('class', 'guest-name').attr('font-size', 11).attr('fill', '#0d47a1');
+      guestBoxesEnter.append('text').attr('class', 'guest-meta').attr('font-size', 10).attr('fill', '#455a64');
 
-      // create shape + text
-      guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 6).attr('ry', 6).attr('stroke-width', 1).attr('stroke', '#1565c0');
-      guestBoxesEnter.append('text').attr('class', 'guest-text').attr('font-size', 11).attr('dy', '0.33em').attr('fill', '#0d47a1');
+      guestBoxesEnter
+        .merge(guestBoxes as any)
+        .each(function (s: Seat) {
+          const gbox = d3.select(this);
+          const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
+          if (!guest) {
+            gbox.attr('display', 'none');
+            return;
+          }
+          gbox.attr('display', null);
 
-      guestBoxesEnter.merge(guestBoxes as any).each(function (s: Seat) {
-        const gbox = d3.select(this);
+          const relX = s.x - tableDatum.x;
+          const relY = s.y - tableDatum.y;
 
-        // hide if no guest
-        if (!s.assignedGuestId) {
-          gbox.attr('display', 'none');
-          return;
-        }
-        gbox.attr('display', null);
+          // outward direction (same logic as connectors)
+          let nx = 0, ny = 0;
+          if (tableDatum.shape === 'round') {
+            const len = Math.sqrt(relX * relX + relY * relY) || 1;
+            nx = relX / len;
+            ny = relY / len;
+          } else {
+            if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; }
+            else { nx = 0; ny = relY >= 0 ? 1 : -1; }
+          }
 
-        // Relative seat position (since the group is translated by tableDatum.x/y)
-        const relX = s.x - tableDatum.x;
-        const relY = s.y - tableDatum.y;
+          // compute text lines and dynamic size
+          const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+          const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
 
-        // Normalized outward vector from table center to seat
-        let vx = relX;
-        let vy = relY;
-        let len = Math.sqrt(vx * vx + vy * vy);
-        if (len === 0) {
-          // fallback if seat is exactly at table center (unlikely)
-          vx = 0;
-          vy = -1;
-          len = 1;
-        }
-        const nx = vx / len;
-        const ny = vy / len;
+          const paddingX = 10, paddingY = 6, lineHeight = 14;
+          const charPx = 7;
+          const estTextWidth = Math.max(line1.length, line2.length) * charPx;
+          const maxBoxWidth = 300;
+          const width = Math.min(Math.max(60, estTextWidth + paddingX * 2), maxBoxWidth);
+          const height = lineHeight * 2 + paddingY * 2;
 
-        // offset distance: place the box just outside the seat circle
-        const offset = (s.radius ?? 8) + 8; // seat radius fallback
+          // same centerOffset formula used for connectors:
+          const gap = 8;
+          const seatR = s.radius ?? 8;
+          const centerOffset = seatR + gap + width / 2;
 
-        // center of box relative to table group
-        const boxCenterX = relX + nx * offset;
-        const boxCenterY = relY + ny * offset;
+          const boxCenterX = relX + nx * centerOffset;
+          const boxCenterY = relY + ny * centerOffset;
 
-        // text to display (use guestLookup)
-        const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
-        const text = guest ? guest.name : 'Unknown';
+          const rectX = boxCenterX - width / 2;
+          const rectY = boxCenterY - height / 2;
 
-        // estimate width based on characters (simple heuristic)
-        const paddingX = 8;
-        const paddingY = 6;
-        const charWidth = 7; // approximate per character in px at font-size ~11
-        const estWidth = Math.min(Math.max(60, text.length * charWidth + paddingX * 2), 220);
-        const width = estWidth;
-        const height = 18 + paddingY; // slightly taller
+          // rect
+          gbox.select('rect.guest-rect')
+            .attr('x', rectX)
+            .attr('y', rectY)
+            .attr('width', width)
+            .attr('height', height)
+            .attr('fill', '#ffffff');
 
-        // anchor left/right based on direction; if nx positive -> box to right, anchor start
-        const anchor = nx >= 0 ? 'start' : 'end';
+          // line1 (centered)
+          gbox.select('text.guest-name')
+            .attr('x', boxCenterX)
+            .attr('y', rectY + paddingY + lineHeight / 2)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .text(line1);
 
-        // compute top-left depending on anchor
-        const rectX = anchor === 'start' ? boxCenterX : boxCenterX - width;
-        const rectY = boxCenterY - height / 2;
-
-        // set rectangle and text
-        gbox.select('rect.guest-rect')
-          .attr('x', rectX)
-          .attr('y', rectY)
-          .attr('width', width)
-          .attr('height', height)
-          .attr('fill', '#ffffff');
-
-        gbox.select('text.guest-text')
-          .attr('x', anchor === 'start' ? rectX + paddingX : rectX + width - paddingX)
-          .attr('y', rectY + height / 2)
-          .attr('text-anchor', anchor === 'start' ? 'start' : 'end')
-          .text(text)
-          .each(function() {
-            // keep single-line and ellipsize visually by truncating the string if needed
-            const el = d3.select(this);
-            const node = el.node() as SVGTextElement;
-            if (!node) return;
-            let t = text;
-            // rough char limit based on width
-            const charLimit = Math.floor((width - paddingX * 2) / charWidth);
-            if (t.length > charLimit) {
-              t = t.slice(0, Math.max(0, charLimit - 1)) + '…';
-              el.text(t);
-            }
-          });
-      });
+          // line2 (centered)
+          gbox.select('text.guest-meta')
+            .attr('x', boxCenterX)
+            .attr('y', rectY + paddingY + lineHeight + lineHeight / 2)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .text(line2);
+        });
     });
+
 
     /** ---------- DRAG behavior ---------- */
     const svgSelection = d3.select(svgEl);
-    const drag = d3
-      .drag<SVGGElement, Table>()
+    const drag = d3.drag<SVGGElement, Table>()
       .on('start', function () {
         svgSelection.on('.zoom', null);
         d3.select(this).style('cursor', 'grabbing');
@@ -401,8 +446,8 @@ export default function PlaygroundCanvas() {
       .on('drag', function (event, d) {
         const [px, py] = d3.pointer(event, svgEl);
         const t = d3.zoomTransform(svgEl);
-        const worldX = Math.max(0, (px - t.x) / t.k); // clamp to positive
-        const worldY = Math.max(0, (py - t.y) / t.k); // clamp to positive
+        const worldX = Math.max(0, (px - t.x) / t.k);
+        const worldY = Math.max(0, (py - t.y) / t.k);
         d3.select(this).attr('transform', `translate(${worldX},${worldY})`);
         moveTable(d.id, worldX, worldY);
 
@@ -419,6 +464,7 @@ export default function PlaygroundCanvas() {
       });
 
     merged.call(drag as any);
+
   }, [
     tables,
     moveTable,
@@ -477,7 +523,7 @@ export default function PlaygroundCanvas() {
     for (let i = 0; i < config.quantity; i++) {
       const id = `t${Date.now()}-${i}`;
       const label = config.label ? `${config.label} ${tables.length + i + 1}` : `Table ${tables.length + i + 1}`;
-      
+
       // Offset each table slightly in a grid pattern
       const offsetX = (i % 3) * 200;  // 3 tables per row
       const offsetY = Math.floor(i / 3) * 200;
@@ -499,7 +545,7 @@ export default function PlaygroundCanvas() {
       ensureChunkExists(row, col);
       assignTableToChunk(id, row, col);
     }
-    
+
     expandWorldIfNeeded();
   };
 
