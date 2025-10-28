@@ -7,7 +7,7 @@ export interface Table {
   radius: number;
   seats: Seat[];
   label: string;
-  shape: "round" | "square" | "rectangle";
+  shape: "round" | "rectangle";
   width?: number;  // for rectangular tables
   height?: number; // for rectangular tables
 }

@@ -22,6 +22,7 @@ interface SeatStoreState {
   addTable: (table: Table) => void;
   updateTable: (id: string, data: Partial<Table>) => void;
   moveTable: (id: string, newX: number, newY: number) => void;
+  updateTableState: (tables: Table[]) => void;
   setSelectedTable: (id: string | null) => void;
   selectSeat: (tableId: string, seatId: string | null) => void;
   assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => void; // 🆕
@@ -78,6 +79,9 @@ export const useSeatStore = create<SeatStoreState>()(
               t.id === id ? { ...t, ...data } : t
             ),
           })),
+
+        updateTableState: (tables) => set(() => ({ tables })),
+
 
         moveTable: (id, newX, newY) => {
           set((state) => {

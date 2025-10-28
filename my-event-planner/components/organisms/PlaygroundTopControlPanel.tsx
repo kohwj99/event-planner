@@ -10,6 +10,7 @@ import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
 import { useState } from 'react';
 import GuestListModal from './GuestListModal';
+import AutoFillButton from '../atoms/AutoFillButton';
 
 export default function PlaygroundTopControlPanel() {
   const { tables, resetTables } = useSeatStore();
@@ -32,6 +33,8 @@ export default function PlaygroundTopControlPanel() {
           <Button variant="contained" color="primary" onClick={() => setGuestModalOpen(true)}>
             Manage Guests
           </Button>
+
+          <AutoFillButton/>
 
           <Button
             variant="contained"
