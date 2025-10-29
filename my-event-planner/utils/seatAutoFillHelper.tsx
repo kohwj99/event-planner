@@ -1,4 +1,4 @@
-// /services/seatAutoFillService.ts
+// /services/seatAutoFillHelper.ts
 import { useSeatStore } from "@/store/seatStore";
 import { useGuestStore } from "@/store/guestStore";
 
@@ -64,10 +64,10 @@ function makeComparator(rules: SortRule[]) {
 
 /**
  * Autofill seats according to requested options.
- * - Does NOT create or assume new store actions beyond what you already have.
  * - Clears only unlocked seats (via clearSeat).
  * - Respects locked seats.
- * - Interleaves host and external lists if both included (host first).
+ * - Uses a single combined sorted guest list (so ranking/sortRules are global).
+ * - Assigns guests sequentially in seat priority: tableOrder asc, seatOrder asc (table 1 seat 1 first).
  */
 export async function autoFillSeats(options: AutoFillOptions = {}) {
   const {
@@ -79,17 +79,16 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   const seatStore = useSeatStore.getState();
   const guestStore = useGuestStore.getState();
 
-  // Validation
   if (!includeHost && !includeExternal) {
     console.warn("autoFillSeats: no guest lists selected; aborting.");
     return;
   }
 
-  // Collect guest lists directly from guestStore (do not duplicate types)
+  // --- Collect candidates from guestStore (exclude deleted) ---
   const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
   const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
 
-  // Gather assigned guest ids that are on LOCKED seats to exclude them
+  // --- Identify guests locked into seats (they must not be reassigned) ---
   const lockedAssignedIds = new Set<string>();
   seatStore.tables.forEach((t) =>
     (t.seats ?? []).forEach((s: any) => {
@@ -97,19 +96,25 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     })
   );
 
-  // Filter out guests already 'locked' in seats (they should not be reassigned)
+  // --- Filter out guests already locked into seats ---
   const hostCandidates = hostPool.filter((g: any) => !lockedAssignedIds.has(g.id));
   const externalCandidates = externalPool.filter((g: any) => !lockedAssignedIds.has(g.id));
 
-  // Build comparators and sort each candidate list according to rules (rules apply within each list)
+  // --- Combine candidates into a single list, sort by comparator (global rules) ---
   const comparator = makeComparator(sortRules);
-  hostCandidates.sort(comparator);
-  externalCandidates.sort(comparator);
+  const combinedCandidates = [...hostCandidates, ...externalCandidates].sort(comparator);
 
-  // Build seat priority order:
-  // - Table ordering: try table.tableNumber -> numeric parse of table.id -> fallback to store order index
-  // - Seat ordering within table: seat.seatNumber -> numeric parse of seat.id -> index
-  const tablesWithOrder = seatStore.tables.map((t: any, idx: number) => {
+  // --- Build current seatEntries (tableOrder, seatOrder) from the store (use tableNumber, seatNumber when present) ---
+  const currentTablesSnapshot = useSeatStore.getState().tables; // read fresh snapshot
+  type SeatEntry = {
+    tableId: string;
+    seatId: string;
+    locked: boolean;
+    tableOrder: number;
+    seatOrder: number;
+  };
+
+  const tablesWithOrder = currentTablesSnapshot.map((t: any, idx: number) => {
     let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
     if (tableOrder === undefined) {
       const parsed = parseInt(t.id, 10);
@@ -120,16 +125,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
 
   tablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
 
-  type SeatEntry = {
-    tableId: string;
-    seatId: string;
-    locked: boolean;
-    tableOrder: number;
-    seatOrder: number;
-  };
-
-  const seatEntries: SeatEntry[] = [];
-
+  let seatEntries: SeatEntry[] = [];
   tablesWithOrder.forEach(({ table, tableOrder }) => {
     (table.seats ?? []).forEach((s: any, sidx: number) => {
       let seatOrder = typeof s.seatNumber === "number" ? s.seatNumber : undefined;
@@ -147,108 +143,84 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     });
   });
 
-  // Sort global seatEntries by tableOrder then seatOrder
   seatEntries.sort((a, b) => {
     if (a.tableOrder !== b.tableOrder) return a.tableOrder - b.tableOrder;
     return a.seatOrder - b.seatOrder;
   });
 
-  // Clear unlocked seats first using existing store action clearSeat(tableId, seatId)
+  // --- Clear unlocked seats (only) using existing clearSeat(tableId, seatId) ---
+  // Use the up-to-date snapshot when checking assignedGuestId, so read fresh tables each time.
   for (const entry of seatEntries) {
-    if (!entry.locked) {
-      // if seat currently has assignment, clear it
-      const table = seatStore.tables.find((t) => t.id === entry.tableId);
-      if (!table) continue;
-      const seat = (table.seats ?? []).find((s: any) => s.id === entry.seatId);
-      if (!seat) continue;
-      if (seat.assignedGuestId) {
-        seatStore.clearSeat(entry.tableId, entry.seatId);
-      }
+    if (entry.locked) continue;
+    const latestTables = useSeatStore.getState().tables;
+    const t = latestTables.find((x) => x.id === entry.tableId);
+    if (!t) continue;
+    const s = (t.seats ?? []).find((x: any) => x.id === entry.seatId);
+    if (!s) continue;
+    if (s.assignedGuestId) {
+      seatStore.clearSeat(entry.tableId, entry.seatId);
     }
   }
 
-  // Remove any candidates who were previously assigned to unlocked seats that we just cleared:
-  // (they were not in lockedAssignedIds, so cleared, and remain available — that's desired)
-  // Build assignment loop
-  const assignedSet = new Set<string>(); // track who we've assigned now (and include lockedAssignedIds to avoid duplicates)
+  // --- After clearing, rebuild seatEntries from up-to-date state so we don't use stale assignment info ---
+  const freshTables = useSeatStore.getState().tables;
+  const freshTablesWithOrder = freshTables.map((t: any, idx: number) => {
+    let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
+    if (tableOrder === undefined) {
+      const parsed = parseInt(t.id, 10);
+      tableOrder = !isNaN(parsed) ? parsed : idx;
+    }
+    return { table: t, tableOrder };
+  });
+  freshTablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
+
+  seatEntries = [];
+  freshTablesWithOrder.forEach(({ table, tableOrder }) => {
+    (table.seats ?? []).forEach((s: any, sidx: number) => {
+      let seatOrder = typeof s.seatNumber === "number" ? s.seatNumber : undefined;
+      if (seatOrder === undefined) {
+        const parsed = parseInt(s.id, 10);
+        seatOrder = !isNaN(parsed) ? parsed : sidx + 1;
+      }
+      seatEntries.push({
+        tableId: table.id,
+        seatId: s.id,
+        locked: !!s.locked,
+        tableOrder,
+        seatOrder,
+      });
+    });
+  });
+  seatEntries.sort((a, b) => {
+    if (a.tableOrder !== b.tableOrder) return a.tableOrder - b.tableOrder;
+    return a.seatOrder - b.seatOrder;
+  });
+
+  // --- Assignment: iterate seats in priority and assign from combinedCandidates sequentially.
+  // Ensure we don't reassign lockedAssignedIds (already excluded from candidates) and avoid duplicates via assignedSet.
+  const assignedSet = new Set<string>();
   lockedAssignedIds.forEach((id) => assignedSet.add(id));
 
-  // iterators
-  let hi = 0;
-  let ei = 0;
-
-  const hostLen = hostCandidates.length;
-  const extLen = externalCandidates.length;
-
-  // Interleaving: host first then external, alternating. If one list exhausted, continue with other.
-  const hostIncluded = includeHost && hostLen > 0;
-  const externalIncluded = includeExternal && extLen > 0;
-
-  let nextIsHost = true; // host starts
-
-  const tryGetNextFromHost = () => {
-    while (hi < hostCandidates.length && assignedSet.has(hostCandidates[hi].id)) hi++;
-    if (hi < hostCandidates.length) {
-      const id = hostCandidates[hi].id;
-      hi++;
-      return id;
-    }
-    return null;
-  };
-
-  const tryGetNextFromExternal = () => {
-    while (ei < externalCandidates.length && assignedSet.has(externalCandidates[ei].id)) ei++;
-    if (ei < externalCandidates.length) {
-      const id = externalCandidates[ei].id;
-      ei++;
-      return id;
-    }
-    return null;
-  };
-
+  let ci = 0; // candidate index
   for (const entry of seatEntries) {
     if (entry.locked) continue;
+    // latest seat state check (defensive)
+    const latestTables2 = useSeatStore.getState().tables;
+    const tNow = latestTables2.find((x) => x.id === entry.tableId);
+    if (!tNow) continue;
+    const sNow = (tNow.seats ?? []).find((x: any) => x.id === entry.seatId);
+    if (!sNow) continue;
+    if (sNow.assignedGuestId) continue; // skip if some other process assigned it
 
-    // If seat currently assigned (possible if not cleared due to logic), skip
-    const tableNow = seatStore.tables.find((t) => t.id === entry.tableId);
-    if (!tableNow) continue;
-    const seatNow = (tableNow.seats ?? []).find((s: any) => s.id === entry.seatId);
-    if (!seatNow) continue;
-    if (seatNow.assignedGuestId) continue; // skip already (locked) or other assignment
-
-    let chosenGuestId: string | null = null;
-
-    if (hostIncluded && externalIncluded) {
-      // alternating mode
-      if (nextIsHost) {
-        chosenGuestId = tryGetNextFromHost();
-        if (!chosenGuestId) {
-          // host exhausted -> try external
-          chosenGuestId = tryGetNextFromExternal();
-          if (!chosenGuestId) break; // no more guests
-        }
-      } else {
-        chosenGuestId = tryGetNextFromExternal();
-        if (!chosenGuestId) {
-          chosenGuestId = tryGetNextFromHost();
-          if (!chosenGuestId) break;
-        }
-      }
-      // flip for next seat (always flip so pattern alternates)
-      nextIsHost = !nextIsHost;
-    } else if (hostIncluded) {
-      chosenGuestId = tryGetNextFromHost();
-      if (!chosenGuestId) break;
-    } else if (externalIncluded) {
-      chosenGuestId = tryGetNextFromExternal();
-      if (!chosenGuestId) break;
+    // find next available candidate not already assigned
+    while (ci < combinedCandidates.length && assignedSet.has(combinedCandidates[ci].id)) {
+      ci++;
     }
+    if (ci >= combinedCandidates.length) break;
 
-    if (chosenGuestId) {
-      // double-check not assigned already (shouldn't happen, but defensive)
-      if (assignedSet.has(chosenGuestId)) continue;
-      assignedSet.add(chosenGuestId);
-      seatStore.assignGuestToSeat(entry.tableId, entry.seatId, chosenGuestId);
-    }
+    const guest = combinedCandidates[ci];
+    assignedSet.add(guest.id);
+    seatStore.assignGuestToSeat(entry.tableId, entry.seatId, guest.id);
+    ci++;
   }
 }
