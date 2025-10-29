@@ -11,6 +11,8 @@ import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import AddIcon from '@mui/icons-material/Add';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
+import Slider from '@mui/material/Slider';
+import Typography from '@mui/material/Typography';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 
@@ -23,9 +25,6 @@ import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
 
-
-
-
 /**
  * 🎯 Controlled finite world (chunks expand only right/down)
  * - Visible dotted grid
@@ -37,6 +36,10 @@ export default function PlaygroundCanvas() {
   const zoomBehavior = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+
+  // --- NEW: connector gap state (user-adjustable) ---
+  // Default 8 to match previous behavior. User can slide 0..120 px.
+  const [connectorGap, setConnectorGap] = useState<number>(8);
 
   const {
     tables,
@@ -64,6 +67,17 @@ export default function PlaygroundCanvas() {
     guests.forEach((g) => (m[g.id] = g));
     return m;
   }, [guests]);
+
+  /** ---------- helper: crown color by ranking ---------- */
+  function getCrownColor(ranking: number | string | undefined) {
+    if (ranking === undefined || ranking === null) return null;
+    const r = Number(ranking) || Infinity;
+    if (r <= 1) return '#FFD700';       // gold
+    if (r <= 2) return '#C0C0C0';       // silver
+    if (r <= 3) return '#CD7F32';       // bronze
+    if (r <= 4) return '#1976d2';       // blue
+    return null;
+  }
 
   /** ---------- SETUP SVG + ZOOM ---------- */
   useEffect(() => {
@@ -298,9 +312,9 @@ export default function PlaygroundCanvas() {
           const estTextWidth = Math.max(line1.length, line2.length) * charPx;
           const maxBoxWidth = 300;
           const width = Math.min(Math.max(60, estTextWidth + paddingX * 2), maxBoxWidth);
-          const gap = 8;
+          // --- USE connectorGap (user-controlled) instead of fixed gap ---
           const seatR = s.radius ?? 8;
-          const centerOffset = seatR + gap + width / 2;
+          const centerOffset = seatR + connectorGap + width / 2;
 
           const boxCenterX = relX + nx * centerOffset;
           const boxCenterY = relY + ny * centerOffset;
@@ -353,86 +367,207 @@ export default function PlaygroundCanvas() {
         .text((s) => s.seatNumber);
 
       // ---------- GUEST BOXES (draw after connectors & seats so they are on top) ----------
-      const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
+      const guestBoxes = group
+        .selectAll<SVGGElement, Seat>('g.guest-box')
+        .data(tableDatum.seats || [], (s) => s.id);
       guestBoxes.exit().remove();
-      const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box').style('pointer-events', 'none');
+      const guestBoxesEnter = guestBoxes.enter()
+        .append('g')
+        .attr('class', 'guest-box')
+        .style('pointer-events', 'none');
 
-      // create rect + two text lines inside each g (we won't attach connector here)
       guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');
+      guestBoxesEnter.append('path').attr('class', 'guest-crown').attr('pointer-events', 'none');
       guestBoxesEnter.append('text').attr('class', 'guest-name').attr('font-size', 11).attr('fill', '#0d47a1');
       guestBoxesEnter.append('text').attr('class', 'guest-meta').attr('font-size', 10).attr('fill', '#455a64');
 
-      guestBoxesEnter
-        .merge(guestBoxes as any)
-        .each(function (s: Seat) {
-          const gbox = d3.select(this);
-          const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
-          if (!guest) {
-            gbox.attr('display', 'none');
-            return;
-          }
-          gbox.attr('display', null);
+      // --- Build initial box positions ---
+      const boxData: any[] = [];
+      (tableDatum.seats || []).forEach((s) => {
+        const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
+        if (!guest) return;
 
-          const relX = s.x - tableDatum.x;
-          const relY = s.y - tableDatum.y;
+        const relX = s.x - tableDatum.x;
+        const relY = s.y - tableDatum.y;
 
-          // outward direction (same logic as connectors)
-          let nx = 0, ny = 0;
-          if (tableDatum.shape === 'round') {
-            const len = Math.sqrt(relX * relX + relY * relY) || 1;
-            nx = relX / len;
-            ny = relY / len;
-          } else {
-            if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; }
-            else { nx = 0; ny = relY >= 0 ? 1 : -1; }
-          }
+        // outward normal
+        let nx = 0, ny = 0;
+        if (tableDatum.shape === 'round') {
+          const len = Math.sqrt(relX * relX + relY * relY) || 1;
+          nx = relX / len;
+          ny = relY / len;
+        } else {
+          if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; }
+          else { nx = 0; ny = relY >= 0 ? 1 : -1; }
+        }
 
-          // compute text lines and dynamic size
-          const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
-          const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+        const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+        const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+        const paddingX = 10, paddingY = 6, lineHeight = 14;
+        const charPx = 7;
+        const estTextWidth = Math.max(line1.length, line2.length) * charPx;
+        const maxBoxWidth = 300;
+        const width = Math.min(Math.max(60, estTextWidth + paddingX * 2), maxBoxWidth);
+        const height = lineHeight * 2 + paddingY * 2;
 
-          const paddingX = 10, paddingY = 6, lineHeight = 14;
-          const charPx = 7;
-          const estTextWidth = Math.max(line1.length, line2.length) * charPx;
-          const maxBoxWidth = 300;
-          const width = Math.min(Math.max(60, estTextWidth + paddingX * 2), maxBoxWidth);
-          const height = lineHeight * 2 + paddingY * 2;
+        const seatR = s.radius ?? 8;
+        const dist = seatR + connectorGap + width / 2;
 
-          // same centerOffset formula used for connectors:
-          const gap = 8;
-          const seatR = s.radius ?? 8;
-          const centerOffset = seatR + gap + width / 2;
-
-          const boxCenterX = relX + nx * centerOffset;
-          const boxCenterY = relY + ny * centerOffset;
-
-          const rectX = boxCenterX - width / 2;
-          const rectY = boxCenterY - height / 2;
-
-          // rect
-          gbox.select('rect.guest-rect')
-            .attr('x', rectX)
-            .attr('y', rectY)
-            .attr('width', width)
-            .attr('height', height)
-            .attr('fill', '#ffffff');
-
-          // line1 (centered)
-          gbox.select('text.guest-name')
-            .attr('x', boxCenterX)
-            .attr('y', rectY + paddingY + lineHeight / 2)
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .text(line1);
-
-          // line2 (centered)
-          gbox.select('text.guest-meta')
-            .attr('x', boxCenterX)
-            .attr('y', rectY + paddingY + lineHeight + lineHeight / 2)
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .text(line2);
+        boxData.push({
+          s,
+          guest,
+          nx, ny,
+          width, height,
+          x: relX + nx * dist,
+          y: relY + ny * dist
         });
+      });
+
+      // --- Localized overlap relaxation ---
+      function relaxOverlaps(boxes: any[], shape: 'round' | 'rectangle') {
+        const iterations = 50;
+        const padding = 6;
+        let changed = true;
+        let iter = 0;
+
+        while (changed && iter < iterations) {
+          changed = false;
+          iter++;
+          for (let i = 0; i < boxes.length; i++) {
+            for (let j = i + 1; j < boxes.length; j++) {
+              const a = boxes[i];
+              const b = boxes[j];
+
+              // Detect overlap
+              if (
+                a.x < b.x + b.width + padding &&
+                a.x + a.width + padding > b.x &&
+                a.y < b.y + b.height + padding &&
+                a.y + a.height + padding > b.y
+              ) {
+                changed = true;
+
+                const dx = (a.x + a.width / 2) - (b.x + b.width / 2);
+                const dy = (a.y + a.height / 2) - (b.y + b.height / 2);
+
+                // overlap magnitude
+                const overlapX = Math.max(0, (a.width + padding) - Math.abs(dx));
+                const overlapY = Math.max(0, (a.height + padding) - Math.abs(dy));
+                const moveMultiplier = 2.5; // 1 = half, 2 = full overlap, >2 = overshoot
+
+                if (shape === 'rectangle') {
+                  // move along predominant axis
+                  if (Math.abs(dx) > Math.abs(dy)) {
+                    const move = overlapX / 2 * moveMultiplier;
+                    a.x += Math.sign(dx) * move;
+                    b.x -= Math.sign(dx) * move;
+                  } else {
+                    const move = overlapY / 2 * moveMultiplier;
+                    a.y += Math.sign(dy) * move;
+                    b.y -= Math.sign(dy) * move;
+                  }
+                } else {
+                  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                  const moveX = (dx / dist) * Math.max(overlapX, overlapY) / 2 * moveMultiplier;
+                  const moveY = (dy / dist) * Math.max(overlapX, overlapY) / 2 * moveMultiplier;
+                  a.x += moveX;
+                  a.y += moveY;
+                  b.x -= moveX;
+                  b.y -= moveY;
+                }
+
+                // Small random jitter to help dense clusters
+                const jitter = 2;
+                a.x += (Math.random() - 0.5) * jitter;
+                a.y += (Math.random() - 0.5) * jitter;
+                b.x += (Math.random() - 0.5) * jitter;
+                b.y += (Math.random() - 0.5) * jitter;
+              }
+            }
+          }
+        }
+      }
+
+      // Run overlap relaxation
+      relaxOverlaps(boxData, tableDatum.shape);
+
+      // --- Render guest boxes using relaxed positions ---
+      boxData.forEach((b) => {
+        const { guest, s, width, height } = b;
+        const rectX = b.x - width / 2;
+        const rectY = b.y - height / 2;
+        const isHost = !!guest.fromHost;
+        const hostFill = '#e3f2fd', hostStroke = '#1976d2';
+        const externalFill = '#e8f5e9', externalStroke = '#2e7d32';
+
+        const gbox = group.selectAll<SVGGElement, any>('g.guest-box').filter((d) => d.id === s.id);
+
+        gbox.select('rect.guest-rect')
+          .attr('x', rectX)
+          .attr('y', rectY)
+          .attr('width', width)
+          .attr('height', height)
+          .attr('fill', isHost ? hostFill : externalFill)
+          .attr('stroke', isHost ? hostStroke : externalStroke);
+
+        const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+        const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+        const paddingY = 6, lineHeight = 14;
+
+        gbox.select('text.guest-name')
+          .attr('x', b.x)
+          .attr('y', rectY + paddingY + lineHeight / 2)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .text(line1);
+
+        gbox.select('text.guest-meta')
+          .attr('x', b.x)
+          .attr('y', rectY + paddingY + lineHeight + lineHeight / 2)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .text(line2);
+
+        // Crown (kept same)
+        const crownColor = getCrownColor(guest.ranking);
+        const crown = gbox.select('path.guest-crown');
+        if (crownColor) {
+          const crownW = Math.min(34, width * 0.28);
+          const crownH = Math.min(18, height * 0.28);
+          const left = rectX + 6;
+          const right = left + crownW;
+          const baseY = rectY + 6 + crownH;
+          const p1x = left + crownW * 0.18, p2x = left + crownW * 0.5, p3x = left + crownW * 0.82;
+          const p1y = baseY - crownH * 0.6, p2y = baseY - crownH * 0.95, p3y = baseY - crownH * 0.6;
+          const v1x = left + crownW * 0.33, v1y = baseY - crownH * 0.25;
+          const v2x = left + crownW * 0.67, v2y = baseY - crownH * 0.25;
+
+          const d = [
+            `M ${left} ${baseY}`,
+            `L ${left} ${baseY - crownH * 0.18}`,
+            `L ${p1x - 2} ${baseY - crownH * 0.30}`,
+            `L ${p1x} ${p1y}`,
+            `L ${v1x} ${v1y}`,
+            `L ${p2x} ${p2y}`,
+            `L ${v2x} ${v2y}`,
+            `L ${p3x} ${p3y}`,
+            `L ${right - 2} ${baseY - crownH * 0.30}`,
+            `L ${right} ${baseY - crownH * 0.18}`,
+            `L ${right} ${baseY}`,
+            `Z`
+          ].join(' ');
+          crown.attr('d', d).attr('fill', crownColor).attr('stroke', '#8b5a00').attr('stroke-width', 0.7);
+        } else {
+          crown.attr('visibility', 'hidden');
+        }
+
+        // Update connector lines to follow final box positions
+        group.selectAll<SVGLineElement, any>('line.connector-line')
+          .filter((d) => d.id === s.id)
+          .attr('x2', b.x)
+          .attr('y2', b.y);
+      });
+
     });
 
 
@@ -480,6 +615,8 @@ export default function PlaygroundCanvas() {
     // keep guest dependencies so boxes update when guests change
     hostGuests,
     externalGuests,
+    // RE-RENDER when connectorGap changes
+    connectorGap,
   ]);
 
   /** ---------- ZOOM CONTROLS ---------- */
@@ -594,6 +731,22 @@ export default function PlaygroundCanvas() {
             </Fab>
           </Tooltip>
         </Stack>
+
+        {/* ---------- NEW: Connector distance slider ---------- */}
+        <Box sx={{ width: 220, px: 1 }}>
+          <Typography variant="caption" display="block" textAlign="center">
+            Connector gap: {Math.round(connectorGap)}px
+          </Typography>
+          <Slider
+            value={connectorGap}
+            min={0}
+            max={120}
+            step={1}
+            onChange={(_, v) => setConnectorGap(Array.isArray(v) ? v[0] : v)}
+            size="small"
+            aria-label="Connector gap"
+          />
+        </Box>
       </Stack>
 
       {/* Add Table Modal */}
