@@ -8,4 +8,8 @@ export interface Seat {
   assignedGuestId?: string | null;
   locked?: boolean;
   selected?: boolean;
+
+    // NEW: independent guest box position
+  textX?: number;
+  textY?: number;
 }
