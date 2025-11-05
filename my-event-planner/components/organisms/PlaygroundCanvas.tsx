@@ -86,90 +86,6 @@ export default function PlaygroundCanvas() {
     return '';
   }
 
-  //attempted at making a function that will run on button click to arrange the textbox as compact as possible but failed, moving on first
-  const autoArrangeGuestBoxes = (table: Table) => {
-    const seats = table.seats || [];
-    const seatR = 12; // default seat radius if needed
-    const initialDist = 50; // fixed distance from table edge
-
-    // Prepare box data with radial angle
-    const boxes: {
-      seat: Seat;
-      width: number;
-      height: number;
-      angle: number;
-      textX: number;
-      textY: number;
-    }[] = [];
-
-    seats.forEach((s, i) => {
-      if (!s.assignedGuestId) return;
-      const guest = guestLookup[s.assignedGuestId];
-      if (!guest) return;
-
-      const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
-      const stars = getRankStars(guest.ranking);
-      const line1 = `${name}${stars}`;
-      const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-      const estTextWidth = Math.max(line1.length, line2.length) * 7;
-      const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-      const height = 14 * 2 + 12;
-
-      // Compute initial angle around table
-      const angle = (i / seats.length) * 2 * Math.PI;
-
-      // Initial position along the ring
-      const textX = table.x + Math.cos(angle) * (table.radius + initialDist);
-      const textY = table.y + Math.sin(angle) * (table.radius + initialDist);
-
-      boxes.push({ seat: s, width, height, angle, textX, textY });
-    });
-
-    // --- Tangential relaxation to prevent overlap ---
-    const maxIter = 200;
-    const stepAngle = 0.02; // ~1 degree in radians
-    const padding = 6;
-
-    for (let iter = 0; iter < maxIter; iter++) {
-      let moved = false;
-      for (let i = 0; i < boxes.length; i++) {
-        const a = boxes[i];
-        const aRect = boxRectFromCenter({ x: a.textX, y: a.textY, width: a.width, height: a.height });
-
-        for (let j = i + 1; j < boxes.length; j++) {
-          const b = boxes[j];
-          const bRect = boxRectFromCenter({ x: b.textX, y: b.textY, width: b.width, height: b.height });
-
-          if (rectsOverlap(aRect, bRect, padding)) {
-            // Move both boxes tangentially along the ring
-            a.angle += stepAngle;
-            b.angle -= stepAngle;
-            a.textX = table.x + Math.cos(a.angle) * (table.radius + initialDist);
-            a.textY = table.y + Math.sin(a.angle) * (table.radius + initialDist);
-            b.textX = table.x + Math.cos(b.angle) * (table.radius + initialDist);
-            b.textY = table.y + Math.sin(b.angle) * (table.radius + initialDist);
-            moved = true;
-          }
-        }
-      }
-      if (!moved) break;
-    }
-
-    // --- Save positions to store ---
-    const newSeats = seats.map((s) => {
-      const b = boxes.find((bx) => bx.seat.id === s.id);
-      if (!b) return s;
-      return { ...s, textX: b.textX, textY: b.textY };
-    });
-
-    useSeatStore.getState().updateTable(table.id, { seats: newSeats });
-  };
-
-
-
-
-
-
   /** ---------- SVG + Zoom ---------- */
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -490,15 +406,6 @@ export default function PlaygroundCanvas() {
           <Tooltip title="Zoom In">
             <Fab size="small" onClick={() => zoomByFactor(1.25)}><ZoomInIcon fontSize="small" /></Fab>
           </Tooltip>
-{/* 
-          <Tooltip title="Auto-Arrange Textboxes">
-            <Fab size="small" onClick={() => {
-              tables.forEach((table) => autoArrangeGuestBoxes(table));
-            }}>
-              ARRANGE
-            </Fab>
-          </Tooltip> */}
-
         </Stack>
 
         <Box sx={{ width: 120, mt: 2 }}>
