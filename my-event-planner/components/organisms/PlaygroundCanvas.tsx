@@ -86,6 +86,7 @@ export default function PlaygroundCanvas() {
     return '';
   }
 
+  //attempted at making a function that will run on button click to arrange the textbox as compact as possible but failed, moving on first
   const autoArrangeGuestBoxes = (table: Table) => {
     const seats = table.seats || [];
     const seatR = 12; // default seat radius if needed
@@ -489,14 +490,14 @@ export default function PlaygroundCanvas() {
           <Tooltip title="Zoom In">
             <Fab size="small" onClick={() => zoomByFactor(1.25)}><ZoomInIcon fontSize="small" /></Fab>
           </Tooltip>
-
+{/* 
           <Tooltip title="Auto-Arrange Textboxes">
             <Fab size="small" onClick={() => {
               tables.forEach((table) => autoArrangeGuestBoxes(table));
             }}>
               ARRANGE
             </Fab>
-          </Tooltip>
+          </Tooltip> */}
 
         </Stack>
 
