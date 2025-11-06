@@ -2,10 +2,6 @@
 import { useSeatStore } from "@/store/seatStore";
 import { useGuestStore } from "@/store/guestStore";
 
-/**
- * SortField supports a user-facing 'organization' but guestStore uses 'company'.
- * We don't redefine guest types here — we operate on the guest objects returned by guestStore.
- */
 export type SortField = "name" | "country" | "organization" | "ranking";
 export type SortDirection = "asc" | "desc";
 
@@ -14,10 +10,29 @@ export interface SortRule {
   direction: SortDirection;
 }
 
+// --- Table Rules ---
+export interface RatioRule {
+  enabled: boolean;
+  hostRatio: number;    // e.g., 20
+  externalRatio: number; // e.g., 80
+}
+
+export interface SpacingRule {
+  enabled: boolean;
+  spacing: number; // e.g., 1 = host, external, host, external...
+  startWithExternal: boolean; // NEW: option to start with external instead of host
+}
+
+export interface TableRules {
+  ratioRule: RatioRule;
+  spacingRule: SpacingRule;
+}
+
 export interface AutoFillOptions {
   includeHost?: boolean;
   includeExternal?: boolean;
-  sortRules?: SortRule[]; // ordered: first rule is highest priority
+  sortRules?: SortRule[];
+  tableRules?: TableRules;
 }
 
 /** Helper: read nested field values and map organization->company */
@@ -27,7 +42,7 @@ function getGuestFieldValue(guest: any, field: SortField): string | number | und
   return (guest as any)[field];
 }
 
-/** Build comparator from ordered sort rules. ranking is numeric, others string (case-insensitive). */
+/** Build comparator from ordered sort rules */
 function makeComparator(rules: SortRule[]) {
   return (a: any, b: any) => {
     for (const r of rules) {
@@ -35,11 +50,9 @@ function makeComparator(rules: SortRule[]) {
       let av = getGuestFieldValue(a, field);
       let bv = getGuestFieldValue(b, field);
 
-      // Normalize undefined/null
       if (av === undefined || av === null) av = "";
       if (bv === undefined || bv === null) bv = "";
 
-      // numeric compare for ranking
       if (field === "ranking") {
         const na = Number(av) || 0;
         const nb = Number(bv) || 0;
@@ -48,32 +61,63 @@ function makeComparator(rules: SortRule[]) {
         continue;
       }
 
-      // string compare case-insensitive
       const sa = String(av).toLowerCase();
       const sb = String(bv).toLowerCase();
       if (sa < sb) return direction === "asc" ? -1 : 1;
       if (sa > sb) return direction === "asc" ? 1 : -1;
     }
 
-    // final deterministic tie-breaker
     const ida = String((a && a.id) || "");
     const idb = String((b && b.id) || "");
     return ida.localeCompare(idb);
   };
 }
 
+/** 
+ * Calculate target counts for host and external guests per table based on ratio rule
+ */
+function calculateRatioCounts(
+  totalSeats: number,
+  hostRatio: number,
+  externalRatio: number
+): { hostTarget: number; externalTarget: number } {
+  const totalRatio = hostRatio + externalRatio;
+  if (totalRatio === 0) {
+    return { hostTarget: 0, externalTarget: 0 };
+  }
+  
+  const hostTarget = Math.round((totalSeats * hostRatio) / totalRatio);
+  const externalTarget = totalSeats - hostTarget;
+  
+  return { hostTarget, externalTarget };
+}
+
 /**
- * Autofill seats according to requested options.
- * - Clears only unlocked seats (via clearSeat).
- * - Respects locked seats.
- * - Uses a single combined sorted guest list (so ranking/sortRules are global).
- * - Assigns guests sequentially in seat priority: tableOrder asc, seatOrder asc (table 1 seat 1 first).
+ * Helper to find next available guest from a candidate list
+ */
+function findNextAvailableGuest(
+  candidates: any[],
+  startIndex: number,
+  assignedSet: Set<string>
+): any | null {
+  for (let i = startIndex; i < candidates.length; i++) {
+    if (!assignedSet.has(candidates[i].id)) {
+      return candidates[i];
+    }
+  }
+  return null;
+}
+
+/**
+ * Autofill seats with COMBINED table rules support
+ * Both Ratio and Spacing rules can work together
  */
 export async function autoFillSeats(options: AutoFillOptions = {}) {
   const {
     includeHost = true,
     includeExternal = true,
     sortRules = [{ field: "ranking", direction: "asc" }],
+    tableRules,
   } = options;
 
   const seatStore = useSeatStore.getState();
@@ -84,11 +128,11 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     return;
   }
 
-  // --- Collect candidates from guestStore (exclude deleted) ---
+  // --- Collect candidates from guestStore ---
   const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
   const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
 
-  // --- Identify guests locked into seats (they must not be reassigned) ---
+  // --- Identify guests locked into seats ---
   const lockedAssignedIds = new Set<string>();
   seatStore.tables.forEach((t) =>
     (t.seats ?? []).forEach((s: any) => {
@@ -96,75 +140,29 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     })
   );
 
-  // --- Filter out guests already locked into seats ---
+  // --- Filter out locked guests ---
   const hostCandidates = hostPool.filter((g: any) => !lockedAssignedIds.has(g.id));
   const externalCandidates = externalPool.filter((g: any) => !lockedAssignedIds.has(g.id));
 
-  // --- Combine candidates into a single list, sort by comparator (global rules) ---
+  // --- Sort candidates separately (maintaining host/external distinction) ---
   const comparator = makeComparator(sortRules);
-  const combinedCandidates = [...hostCandidates, ...externalCandidates].sort(comparator);
+  const sortedHostCandidates = [...hostCandidates].sort(comparator);
+  const sortedExternalCandidates = [...externalCandidates].sort(comparator);
 
-  // --- Build current seatEntries (tableOrder, seatOrder) from the store (use tableNumber, seatNumber when present) ---
-  const currentTablesSnapshot = useSeatStore.getState().tables; // read fresh snapshot
-  type SeatEntry = {
-    tableId: string;
-    seatId: string;
-    locked: boolean;
-    tableOrder: number;
-    seatOrder: number;
-  };
-
-  const tablesWithOrder = currentTablesSnapshot.map((t: any, idx: number) => {
-    let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
-    if (tableOrder === undefined) {
-      const parsed = parseInt(t.id, 10);
-      tableOrder = !isNaN(parsed) ? parsed : idx;
-    }
-    return { table: t, tableOrder };
-  });
-
-  tablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
-
-  let seatEntries: SeatEntry[] = [];
-  tablesWithOrder.forEach(({ table, tableOrder }) => {
-    (table.seats ?? []).forEach((s: any, sidx: number) => {
-      let seatOrder = typeof s.seatNumber === "number" ? s.seatNumber : undefined;
-      if (seatOrder === undefined) {
-        const parsed = parseInt(s.id, 10);
-        seatOrder = !isNaN(parsed) ? parsed : sidx + 1;
+  // --- Clear unlocked seats ---
+  const currentTablesSnapshot = useSeatStore.getState().tables;
+  
+  for (const table of currentTablesSnapshot) {
+    for (const seat of table.seats ?? []) {
+      if (!seat.locked && seat.assignedGuestId) {
+        seatStore.clearSeat(table.id, seat.id);
       }
-      seatEntries.push({
-        tableId: table.id,
-        seatId: s.id,
-        locked: !!s.locked,
-        tableOrder,
-        seatOrder,
-      });
-    });
-  });
-
-  seatEntries.sort((a, b) => {
-    if (a.tableOrder !== b.tableOrder) return a.tableOrder - b.tableOrder;
-    return a.seatOrder - b.seatOrder;
-  });
-
-  // --- Clear unlocked seats (only) using existing clearSeat(tableId, seatId) ---
-  // Use the up-to-date snapshot when checking assignedGuestId, so read fresh tables each time.
-  for (const entry of seatEntries) {
-    if (entry.locked) continue;
-    const latestTables = useSeatStore.getState().tables;
-    const t = latestTables.find((x) => x.id === entry.tableId);
-    if (!t) continue;
-    const s = (t.seats ?? []).find((x: any) => x.id === entry.seatId);
-    if (!s) continue;
-    if (s.assignedGuestId) {
-      seatStore.clearSeat(entry.tableId, entry.seatId);
     }
   }
 
-  // --- After clearing, rebuild seatEntries from up-to-date state so we don't use stale assignment info ---
+  // --- Build table structure with priority ordering ---
   const freshTables = useSeatStore.getState().tables;
-  const freshTablesWithOrder = freshTables.map((t: any, idx: number) => {
+  const tablesWithOrder = freshTables.map((t: any, idx: number) => {
     let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
     if (tableOrder === undefined) {
       const parsed = parseInt(t.id, 10);
@@ -172,55 +170,315 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     }
     return { table: t, tableOrder };
   });
-  freshTablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
+  
+  tablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
 
-  seatEntries = [];
-  freshTablesWithOrder.forEach(({ table, tableOrder }) => {
-    (table.seats ?? []).forEach((s: any, sidx: number) => {
+  // --- Track assigned guests globally ---
+  const globalAssignedSet = new Set<string>();
+  lockedAssignedIds.forEach((id) => globalAssignedSet.add(id));
+
+  // --- Assign guests table by table ---
+  let globalHostIndex = 0;
+  let globalExternalIndex = 0;
+
+  for (const { table } of tablesWithOrder) {
+    type SeatWithOrder = {
+      id: string;
+      locked?: boolean;
+      assignedGuestId?: string | null;
+      seatOrder: number;
+      [key: string]: any;
+    };
+
+    const seats: SeatWithOrder[] = (table.seats ?? []).map((s: any, sidx: number) => {
       let seatOrder = typeof s.seatNumber === "number" ? s.seatNumber : undefined;
       if (seatOrder === undefined) {
         const parsed = parseInt(s.id, 10);
         seatOrder = !isNaN(parsed) ? parsed : sidx + 1;
       }
-      seatEntries.push({
-        tableId: table.id,
-        seatId: s.id,
-        locked: !!s.locked,
-        tableOrder,
-        seatOrder,
-      });
+      return { ...s, seatOrder };
     });
-  });
-  seatEntries.sort((a, b) => {
-    if (a.tableOrder !== b.tableOrder) return a.tableOrder - b.tableOrder;
-    return a.seatOrder - b.seatOrder;
-  });
+    
+    // Sort seats within this table
+    seats.sort((a: SeatWithOrder, b: SeatWithOrder) => a.seatOrder - b.seatOrder);
+    
+    // Get unlocked seats for this table
+    const unlockedSeats = seats.filter((s: SeatWithOrder) => !s.locked);
+    const totalSeatsInTable = unlockedSeats.length;
+    
+    if (totalSeatsInTable === 0) continue;
 
-  // --- Assignment: iterate seats in priority and assign from combinedCandidates sequentially.
-  // Ensure we don't reassign lockedAssignedIds (already excluded from candidates) and avoid duplicates via assignedSet.
-  const assignedSet = new Set<string>();
-  lockedAssignedIds.forEach((id) => assignedSet.add(id));
+    // --- Determine which rules are active ---
+    const useRatioRule = tableRules?.ratioRule?.enabled;
+    const useSpacingRule = tableRules?.spacingRule?.enabled;
 
-  let ci = 0; // candidate index
-  for (const entry of seatEntries) {
-    if (entry.locked) continue;
-    // latest seat state check (defensive)
-    const latestTables2 = useSeatStore.getState().tables;
-    const tNow = latestTables2.find((x) => x.id === entry.tableId);
-    if (!tNow) continue;
-    const sNow = (tNow.seats ?? []).find((x: any) => x.id === entry.seatId);
-    if (!sNow) continue;
-    if (sNow.assignedGuestId) continue; // skip if some other process assigned it
+    // --- COMBINED RULES MODE: Both Ratio and Spacing ---
+    if (useRatioRule && useSpacingRule) {
+      const { hostRatio, externalRatio } = tableRules!.ratioRule;
+      const { spacing, startWithExternal } = tableRules!.spacingRule;
+      
+      // Calculate targets from ratio rule
+      const { hostTarget, externalTarget } = calculateRatioCounts(
+        totalSeatsInTable,
+        hostRatio,
+        externalRatio
+      );
 
-    // find next available candidate not already assigned
-    while (ci < combinedCandidates.length && assignedSet.has(combinedCandidates[ci].id)) {
-      ci++;
+      let hostAssigned = 0;
+      let externalAssigned = 0;
+      let nextIsHost = !startWithExternal; // Start based on config
+      let consecutiveCounter = 0; // Count consecutive guests of current type
+
+      for (const seat of unlockedSeats) {
+        let guestToAssign: any = null;
+        
+        // Check if we've exceeded ratio targets
+        const hostLimitReached = hostAssigned >= hostTarget;
+        const externalLimitReached = externalAssigned >= externalTarget;
+
+        // Determine what type of guest to assign next
+        if (nextIsHost) {
+          // Try to assign host
+          if (!hostLimitReached) {
+            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalHostIndex++;
+              hostAssigned++;
+              consecutiveCounter = 0; // Reset counter
+              nextIsHost = false; // Switch to external for next spacing guests
+            } else {
+              // No host available, try external
+              if (!externalLimitReached) {
+                guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+                if (guestToAssign) {
+                  globalExternalIndex++;
+                  externalAssigned++;
+                  consecutiveCounter++;
+                }
+              }
+            }
+          } else {
+            // Host limit reached, must use external
+            if (!externalLimitReached) {
+              guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+              if (guestToAssign) {
+                globalExternalIndex++;
+                externalAssigned++;
+                consecutiveCounter++;
+              }
+            }
+          }
+        } else {
+          // Try to assign external
+          if (!externalLimitReached) {
+            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalExternalIndex++;
+              externalAssigned++;
+              consecutiveCounter++;
+              
+              // Check if we've assigned 'spacing' number of external guests
+              if (consecutiveCounter >= spacing) {
+                nextIsHost = true; // Switch back to host
+                consecutiveCounter = 0;
+              }
+            } else {
+              // No external available, try host
+              if (!hostLimitReached) {
+                guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+                if (guestToAssign) {
+                  globalHostIndex++;
+                  hostAssigned++;
+                  nextIsHost = false;
+                  consecutiveCounter = 0;
+                }
+              }
+            }
+          } else {
+            // External limit reached, must use host
+            if (!hostLimitReached) {
+              guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+              if (guestToAssign) {
+                globalHostIndex++;
+                hostAssigned++;
+                nextIsHost = false;
+                consecutiveCounter = 0;
+              }
+            }
+          }
+        }
+
+        if (guestToAssign) {
+          globalAssignedSet.add(guestToAssign.id);
+          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
+        }
+      }
+
+    } else if (useSpacingRule) {
+      // --- SPACING RULE ONLY ---
+      const { spacing, startWithExternal } = tableRules!.spacingRule;
+      
+      let hostAssigned = 0;
+      let externalAssigned = 0;
+      let nextIsHost = !startWithExternal;
+      let consecutiveCounter = 0;
+
+      for (const seat of unlockedSeats) {
+        let guestToAssign: any = null;
+
+        if (nextIsHost) {
+          // Try to assign a host guest
+          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalHostIndex++;
+            hostAssigned++;
+            consecutiveCounter = 0;
+            nextIsHost = false;
+          } else {
+            // No more host guests, fall back to external
+            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalExternalIndex++;
+              externalAssigned++;
+              consecutiveCounter++;
+            }
+          }
+        } else {
+          // Assign external guest
+          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalExternalIndex++;
+            externalAssigned++;
+            consecutiveCounter++;
+            
+            // Check if we've assigned 'spacing' number of guests
+            if (consecutiveCounter >= spacing) {
+              nextIsHost = true;
+              consecutiveCounter = 0;
+            }
+          } else {
+            // No more external guests, fall back to host
+            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalHostIndex++;
+              hostAssigned++;
+              nextIsHost = false;
+              consecutiveCounter = 0;
+            }
+          }
+        }
+
+        if (guestToAssign) {
+          globalAssignedSet.add(guestToAssign.id);
+          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
+        }
+      }
+
+    } else if (useRatioRule) {
+      // --- RATIO RULE ONLY ---
+      const { hostRatio, externalRatio } = tableRules!.ratioRule;
+      const { hostTarget, externalTarget } = calculateRatioCounts(
+        totalSeatsInTable,
+        hostRatio,
+        externalRatio
+      );
+
+      let hostAssigned = 0;
+      let externalAssigned = 0;
+
+      for (const seat of unlockedSeats) {
+        let guestToAssign: any = null;
+        
+        const needsMoreHost = hostAssigned < hostTarget;
+        const needsMoreExternal = externalAssigned < externalTarget;
+        
+        if (needsMoreHost && !needsMoreExternal) {
+          // Only need host
+          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalHostIndex++;
+            hostAssigned++;
+          }
+        } else if (needsMoreExternal && !needsMoreHost) {
+          // Only need external
+          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalExternalIndex++;
+            externalAssigned++;
+          }
+        } else if (needsMoreHost && needsMoreExternal) {
+          // Need both - decide based on how far behind we are on ratio
+          const hostRatioCurrent = totalSeatsInTable > 0 ? hostAssigned / totalSeatsInTable : 0;
+          const targetHostRatio = (hostRatio + externalRatio) > 0 ? hostRatio / (hostRatio + externalRatio) : 0.5;
+          
+          if (hostRatioCurrent < targetHostRatio) {
+            // Try host first
+            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalHostIndex++;
+              hostAssigned++;
+            } else {
+              // Fall back to external
+              guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+              if (guestToAssign) {
+                globalExternalIndex++;
+                externalAssigned++;
+              }
+            }
+          } else {
+            // Try external first
+            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalExternalIndex++;
+              externalAssigned++;
+            } else {
+              // Fall back to host
+              guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+              if (guestToAssign) {
+                globalHostIndex++;
+                hostAssigned++;
+              }
+            }
+          }
+        } else {
+          // Both targets met, fill with whatever is available
+          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalHostIndex++;
+            hostAssigned++;
+          } else {
+            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+            if (guestToAssign) {
+              globalExternalIndex++;
+              externalAssigned++;
+            }
+          }
+        }
+
+        if (guestToAssign) {
+          globalAssignedSet.add(guestToAssign.id);
+          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
+        }
+      }
+    } else {
+      // --- NO TABLE RULES: Sequential assignment ---
+      for (const seat of unlockedSeats) {
+        // Try host first, then external
+        let guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+        if (guestToAssign) {
+          globalHostIndex++;
+        } else {
+          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+          if (guestToAssign) {
+            globalExternalIndex++;
+          }
+        }
+
+        if (guestToAssign) {
+          globalAssignedSet.add(guestToAssign.id);
+          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
+        }
+      }
     }
-    if (ci >= combinedCandidates.length) break;
-
-    const guest = combinedCandidates[ci];
-    assignedSet.add(guest.id);
-    seatStore.assignGuestToSeat(entry.tableId, entry.seatId, guest.id);
-    ci++;
   }
 }
