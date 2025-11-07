@@ -21,6 +21,7 @@ import {
   Warning,
   CheckCircle,
   Error,
+  Close,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
@@ -159,7 +160,7 @@ export default function SeatingStatsPanel() {
         position: 'absolute',
         top: 24,
         right: 24,
-        zIndex: 1000,
+        zIndex: 1100, // Increased from 1000 to ensure it's above other FABs
       }}
     >
       {!expanded ? (
@@ -203,7 +204,7 @@ export default function SeatingStatsPanel() {
             }}
           >
             <Stack direction="row" spacing={1} alignItems="center">
-              {showVIPDetails && (
+              {/* {showVIPDetails && (
                 <IconButton
                   size="small"
                   onClick={() => setShowVIPDetails(false)}
@@ -211,7 +212,7 @@ export default function SeatingStatsPanel() {
                 >
                   <ArrowBack fontSize="small" />
                 </IconButton>
-              )}
+              )} */}
               {getStatusIcon()}
               <Typography variant="h6" fontWeight="bold">
                 {showVIPDetails ? 'Unseated VIPs' : 'Seating Statistics'}
@@ -222,7 +223,7 @@ export default function SeatingStatsPanel() {
               onClick={handleToggle}
               sx={{ color: 'white' }}
             >
-              <ArrowBack fontSize="small" />
+              <Close fontSize="small" />
             </IconButton>
           </Box>
 
