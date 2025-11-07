@@ -1,3 +1,4 @@
+// types/Seat.ts - UPDATED
 export interface Seat {
   id: string;
   x: number;
@@ -9,7 +10,11 @@ export interface Seat {
   locked?: boolean;
   selected?: boolean;
 
-    // NEW: independent guest box position
+  // Guest box position
   textX?: number;
   textY?: number;
+
+  // NEW: Physical adjacency tracking
+  adjacentSeats?: string[]; // Array of seat IDs that are physically next to this seat
+  position?: number; // Physical position index (0-based, clockwise from top)
 }

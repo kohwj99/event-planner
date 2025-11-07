@@ -451,20 +451,82 @@ export default function PlaygroundCanvas() {
   /** ---------- Add Table ---------- */
   const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
   const handleAddTableClick = () => setIsAddTableModalOpen(true);
+  // const handleAddTable = (config: TableConfig) => {
+  //   const svgEl = svgRef.current; if (!svgEl) return; const rect = svgEl.getBoundingClientRect(); const centerX = rect.width / 2; const centerY = rect.height / 2;
+  //   const t = d3.zoomTransform(svgEl);
+  //   const worldX = Math.max(0, (centerX - t.x) / t.k); const worldY = Math.max(0, (centerY - t.y) / t.k);
+  //   for (let i = 0; i < config.quantity; i++) {
+  //     const id = `t${Date.now()}-${i}`;
+  //     const label = config.label ? `${config.label} ${tables.length + i + 1}` : `Table ${tables.length + i + 1}`;
+  //     const offsetX = (i % 3) * 200; const offsetY = Math.floor(i / 3) * 200;
+  //     const x = worldX + offsetX; const y = worldY + offsetY;
+  //     let table;
+  //     if (config.type === 'round') { table = createRoundTable(id, x, y, 60, config.roundSeats || 8, label); }
+  //     else { const { top, bottom, left, right } = config.rectangleSeats || { top: 2, bottom: 2, left: 1, right: 1 }; table = createRectangleTable(id, x, y, top, bottom, left, right, label); }
+  //     addTable(table);
+  //     const row = Math.floor(y / CHUNK_HEIGHT); const col = Math.floor(x / CHUNK_WIDTH); ensureChunkExists(row, col); assignTableToChunk(id, row, col);
+  //   }
+  //   expandWorldIfNeeded();
+  // };
+
+  // In PlaygroundCanvas.tsx - Update the handleAddTable function
+
   const handleAddTable = (config: TableConfig) => {
-    const svgEl = svgRef.current; if (!svgEl) return; const rect = svgEl.getBoundingClientRect(); const centerX = rect.width / 2; const centerY = rect.height / 2;
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+
+    const rect = svgEl.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
     const t = d3.zoomTransform(svgEl);
-    const worldX = Math.max(0, (centerX - t.x) / t.k); const worldY = Math.max(0, (centerY - t.y) / t.k);
+    const worldX = Math.max(0, (centerX - t.x) / t.k);
+    const worldY = Math.max(0, (centerY - t.y) / t.k);
+
     for (let i = 0; i < config.quantity; i++) {
       const id = `t${Date.now()}-${i}`;
-      const label = config.label ? `${config.label} ${tables.length + i + 1}` : `Table ${tables.length + i + 1}`;
-      const offsetX = (i % 3) * 200; const offsetY = Math.floor(i / 3) * 200;
-      const x = worldX + offsetX; const y = worldY + offsetY;
+      const label = config.label
+        ? `${config.label} ${tables.length + i + 1}`
+        : `Table ${tables.length + i + 1}`;
+      const offsetX = (i % 3) * 200;
+      const offsetY = Math.floor(i / 3) * 200;
+      const x = worldX + offsetX;
+      const y = worldY + offsetY;
+
       let table;
-      if (config.type === 'round') { table = createRoundTable(id, x, y, 60, config.roundSeats || 8, label); }
-      else { const { top, bottom, left, right } = config.rectangleSeats || { top: 2, bottom: 2, left: 1, right: 1 }; table = createRectangleTable(id, x, y, top, bottom, left, right, label); }
+      if (config.type === 'round') {
+        // Pass custom seat ordering to round table
+        table = createRoundTable(
+          id,
+          x,
+          y,
+          60,
+          config.roundSeats || 8,
+          label,
+          config.seatOrdering // NEW: Pass custom ordering
+        );
+      } else {
+        // Pass custom seat ordering to rectangle table
+        const { top, bottom, left, right } = config.rectangleSeats || {
+          top: 2, bottom: 2, left: 1, right: 1
+        };
+        table = createRectangleTable(
+          id,
+          x,
+          y,
+          top,
+          bottom,
+          left,
+          right,
+          label,
+          config.seatOrdering // NEW: Pass custom ordering
+        );
+      }
+
       addTable(table);
-      const row = Math.floor(y / CHUNK_HEIGHT); const col = Math.floor(x / CHUNK_WIDTH); ensureChunkExists(row, col); assignTableToChunk(id, row, col);
+      const row = Math.floor(y / CHUNK_HEIGHT);
+      const col = Math.floor(x / CHUNK_WIDTH);
+      ensureChunkExists(row, col);
+      assignTableToChunk(id, row, col);
     }
     expandWorldIfNeeded();
   };
@@ -492,7 +554,7 @@ export default function PlaygroundCanvas() {
           <Tooltip title="Zoom In">
             <Fab size="small" onClick={() => zoomByFactor(1.25)}><ZoomInIcon fontSize="small" /></Fab>
           </Tooltip>
-{/* 
+          {/* 
           <Tooltip title="Auto-Arrange Textboxes">
             <Fab size="small" onClick={() => {
               tables.forEach((table) => autoArrangeGuestBoxes(table));
