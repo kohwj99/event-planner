@@ -461,17 +461,38 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
         }
       }
     } else {
-      // --- NO TABLE RULES: Sequential assignment ---
+      // --- NO TABLE RULES: Combined sorted assignment ---
+      // Merge both lists while maintaining their individual sort orders
+      // Pick the "next best" guest from either list based on the comparator
+      
       for (const seat of unlockedSeats) {
-        // Try host first, then external
-        let guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-        if (guestToAssign) {
-          globalHostIndex++;
-        } else {
-          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-          if (guestToAssign) {
+        let guestToAssign: any = null;
+        
+        // Get next available from each list
+        const nextHost = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
+        const nextExternal = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
+        
+        // Compare and pick the better one according to sort rules
+        if (nextHost && nextExternal) {
+          // Both available - use comparator to decide
+          const comparison = comparator(nextHost, nextExternal);
+          if (comparison <= 0) {
+            // Host comes first (or equal)
+            guestToAssign = nextHost;
+            globalHostIndex++;
+          } else {
+            // External comes first
+            guestToAssign = nextExternal;
             globalExternalIndex++;
           }
+        } else if (nextHost) {
+          // Only host available
+          guestToAssign = nextHost;
+          globalHostIndex++;
+        } else if (nextExternal) {
+          // Only external available
+          guestToAssign = nextExternal;
+          globalExternalIndex++;
         }
 
         if (guestToAssign) {
