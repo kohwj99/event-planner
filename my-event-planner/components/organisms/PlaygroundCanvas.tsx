@@ -23,6 +23,7 @@ import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
+import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
 
 export default function PlaygroundCanvas() {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -473,7 +474,8 @@ export default function PlaygroundCanvas() {
       <Paper elevation={0} sx={{ position: 'absolute', inset: 0, bgcolor: '#fafafa' }}>
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
-
+      {/* NEW: Add Statistics Panel - TOP RIGHT */}
+      <SeatingStatsPanel />
       <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
         <Tooltip title="Add Table">
           <Fab color="primary" size="medium" onClick={handleAddTableClick}><AddIcon /></Fab>
