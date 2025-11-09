@@ -1,4 +1,4 @@
-// components/molecules/AddTableModal.tsx - CLEAN IMPLEMENTATION
+// components/molecules/AddTableModal.tsx - ENHANCED IMPLEMENTATION
 import { useState, useMemo, useEffect } from 'react';
 import {
   Dialog,
@@ -21,6 +21,8 @@ import {
   Tab,
   ToggleButtonGroup,
   ToggleButton,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import { Refresh, RadioButtonUnchecked } from '@mui/icons-material';
 
@@ -44,39 +46,35 @@ interface AddTableModalProps {
   onConfirm: (config: TableConfig) => void;
 }
 
-type OrderingMode = 'clockwise' | 'counter-clockwise' | 'alternating';
+type Direction = 'clockwise' | 'counter-clockwise';
 
 /**
- * Generate seat ordering based on mode and start position
- * @param count - Total number of seats
- * @param mode - Ordering pattern
- * @param startPosition - Which physical position should be seat #1 (0-based index)
+ * Generate seat ordering based on direction, alternating mode, and start position
  */
-const generateOrdering = (count: number, mode: OrderingMode, startPosition: number): number[] => {
+const generateOrdering = (
+  count: number,
+  direction: Direction,
+  useAlternating: boolean,
+  startPosition: number
+): number[] => {
   const result: number[] = new Array(count);
   
-  if (mode === 'clockwise') {
-    // Clockwise: 1, 2, 3, 4, ...
-    // Starting from startPosition
-    for (let i = 0; i < count; i++) {
-      const position = (startPosition + i) % count;
-      result[position] = i + 1;
+  if (!useAlternating) {
+    // Simple directional ordering
+    if (direction === 'clockwise') {
+      for (let i = 0; i < count; i++) {
+        const position = (startPosition + i) % count;
+        result[position] = i + 1;
+      }
+    } else {
+      // counter-clockwise
+      for (let i = 0; i < count; i++) {
+        const position = (startPosition - i + count) % count;
+        result[position] = i + 1;
+      }
     }
-  } else if (mode === 'counter-clockwise') {
-    // Counter-clockwise: 1, then go backwards
-    // Starting from startPosition
-    for (let i = 0; i < count; i++) {
-      const position = (startPosition - i + count) % count;
-      result[position] = i + 1;
-    }
-  } else if (mode === 'alternating') {
-    // Alternating pattern centered on seat 1
-    // For 12 seats starting at position 0:
-    // Position 0 = Seat 1
-    // Then split remaining seats:
-    // - Odds (1,3,5,7,9,11) go counter-clockwise: positions before startPosition
-    // - Evens (2,4,6,8,10,12) go clockwise: positions after startPosition
-    
+  } else {
+    // Alternating pattern in specified direction
     result[startPosition] = 1; // Seat 1 at start position
     
     // Calculate how many odds and evens we have (excluding 1)
@@ -91,21 +89,50 @@ const generateOrdering = (count: number, mode: OrderingMode, startPosition: numb
       }
     }
     
-    // Place evens clockwise from startPosition
-    for (let i = 0; i < evens.length; i++) {
-      const position = (startPosition + 1 + i) % count;
-      result[position] = evens[i];
-    }
-    
-    // Place odds counter-clockwise from startPosition
-    for (let i = 0; i < odds.length; i++) {
-      const position = (startPosition - 1 - i + count) % count;
-      result[position] = odds[i];
+    if (direction === 'clockwise') {
+      // Evens go clockwise (forward)
+      for (let i = 0; i < evens.length; i++) {
+        const position = (startPosition + 1 + i) % count;
+        result[position] = evens[i];
+      }
+      
+      // Odds go counter-clockwise (backward)
+      for (let i = 0; i < odds.length; i++) {
+        const position = (startPosition - 1 - i + count) % count;
+        result[position] = odds[i];
+      }
+    } else {
+      // Counter-clockwise direction
+      // Evens go counter-clockwise (backward)
+      for (let i = 0; i < evens.length; i++) {
+        const position = (startPosition - 1 - i + count) % count;
+        result[position] = evens[i];
+      }
+      
+      // Odds go clockwise (forward)
+      for (let i = 0; i < odds.length; i++) {
+        const position = (startPosition + 1 + i) % count;
+        result[position] = odds[i];
+      }
     }
   }
   
   return result;
 };
+
+/**
+ * Generate a visual pattern example
+ */
+function generatePatternPreview(
+  count: number,
+  direction: Direction,
+  useAlternating: boolean
+): string {
+  const ordering = generateOrdering(count, direction, useAlternating, 0);
+  const maxShow = Math.min(12, count);
+  const preview = ordering.slice(0, maxShow).join(' → ');
+  return count > maxShow ? `${preview} ...` : preview;
+}
 
 export default function AddTableModal({ open, onClose, onConfirm }: AddTableModalProps) {
   const [activeTab, setActiveTab] = useState<'config' | 'ordering'>('config');
@@ -133,14 +160,15 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
     }
   }, [tableConfig]);
 
-  // Ordering configuration
-  const [orderingMode, setOrderingMode] = useState<OrderingMode>('clockwise');
-  const [startPosition, setStartPosition] = useState<number>(0); // 0-based position index
+  // Ordering configuration - ENHANCED
+  const [direction, setDirection] = useState<Direction>('clockwise');
+  const [useAlternating, setUseAlternating] = useState<boolean>(false);
+  const [startPosition, setStartPosition] = useState<number>(0);
 
-  // Seat ordering (calculated based on mode and start position)
+  // Seat ordering (calculated based on direction, alternating, and start position)
   const seatOrdering = useMemo(() => {
-    return generateOrdering(totalSeats, orderingMode, startPosition);
-  }, [totalSeats, orderingMode, startPosition]);
+    return generateOrdering(totalSeats, direction, useAlternating, startPosition);
+  }, [totalSeats, direction, useAlternating, startPosition]);
 
   // Reset when seats count changes
   useEffect(() => {
@@ -149,7 +177,8 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
 
   // Reset to defaults
   const handleResetOrdering = () => {
-    setOrderingMode('clockwise');
+    setDirection('clockwise');
+    setUseAlternating(false);
     setStartPosition(0);
   };
 
@@ -163,7 +192,8 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
     
     // Reset for next use
     setActiveTab('config');
-    setOrderingMode('clockwise');
+    setDirection('clockwise');
+    setUseAlternating(false);
     setStartPosition(0);
   };
 
@@ -227,7 +257,7 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
                   }))
                 }
                 inputProps={{ min: 1 }}
-                helperText="Seats arranged clockwise starting from top"
+                helperText="Seats arranged starting from top"
               />
             ) : (
               <Stack spacing={2}>
@@ -336,37 +366,61 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
             </Paper>
           </Stack>
         ) : (
-          // Seat Ordering Tab
+          // Seat Ordering Tab - ENHANCED
           <Stack spacing={3} sx={{ height: '100%' }}>
             {/* Ordering Controls */}
             <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd' }}>
-              <Stack spacing={2}>
+              <Stack spacing={2.5}>
+                {/* Direction Selection */}
                 <Box>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Ordering Pattern
+                  <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+                    Direction
                   </Typography>
                   <ToggleButtonGroup
-                    value={orderingMode}
+                    value={direction}
                     exclusive
-                    onChange={(_, value) => value && setOrderingMode(value)}
+                    onChange={(_, value) => value && setDirection(value)}
                     fullWidth
                   >
                     <ToggleButton value="clockwise">
-                      Clockwise
+                      Clockwise ↻
                     </ToggleButton>
                     <ToggleButton value="counter-clockwise">
-                      Counter-Clockwise
-                    </ToggleButton>
-                    <ToggleButton value="alternating">
-                      Alternating
+                      Counter-Clockwise ↺
                     </ToggleButton>
                   </ToggleButtonGroup>
                 </Box>
 
                 <Divider />
 
+                {/* Alternating Toggle */}
                 <Box>
-                  <Typography variant="subtitle2" gutterBottom>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={useAlternating}
+                        onChange={(e) => setUseAlternating(e.target.checked)}
+                        color="primary"
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          Use Alternating Pattern
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Seat #1 at start, then evens in {direction === 'clockwise' ? 'forward' : 'backward'} direction, odds in opposite
+                        </Typography>
+                      </Box>
+                    }
+                  />
+                </Box>
+
+                <Divider />
+
+                {/* Start Position */}
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom fontWeight={600}>
                     Seat #1 Position
                   </Typography>
                   <Typography variant="caption" color="text.secondary" display="block" mb={1}>
@@ -376,7 +430,25 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               </Stack>
             </Paper>
 
-            {/* Preview */}
+            {/* Pattern Preview Info */}
+            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#fff9c4' }}>
+              <Stack spacing={0.5}>
+                <Typography variant="caption" fontWeight={600} color="text.secondary">
+                  📊 Current Pattern:
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                  {generatePatternPreview(totalSeats, direction, useAlternating)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {useAlternating 
+                    ? `Alternating ${direction} (Seat 1 → Evens ${direction === 'clockwise' ? '→' : '←'} / Odds ${direction === 'clockwise' ? '←' : '→'})`
+                    : `Simple ${direction} (1, 2, 3, ...)`
+                  }
+                </Typography>
+              </Stack>
+            </Paper>
+
+            {/* Visual Preview */}
             <Box
               sx={{
                 flexGrow: 1,
@@ -407,10 +479,10 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               )}
             </Box>
 
-            {/* Info */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#fff9c4' }}>
+            {/* Full Sequence */}
+            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
               <Typography variant="caption" color="text.secondary">
-                💡 <strong>Pattern:</strong> {seatOrdering.join(', ')}
+                💡 <strong>Full Sequence:</strong> {seatOrdering.join(', ')}
               </Typography>
             </Paper>
           </Stack>
@@ -459,7 +531,6 @@ function RoundTablePreview({ seats, startPosition, onSelectStart }: RoundTablePr
           const x = center + Math.cos(angle) * (radius + seatRadius * 2.5);
           const y = center + Math.sin(angle) * (radius + seatRadius * 2.5);
           const isSeatOne = seatNumber === 1;
-          const isStartPosition = index === startPosition;
 
           return (
             <g key={index} onClick={() => onSelectStart(index)} style={{ cursor: 'pointer' }}>
