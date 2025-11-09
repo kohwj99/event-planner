@@ -294,40 +294,404 @@ export default function PlaygroundCanvas() {
     enter.append('text').attr('y', 5).attr('text-anchor', 'middle').attr('fill', 'white').attr('font-size', '14px').text((d) => d.label);
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    merged.each(function (tableDatum) {
-      const group = d3.select(this);
+    // In your PlaygroundCanvas.tsx, replace the entire guest box positioning section with this:
 
-      // CONNECTORS
-      const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
-      let connectorsLayer = group.select<SVGGElement>('g.connectors-layer');
-      if (connectorsLayer.empty()) connectorsLayer = group.insert('g', ':first-child').attr('class', 'connectors-layer') as any;
+    // ============================================================================
+    // OPTIMAL TEXTBOX LAYOUT ALGORITHM
+    // ============================================================================
+    // This creates a compact oval ring for round tables and proper alignment
+    // for rectangular tables with consistent distances.
 
-      const connectors = connectorsLayer.selectAll<SVGLineElement, Seat>('line.connector-line').data(seatsWithGuest, (s: any) => s.id);
-      connectors.exit().remove();
-      const connectorsEnter = connectors.enter().append('line').attr('class', 'connector-line').attr('stroke', '#90a4ae').attr('stroke-width', 1).attr('pointer-events', 'none');
-      connectorsEnter.merge(connectors as any).each(function (s: Seat) {
+    interface BoxData {
+      s: any; // Seat
+      guest: any;
+      nx: number; // Normal X direction
+      ny: number; // Normal Y direction
+      width: number;
+      height: number;
+      x: number; // Box center X (relative to table)
+      y: number; // Box center Y (relative to table)
+      relX: number; // Seat relative X
+      relY: number; // Seat relative Y
+      angle: number; // Angle from table center
+      seatAngle: number; // Original seat angle
+    }
+
+    /**
+     * Check if two axis-aligned rectangles overlap
+     */
+    function rectsOverlap(
+      a: { x: number; y: number; width: number; height: number },
+      b: { x: number; y: number; width: number; height: number },
+      padding: number = 6
+    ): boolean {
+      const a_left = a.x - a.width / 2 - padding;
+      const a_right = a.x + a.width / 2 + padding;
+      const a_top = a.y - a.height / 2 - padding;
+      const a_bottom = a.y + a.height / 2 + padding;
+
+      const b_left = b.x - b.width / 2 - padding;
+      const b_right = b.x + b.width / 2 + padding;
+      const b_top = b.y - b.height / 2 - padding;
+      const b_bottom = b.y + b.height / 2 + padding;
+
+      return !(a_right < b_left || a_left > b_right || a_bottom < b_top || a_top > b_bottom);
+    }
+
+    /**
+     * Calculate optimal positions for round tables
+     * Creates a compact oval ring around the table
+     */
+    function layoutRoundTable(
+      boxData: BoxData[],
+      tableRadius: number,
+      connectorGap: number
+    ): void {
+      if (boxData.length === 0) return;
+
+      // STEP 1: Sort boxes by angle
+      boxData.sort((a, b) => a.seatAngle - b.seatAngle);
+
+      // STEP 2: Calculate the oval ring parameters
+      // The ring should be wider horizontally than vertically for better readability
+      const avgBoxWidth = boxData.reduce((sum, b) => sum + b.width, 0) / boxData.length;
+      const avgBoxHeight = boxData.reduce((sum, b) => sum + b.height, 0) / boxData.length;
+
+      // Calculate required circumference to fit all boxes with spacing
+      const boxSpacing = 8; // Gap between adjacent boxes
+      const totalBoxWidth = boxData.reduce((sum, b) => sum + b.width, 0);
+      const totalSpacing = boxData.length * boxSpacing;
+      const requiredCircumference = totalBoxWidth + totalSpacing;
+
+      // For an ellipse: circumference ≈ π * (3(a+b) - sqrt((3a+b)(a+3b)))
+      // We want a taller, narrower oval: b > a
+      // Simplify: use a ratio and solve for the radii
+      const heightToWidthRatio = 1.3; // Oval is 30% taller than wide
+
+      // Estimate ellipse semi-axes (a = horizontal, b = vertical)
+      let a = requiredCircumference / (2 * Math.PI * heightToWidthRatio);
+      let b = a * heightToWidthRatio;
+
+      // Ensure minimum distance from table
+      const minRadialDist = tableRadius + connectorGap + avgBoxHeight / 2 + 20;
+      if (b < minRadialDist) {
+        b = minRadialDist;
+        a = b / heightToWidthRatio;
+      }
+
+      // STEP 3: Distribute boxes along the ellipse
+      // Use cumulative angular distribution based on box widths
+      let totalAngle = 0;
+      const angleIncrements: number[] = [];
+
+      for (let i = 0; i < boxData.length; i++) {
+        const box = boxData[i];
+        const nextBox = boxData[(i + 1) % boxData.length];
+
+        // Calculate angular space needed for this box + spacing
+        const avgRadius = (a + b) / 2;
+        const boxArc = (box.width / 2 + boxSpacing / 2) / avgRadius;
+        const nextBoxArc = (nextBox.width / 2 + boxSpacing / 2) / avgRadius;
+        const angleIncrement = boxArc + nextBoxArc;
+
+        angleIncrements.push(angleIncrement);
+        totalAngle += angleIncrement;
+      }
+
+      // Normalize angles to fill 2π
+      const scaleFactor = (2 * Math.PI) / totalAngle;
+      let currentAngle = -Math.PI / 2; // Start at top
+
+      for (let i = 0; i < boxData.length; i++) {
+        const box = boxData[i];
+
+        // Position on ellipse
+        const ellipseX = a * Math.cos(currentAngle);
+        const ellipseY = b * Math.sin(currentAngle);
+
+        box.x = ellipseX;
+        box.y = ellipseY;
+
+        // Update normal direction to point outward from ellipse
+        const dist = Math.sqrt(ellipseX * ellipseX + ellipseY * ellipseY);
+        box.nx = ellipseX / dist;
+        box.ny = ellipseY / dist;
+
+        currentAngle += angleIncrements[i] * scaleFactor;
+      }
+
+      // STEP 4: Fine-tune positions to avoid overlaps
+      resolveCollisions(boxData, 50, 3);
+    }
+
+    /**
+     * Calculate optimal positions for rectangular tables
+     * Places boxes at consistent distances in proper alignment
+     */
+    function layoutRectangularTable(
+      boxData: BoxData[],
+      tableWidth: number,
+      tableHeight: number,
+      connectorGap: number
+    ): void {
+      if (boxData.length === 0) return;
+
+      const avgBoxHeight = boxData.reduce((sum, b) => sum + b.height, 0) / boxData.length;
+      const fixedDistance = connectorGap + avgBoxHeight / 2 + 15; // Consistent distance
+
+      // Categorize boxes by which side of the table they're on
+      const topBoxes: BoxData[] = [];
+      const bottomBoxes: BoxData[] = [];
+      const leftBoxes: BoxData[] = [];
+      const rightBoxes: BoxData[] = [];
+
+      boxData.forEach((box) => {
+        const absX = Math.abs(box.relX);
+        const absY = Math.abs(box.relY);
+
+        if (absY > absX) {
+          // Vertical side
+          if (box.relY < 0) {
+            topBoxes.push(box);
+          } else {
+            bottomBoxes.push(box);
+          }
+        } else {
+          // Horizontal side
+          if (box.relX < 0) {
+            leftBoxes.push(box);
+          } else {
+            rightBoxes.push(box);
+          }
+        }
+      });
+
+      // Sort each side by position along that edge
+      topBoxes.sort((a, b) => a.relX - b.relX);
+      bottomBoxes.sort((a, b) => a.relX - b.relX);
+      leftBoxes.sort((a, b) => a.relY - b.relY);
+      rightBoxes.sort((a, b) => a.relY - b.relY);
+
+      // Position boxes for each side
+
+      // TOP: Fixed distance above, align horizontally
+      positionLinearSide(topBoxes, fixedDistance, 'horizontal', -1, tableWidth);
+
+      // BOTTOM: Fixed distance below, align horizontally
+      positionLinearSide(bottomBoxes, fixedDistance, 'horizontal', 1, tableWidth);
+
+      // LEFT: Fixed distance to left, align vertically
+      positionLinearSide(leftBoxes, fixedDistance, 'vertical', -1, tableHeight);
+
+      // RIGHT: Fixed distance to right, align vertically
+      positionLinearSide(rightBoxes, fixedDistance, 'vertical', 1, tableHeight);
+
+      // Fine-tune to avoid overlaps
+      resolveCollisions(boxData, 30, 2);
+    }
+
+    /**
+     * Position boxes along a linear side of rectangular table
+     */
+    function positionLinearSide(
+      boxes: BoxData[],
+      distance: number,
+      orientation: 'horizontal' | 'vertical',
+      direction: number, // -1 or 1
+      tableSize: number
+    ): void {
+      if (boxes.length === 0) return;
+
+      const spacing = 8;
+
+      if (orientation === 'horizontal') {
+        // Top or bottom side
+        const totalWidth = boxes.reduce((sum, b) => sum + b.width, 0);
+        const totalSpacing = (boxes.length - 1) * spacing;
+        const totalNeeded = totalWidth + totalSpacing;
+
+        // Start position (centered)
+        let currentX = -totalNeeded / 2;
+
+        boxes.forEach((box) => {
+          box.x = currentX + box.width / 2;
+          box.y = direction * (tableSize / 2 + distance);
+          box.nx = 0;
+          box.ny = direction;
+
+          currentX += box.width + spacing;
+        });
+      } else {
+        // Left or right side
+        const totalHeight = boxes.reduce((sum, b) => sum + b.height, 0);
+        const totalSpacing = (boxes.length - 1) * spacing;
+        const totalNeeded = totalHeight + totalSpacing;
+
+        // Start position (centered)
+        let currentY = -totalNeeded / 2;
+
+        boxes.forEach((box) => {
+          box.x = direction * (tableSize / 2 + distance);
+          box.y = currentY + box.height / 2;
+          box.nx = direction;
+          box.ny = 0;
+
+          currentY += box.height + spacing;
+        });
+      }
+    }
+
+    /**
+     * Resolve any remaining collisions with minimal adjustments
+     */
+    function resolveCollisions(
+      boxData: BoxData[],
+      maxIterations: number,
+      stepSize: number
+    ): void {
+      const padding = 6;
+
+      for (let iter = 0; iter < maxIterations; iter++) {
+        let hasCollision = false;
+
+        for (let i = 0; i < boxData.length; i++) {
+          for (let j = i + 1; j < boxData.length; j++) {
+            const a = boxData[i];
+            const b = boxData[j];
+
+            if (rectsOverlap(a, b, padding)) {
+              hasCollision = true;
+
+              // Push both boxes along their normal directions
+              a.x += a.nx * stepSize;
+              a.y += a.ny * stepSize;
+              b.x += b.nx * stepSize;
+              b.y += b.ny * stepSize;
+            }
+          }
+        }
+
+        if (!hasCollision) break;
+      }
+    }
+
+    /**
+     * Main function to calculate optimal guest box positions
+     */
+    function calculateGuestBoxPositions(
+      tableDatum: any,
+      guestLookup: Record<string, any>,
+      connectorGap: number,
+      getRankStars: (ranking: number | string | undefined) => string
+    ): BoxData[] {
+      const seatsWithGuest = (tableDatum.seats || []).filter((s: any) => s.assignedGuestId);
+      const boxData: BoxData[] = [];
+
+      // STEP 1: Build initial box data
+      seatsWithGuest.forEach((s: any) => {
+        const guest = guestLookup[s.assignedGuestId];
+        if (!guest) return;
+
         const relX = s.x - tableDatum.x;
         const relY = s.y - tableDatum.y;
+
+        // Calculate normal direction (away from table center)
         let nx = 0, ny = 0;
         if (tableDatum.shape === 'round') {
-          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
-        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
-        const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
-        if (!guest) return;
-        const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+          const len = Math.sqrt(relX * relX + relY * relY) || 1;
+          nx = relX / len;
+          ny = relY / len;
+        } else {
+          // For rectangular tables
+          if (Math.abs(relX) >= Math.abs(relY)) {
+            nx = relX >= 0 ? 1 : -1;
+            ny = 0;
+          } else {
+            nx = 0;
+            ny = relY >= 0 ? 1 : -1;
+          }
+        }
+
+        // Calculate text dimensions
+        const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+        const stars = getRankStars(guest.ranking);
+        const line1 = `${name}${stars}`;
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
         const charPx = 7;
         const estTextWidth = Math.max(line1.length, line2.length) * charPx;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-        const seatR = s.radius ?? 8;
-        const centerOffset = seatR + connectorGap + width / 2;
-        const boxCenterX = relX + nx * centerOffset;
-        const boxCenterY = relY + ny * centerOffset;
-        d3.select(this).attr('x1', relX).attr('y1', relY).attr('x2', boxCenterX).attr('y2', boxCenterY);
+        const height = 14 * 2 + 12;
+
+        const seatAngle = Math.atan2(relY, relX);
+
+        boxData.push({
+          s,
+          guest,
+          nx,
+          ny,
+          width,
+          height,
+          x: 0, // Will be set by layout algorithm
+          y: 0, // Will be set by layout algorithm
+          relX,
+          relY,
+          angle: seatAngle,
+          seatAngle,
+        });
       });
 
-      // SEATS
-      const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat').data(tableDatum.seats || [], (s) => s.id);
+      // STEP 2: Apply appropriate layout algorithm
+      if (tableDatum.shape === 'round') {
+        layoutRoundTable(boxData, tableDatum.radius, connectorGap);
+      } else {
+        const tableWidth = tableDatum.width || 160;
+        const tableHeight = tableDatum.height || 100;
+        layoutRectangularTable(boxData, tableWidth, tableHeight, connectorGap);
+      }
+
+      return boxData;
+    }
+
+    // ============================================================================
+    // INTEGRATION CODE FOR PlaygroundCanvas.tsx
+    // ============================================================================
+
+
+    merged.each(function (tableDatum) {
+      const group = d3.select(this);
+
+      // Calculate optimized guest box positions
+      const boxData = calculateGuestBoxPositions(tableDatum, guestLookup, connectorGap, getRankStars);
+
+      // CONNECTORS
+      let connectorsLayer = group.select<SVGGElement>('g.connectors-layer');
+      if (connectorsLayer.empty()) {
+        connectorsLayer = group.insert('g', ':first-child').attr('class', 'connectors-layer') as any;
+      }
+
+      const connectors = connectorsLayer
+        .selectAll<SVGLineElement, any>('line.connector-line')
+        .data(boxData, (d: any) => d.s.id);
+
+      connectors.exit().remove();
+
+      const connectorsEnter = connectors
+        .enter()
+        .append('line')
+        .attr('class', 'connector-line')
+        .attr('stroke', '#90a4ae')
+        .attr('stroke-width', 1)
+        .attr('pointer-events', 'none');
+
+      connectorsEnter.merge(connectors as any)
+        .attr('x1', (d: any) => d.relX)
+        .attr('y1', (d: any) => d.relY)
+        .attr('x2', (d: any) => d.x)
+        .attr('y2', (d: any) => d.y);
+
+      // SEATS (your existing seat rendering code)
+      const seatsSel = group.selectAll<SVGCircleElement, Seat>('circle.seat')
+        .data(tableDatum.seats || [], (s) => s.id);
       seatsSel.exit().remove();
       const seatsEnter = seatsSel.enter().append('circle').attr('class', 'seat');
       seatsEnter.merge(seatsSel as any)
@@ -342,7 +706,8 @@ export default function PlaygroundCanvas() {
         .on('contextmenu', (event, s) => { event.preventDefault(); lockSeat(tableDatum.id, s.id, !s.locked); })
         .on('dblclick', (event, s) => { clearSeat(tableDatum.id, s.id); });
 
-      const seatLabels = group.selectAll<SVGTextElement, Seat>('text.seat-number').data(tableDatum.seats || [], (s) => s.id);
+      const seatLabels = group.selectAll<SVGTextElement, Seat>('text.seat-number')
+        .data(tableDatum.seats || [], (s) => s.id);
       seatLabels.exit().remove();
       const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
       seatLabelsEnter.merge(seatLabels as any)
@@ -354,60 +719,40 @@ export default function PlaygroundCanvas() {
         .text((s) => s.seatNumber);
 
       // GUEST BOXES
-      const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
+      const guestBoxes = group.selectAll<SVGGElement, any>('g.guest-box')
+        .data(boxData, (d: any) => d.s.id);
       guestBoxes.exit().remove();
-      const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box').style('pointer-events', 'none');
-      guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');
-      guestBoxesEnter.append('text').attr('class', 'guest-name').attr('font-size', 11).attr('fill', '#0d47a1').style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
-      guestBoxesEnter.append('text').attr('class', 'guest-meta').attr('font-size', 10).attr('fill', '#455a64');
 
-      // --- Compute relaxed guest box positions ---
-      const boxData: any[] = [];
-      (tableDatum.seats || []).forEach((s) => {
-        const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
-        if (!guest) return;
-        const relX = s.x - tableDatum.x;
-        const relY = s.y - tableDatum.y;
-        let nx = 0, ny = 0;
-        if (tableDatum.shape === 'round') {
-          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
-        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
-        const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
-        const stars = getRankStars(guest.ranking);
-        const line1 = `${name}${stars}`;
-        const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-        const estTextWidth = Math.max(line1.length, line2.length) * 7;
-        const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-        const height = 14 * 2 + 12;
-        const seatR = s.radius ?? 8;
-        const dist = seatR + connectorGap + width / 2;
-        boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist });
-      });
+      const guestBoxesEnter = guestBoxes.enter()
+        .append('g')
+        .attr('class', 'guest-box')
+        .style('pointer-events', 'none');
 
-      /** Radial outward relaxation to prevent overlap */
-      const maxIterations = 100; const step = 10; const padding = 6;
-      for (let iter = 0; iter < maxIterations; iter++) {
-        let moved = false;
-        for (let i = 0; i < boxData.length; i++) {
-          const a = boxData[i], aRect = boxRectFromCenter(a);
-          for (let j = i + 1; j < boxData.length; j++) {
-            const b = boxData[j], bRect = boxRectFromCenter(b);
-            if (rectsOverlap(aRect, bRect, padding)) {
-              a.x += a.nx * step; a.y += a.ny * step; b.x += b.nx * step; b.y += b.ny * step; moved = true;
-            }
-          }
-        }
-        if (!moved) break;
-      }
+      guestBoxesEnter.append('rect')
+        .attr('class', 'guest-rect')
+        .attr('rx', 8)
+        .attr('ry', 8)
+        .attr('stroke-width', 1.2);
 
-      // Render relaxed guest boxes
-      boxData.forEach((b) => {
-        const { guest, s, width, height } = b;
-        const rectX = b.x - width / 2; const rectY = b.y - height / 2;
+      guestBoxesEnter.append('text')
+        .attr('class', 'guest-name')
+        .attr('font-size', 11)
+        .style('font-family', 'Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif');
+
+      guestBoxesEnter.append('text')
+        .attr('class', 'guest-meta')
+        .attr('font-size', 10);
+
+      guestBoxesEnter.merge(guestBoxes as any).each(function (this: SVGGElement, d: any) {
+        const gbox = d3.select(this);
+        const { guest, width, height, x, y } = d;
+
+        const rectX = x - width / 2;
+        const rectY = y - height / 2;
         const isHost = !!guest.fromHost;
         const hostFill = '#e3f2fd', hostStroke = '#1976d2';
         const externalFill = '#e8f5e9', externalStroke = '#2e7d32';
-        const gbox = group.selectAll<SVGGElement, any>('g.guest-box').filter((d) => d.id === s.id);
+
         gbox.select('rect.guest-rect')
           .attr('x', rectX)
           .attr('y', rectY)
@@ -415,15 +760,28 @@ export default function PlaygroundCanvas() {
           .attr('height', height)
           .attr('fill', isHost ? hostFill : externalFill)
           .attr('stroke', isHost ? hostStroke : externalStroke);
+
         const line1 = `${getRankStars(guest.ranking)} ${guest.salutation || ''} ${guest.name || ''}`.trim();
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-        gbox.select('text.guest-name').attr('x', b.x).attr('y', rectY + 6 + 14 / 2).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').text(line1);
-        gbox.select('text.guest-meta').attr('x', b.x).attr('y', rectY + 6 + 14 + 14 / 2).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').text(line2);
 
-        group.selectAll<SVGLineElement, any>('line.connector-line').filter((d) => d.id === s.id).attr('x2', b.x).attr('y2', b.y);
+        gbox.select('text.guest-name')
+          .attr('x', x)
+          .attr('y', rectY + 6 + 14 / 2)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('fill', '#0d47a1')
+          .text(line1);
+
+        gbox.select('text.guest-meta')
+          .attr('x', x)
+          .attr('y', rectY + 6 + 14 + 14 / 2)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('fill', '#455a64')
+          .text(line2);
       });
-
     });
+
 
     /** ---------- Drag ---------- */
     const svgSelection = d3.select(svgEl);
