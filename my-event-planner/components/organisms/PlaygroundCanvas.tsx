@@ -13,7 +13,6 @@ import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
-import { forceSimulation, forceCollide, forceRadial } from 'd3-force';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 

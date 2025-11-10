@@ -1,4 +1,7 @@
-// /services/seatAutoFillHelper.ts
+// ============================================================================
+// FIXED seatAutoFillHelper.tsx - Respects Custom Seat Ordering
+// ============================================================================
+
 import { useSeatStore } from "@/store/seatStore";
 import { useGuestStore } from "@/store/guestStore";
 
@@ -10,17 +13,16 @@ export interface SortRule {
   direction: SortDirection;
 }
 
-// --- Table Rules ---
 export interface RatioRule {
   enabled: boolean;
-  hostRatio: number;    // e.g., 20
-  externalRatio: number; // e.g., 80
+  hostRatio: number;
+  externalRatio: number;
 }
 
 export interface SpacingRule {
   enabled: boolean;
-  spacing: number; // e.g., 1 = host, external, host, external...
-  startWithExternal: boolean; // NEW: option to start with external instead of host
+  spacing: number;
+  startWithExternal: boolean;
 }
 
 export interface TableRules {
@@ -28,14 +30,50 @@ export interface TableRules {
   spacingRule: SpacingRule;
 }
 
+export interface SitTogetherRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
+}
+
+export interface SitAwayRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
+}
+
+export interface ProximityRules {
+  sitTogether: SitTogetherRule[];
+  sitAway: SitAwayRule[];
+}
+
 export interface AutoFillOptions {
   includeHost?: boolean;
   includeExternal?: boolean;
   sortRules?: SortRule[];
   tableRules?: TableRules;
+  proximityRules?: ProximityRules;
 }
 
-/** Helper: read nested field values and map organization->company */
+export interface ProximityViolation {
+  type: 'sit-together' | 'sit-away';
+  guest1Id: string;
+  guest2Id: string;
+  guest1Name: string;
+  guest2Name: string;
+  tableId: string;
+  tableLabel: string;
+  seat1Id: string;
+  seat2Id: string;
+}
+
+let proximityViolations: ProximityViolation[] = [];
+
+export function getProximityViolations(): ProximityViolation[] {
+  return proximityViolations;
+}
+
+/** Helper: read nested field values */
 function getGuestFieldValue(guest: any, field: SortField): string | number | undefined {
   if (!guest) return undefined;
   if (field === "organization") return (guest as any).company ?? (guest as any).organization ?? "";
@@ -73,44 +111,368 @@ function makeComparator(rules: SortRule[]) {
   };
 }
 
-/** 
- * Calculate target counts for host and external guests per table based on ratio rule
- */
-function calculateRatioCounts(
-  totalSeats: number,
-  hostRatio: number,
-  externalRatio: number
-): { hostTarget: number; externalTarget: number } {
-  const totalRatio = hostRatio + externalRatio;
-  if (totalRatio === 0) {
-    return { hostTarget: 0, externalTarget: 0 };
-  }
-  
-  const hostTarget = Math.round((totalSeats * hostRatio) / totalRatio);
-  const externalTarget = totalSeats - hostTarget;
-  
-  return { hostTarget, externalTarget };
+/** Check if two guests should sit together */
+function shouldSitTogether(guest1Id: string, guest2Id: string, rules: SitTogetherRule[]): boolean {
+  return rules.some(
+    (rule) =>
+      (rule.guest1Id === guest1Id && rule.guest2Id === guest2Id) ||
+      (rule.guest1Id === guest2Id && rule.guest2Id === guest1Id)
+  );
 }
 
-/**
- * Helper to find next available guest from a candidate list
- */
-function findNextAvailableGuest(
-  candidates: any[],
-  startIndex: number,
-  assignedSet: Set<string>
-): any | null {
-  for (let i = startIndex; i < candidates.length; i++) {
-    if (!assignedSet.has(candidates[i].id)) {
-      return candidates[i];
-    }
+/** Check if two guests should sit away */
+function shouldSitAway(guest1Id: string, guest2Id: string, rules: SitAwayRule[]): boolean {
+  return rules.some(
+    (rule) =>
+      (rule.guest1Id === guest1Id && rule.guest2Id === guest2Id) ||
+      (rule.guest1Id === guest2Id && rule.guest2Id === guest1Id)
+  );
+}
+
+/** Get the partner guest ID from sit-together rules */
+function getSitTogetherPartner(guestId: string, rules: SitTogetherRule[]): string | null {
+  for (const rule of rules) {
+    if (rule.guest1Id === guestId) return rule.guest2Id;
+    if (rule.guest2Id === guestId) return rule.guest1Id;
   }
   return null;
 }
 
+/** Get all guests that should sit away from this guest */
+function getSitAwayGuests(guestId: string, rules: SitAwayRule[]): string[] {
+  const awayGuests: string[] = [];
+  for (const rule of rules) {
+    if (rule.guest1Id === guestId) awayGuests.push(rule.guest2Id);
+    if (rule.guest2Id === guestId) awayGuests.push(rule.guest1Id);
+  }
+  return awayGuests;
+}
+
+/** Get all adjacent seat IDs for a given seat */
+function getAdjacentSeats(seat: any, allSeats: any[]): any[] {
+  if (!seat.adjacentSeats || seat.adjacentSeats.length === 0) return [];
+  return seat.adjacentSeats
+    .map((adjId: string) => allSeats.find((s) => s.id === adjId))
+    .filter(Boolean);
+}
+
 /**
- * Autofill seats with COMBINED table rules support
- * Both Ratio and Spacing rules can work together
+ * Build a proximity constraint map for strategic planning
+ */
+interface GuestConstraints {
+  guestId: string;
+  togetherWith: string | null;
+  awayFrom: string[];
+  priority: number;
+}
+
+function buildConstraintMap(
+  allGuests: any[],
+  proximityRules: ProximityRules
+): Map<string, GuestConstraints> {
+  const constraintMap = new Map<string, GuestConstraints>();
+  
+  for (const guest of allGuests) {
+    const togetherWith = getSitTogetherPartner(guest.id, proximityRules.sitTogether);
+    const awayFrom = getSitAwayGuests(guest.id, proximityRules.sitAway);
+    const priority = (togetherWith ? 100 : 0) + (awayFrom.length * 10);
+    
+    constraintMap.set(guest.id, {
+      guestId: guest.id,
+      togetherWith,
+      awayFrom,
+      priority,
+    });
+  }
+  
+  return constraintMap;
+}
+
+/**
+ * Re-order guest list to prioritize constrained guests
+ */
+function reorderByConstraints(
+  guests: any[],
+  constraintMap: Map<string, GuestConstraints>
+): any[] {
+  const guestsWithPriority = guests.map((g) => ({
+    guest: g,
+    constraints: constraintMap.get(g.id) || {
+      guestId: g.id,
+      togetherWith: null,
+      awayFrom: [],
+      priority: 0,
+    },
+  }));
+  
+  guestsWithPriority.sort((a, b) => b.constraints.priority - a.constraints.priority);
+  return guestsWithPriority.map((item) => item.guest);
+}
+
+/**
+ * Check if a guest can be safely placed in a seat
+ */
+function canSafelyPlace(
+  guestId: string,
+  seat: any,
+  allSeats: any[],
+  constraints: GuestConstraints,
+  proximityRules: ProximityRules
+): { safe: boolean; reason?: string } {
+  const adjacentSeats = getAdjacentSeats(seat, allSeats);
+  
+  for (const adjSeat of adjacentSeats) {
+    if (!adjSeat.assignedGuestId) continue;
+    
+    const adjGuestId = adjSeat.assignedGuestId;
+    
+    // Check sit-away violations
+    if (constraints.awayFrom.includes(adjGuestId)) {
+      return { safe: false, reason: `sit-away violation with ${adjGuestId}` };
+    }
+  }
+  
+  return { safe: true };
+}
+
+/**
+ * Strategic pre-seating for sit-together pairs
+ */
+function strategicPreSeatPairs(
+  tables: any[],
+  allGuests: any[],
+  assignedSet: Set<string>,
+  proximityRules: ProximityRules,
+  constraintMap: Map<string, GuestConstraints>,
+  seatStore: any
+): void {
+  const guestMap = new Map(allGuests.map((g) => [g.id, g]));
+  const seatedPairs = new Set<string>();
+  
+  const rulesWithPriority = proximityRules.sitTogether.map((rule) => {
+    const c1 = constraintMap.get(rule.guest1Id);
+    const c2 = constraintMap.get(rule.guest2Id);
+    const combinedPriority = (c1?.priority || 0) + (c2?.priority || 0);
+    return { rule, priority: combinedPriority };
+  });
+  
+  rulesWithPriority.sort((a, b) => b.priority - a.priority);
+  
+  for (const { rule } of rulesWithPriority) {
+    const pairKey = [rule.guest1Id, rule.guest2Id].sort().join('-');
+    if (seatedPairs.has(pairKey)) continue;
+    
+    const guest1 = guestMap.get(rule.guest1Id);
+    const guest2 = guestMap.get(rule.guest2Id);
+    
+    if (!guest1 || !guest2 || assignedSet.has(guest1.id) || assignedSet.has(guest2.id)) {
+      continue;
+    }
+    
+    const c1 = constraintMap.get(guest1.id)!;
+    const c2 = constraintMap.get(guest2.id)!;
+    
+    for (const table of tables) {
+      const seats = (table.seats || []).filter((s: any) => !s.locked);
+      let foundSeats = false;
+      
+      for (const seat of seats) {
+        if (seat.assignedGuestId) continue;
+        
+        const adjacentSeats = getAdjacentSeats(seat, seats);
+        
+        for (const adjSeat of adjacentSeats) {
+          if (!adjSeat.assignedGuestId && !adjSeat.locked) {
+            const safe1 = canSafelyPlace(guest1.id, seat, seats, c1, proximityRules);
+            const safe2 = canSafelyPlace(guest2.id, adjSeat, seats, c2, proximityRules);
+            
+            if (safe1.safe && safe2.safe) {
+              seatStore.assignGuestToSeat(table.id, seat.id, guest1.id);
+              seatStore.assignGuestToSeat(table.id, adjSeat.id, guest2.id);
+              
+              assignedSet.add(guest1.id);
+              assignedSet.add(guest2.id);
+              seatedPairs.add(pairKey);
+              
+              foundSeats = true;
+              break;
+            }
+          }
+        }
+        
+        if (foundSeats) break;
+      }
+      
+      if (foundSeats) break;
+    }
+  }
+}
+
+/**
+ * Smart guest selection that ALWAYS reconsiders all unassigned guests
+ */
+function selectBestGuestForSeat(
+  allCandidates: any[],
+  assignedSet: Set<string>,
+  nextSeat: any,
+  allSeats: any[],
+  constraintMap: Map<string, GuestConstraints>,
+  proximityRules: ProximityRules,
+  comparator: (a: any, b: any) => number
+): any | null {
+  const adjacentSeats = getAdjacentSeats(nextSeat, allSeats);
+  const adjacentGuestIds = adjacentSeats
+    .map((s) => s.assignedGuestId)
+    .filter(Boolean) as string[];
+  
+  // PRIORITY 1: Check if any adjacent guest has an unassigned sit-together partner
+  for (const adjGuestId of adjacentGuestIds) {
+    const partner = getSitTogetherPartner(adjGuestId, proximityRules.sitTogether);
+    if (partner && !assignedSet.has(partner)) {
+      const partnerGuest = allCandidates.find((c) => c.id === partner);
+      if (partnerGuest) {
+        const constraints = constraintMap.get(partner);
+        if (constraints) {
+          const safetyCheck = canSafelyPlace(partner, nextSeat, allSeats, constraints, proximityRules);
+          if (safetyCheck.safe) {
+            return partnerGuest;
+          }
+        }
+      }
+    }
+  }
+  
+  // PRIORITY 2: Find best available guest from ALL unassigned candidates
+  const unassignedCandidates = allCandidates.filter((c) => !assignedSet.has(c.id));
+  
+  // Sort by constraints first, then by original sort order
+  const sortedUnassigned = [...unassignedCandidates].sort((a, b) => {
+    const ca = constraintMap.get(a.id);
+    const cb = constraintMap.get(b.id);
+    
+    // Prioritize guests with sit-together partners still unassigned
+    const aHasUnassignedPartner = ca?.togetherWith && !assignedSet.has(ca.togetherWith);
+    const bHasUnassignedPartner = cb?.togetherWith && !assignedSet.has(cb.togetherWith);
+    
+    if (aHasUnassignedPartner && !bHasUnassignedPartner) return -1;
+    if (!aHasUnassignedPartner && bHasUnassignedPartner) return 1;
+    
+    // Then by original sort order
+    return comparator(a, b);
+  });
+  
+  // Try each candidate in order until we find one that's safe
+  for (const candidate of sortedUnassigned) {
+    const constraints = constraintMap.get(candidate.id);
+    if (!constraints) continue;
+    
+    const safetyCheck = canSafelyPlace(candidate.id, nextSeat, allSeats, constraints, proximityRules);
+    
+    if (safetyCheck.safe) {
+      return candidate;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Detect violations after seating is complete
+ */
+function detectViolations(proximityRules: ProximityRules, guestStore: any): ProximityViolation[] {
+  const violations: ProximityViolation[] = [];
+  const seatStore = useSeatStore.getState();
+  const allGuests = [...guestStore.hostGuests, ...guestStore.externalGuests];
+  const guestLookup: Record<string, any> = {};
+  allGuests.forEach((g: any) => (guestLookup[g.id] = g));
+  
+  for (const table of seatStore.tables) {
+    const seats = table.seats || [];
+    
+    for (const seat of seats) {
+      if (!seat.assignedGuestId) continue;
+      
+      const guestId = seat.assignedGuestId;
+      const guest = guestLookup[guestId];
+      if (!guest) continue;
+      
+      const adjacentSeats = getAdjacentSeats(seat, seats);
+      const adjacentGuestIds = adjacentSeats
+        .map((s) => s.assignedGuestId)
+        .filter(Boolean) as string[];
+      
+      // Check sit-together violations
+      const togetherPartner = getSitTogetherPartner(guestId, proximityRules.sitTogether);
+      if (togetherPartner) {
+        const partner = guestLookup[togetherPartner];
+        if (partner && !adjacentGuestIds.includes(togetherPartner)) {
+          const partnerAssigned = seatStore.tables.some((t: any) =>
+            t.seats.some((s: any) => s.assignedGuestId === togetherPartner)
+          );
+          
+          if (partnerAssigned) {
+            const alreadyReported = violations.some(
+              (v) =>
+                v.type === 'sit-together' &&
+                ((v.guest1Id === guestId && v.guest2Id === togetherPartner) ||
+                  (v.guest1Id === togetherPartner && v.guest2Id === guestId))
+            );
+            
+            if (!alreadyReported) {
+              violations.push({
+                type: 'sit-together',
+                guest1Id: guestId,
+                guest2Id: togetherPartner,
+                guest1Name: guest.name,
+                guest2Name: partner.name,
+                tableId: table.id,
+                tableLabel: table.label,
+                seat1Id: seat.id,
+                seat2Id: '',
+              });
+            }
+          }
+        }
+      }
+      
+      // Check sit-away violations
+      for (const adjGuestId of adjacentGuestIds) {
+        if (shouldSitAway(guestId, adjGuestId, proximityRules.sitAway)) {
+          const adjGuest = guestLookup[adjGuestId];
+          const adjSeat = seats.find((s: any) => s.assignedGuestId === adjGuestId);
+          
+          if (adjGuest && adjSeat) {
+            const alreadyReported = violations.some(
+              (v) =>
+                v.type === 'sit-away' &&
+                ((v.guest1Id === guestId && v.guest2Id === adjGuestId) ||
+                  (v.guest1Id === adjGuestId && v.guest2Id === guestId))
+            );
+            
+            if (!alreadyReported) {
+              violations.push({
+                type: 'sit-away',
+                guest1Id: guestId,
+                guest2Id: adjGuestId,
+                guest1Name: guest.name,
+                guest2Name: adjGuest.name,
+                tableId: table.id,
+                tableLabel: table.label,
+                seat1Id: seat.id,
+                seat2Id: adjSeat.id,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return violations;
+}
+
+/**
+ * MAIN AUTOFILL FUNCTION - Respects custom seat ordering
  */
 export async function autoFillSeats(options: AutoFillOptions = {}) {
   const {
@@ -118,6 +480,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     includeExternal = true,
     sortRules = [{ field: "ranking", direction: "asc" }],
     tableRules,
+    proximityRules = { sitTogether: [], sitAway: [] },
   } = options;
 
   const seatStore = useSeatStore.getState();
@@ -128,30 +491,47 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     return;
   }
 
-  // --- Collect candidates from guestStore ---
+  proximityViolations = [];
+
+  // Collect candidates
   const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
   const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
+  const allGuests = [...hostPool, ...externalPool];
 
-  // --- Identify guests locked into seats ---
+  // Build constraint map
+  const constraintMap = buildConstraintMap(allGuests, proximityRules);
+
+  // Identify locked guests
   const lockedAssignedIds = new Set<string>();
-  seatStore.tables.forEach((t) =>
+  seatStore.tables.forEach((t: any) =>
     (t.seats ?? []).forEach((s: any) => {
       if (s.locked && s.assignedGuestId) lockedAssignedIds.add(s.assignedGuestId);
     })
   );
 
-  // --- Filter out locked guests ---
+  // Filter out locked guests
   const hostCandidates = hostPool.filter((g: any) => !lockedAssignedIds.has(g.id));
   const externalCandidates = externalPool.filter((g: any) => !lockedAssignedIds.has(g.id));
 
-  // --- Sort candidates separately (maintaining host/external distinction) ---
+  // Sort candidates
   const comparator = makeComparator(sortRules);
-  const sortedHostCandidates = [...hostCandidates].sort(comparator);
-  const sortedExternalCandidates = [...externalCandidates].sort(comparator);
-
-  // --- Clear unlocked seats ---
-  const currentTablesSnapshot = useSeatStore.getState().tables;
+  let sortedHostCandidates = [...hostCandidates].sort(comparator);
+  let sortedExternalCandidates = [...externalCandidates].sort(comparator);
   
+  // Re-order to prioritize constrained guests
+  sortedHostCandidates = reorderByConstraints(sortedHostCandidates, constraintMap);
+  sortedExternalCandidates = reorderByConstraints(sortedExternalCandidates, constraintMap);
+  
+  // Combine all candidates
+  const allSortedCandidates = [...sortedHostCandidates, ...sortedExternalCandidates].sort((a, b) => {
+    const ca = constraintMap.get(a.id)!;
+    const cb = constraintMap.get(b.id)!;
+    if (ca.priority !== cb.priority) return cb.priority - ca.priority;
+    return comparator(a, b);
+  });
+
+  // Clear unlocked seats
+  const currentTablesSnapshot = useSeatStore.getState().tables;
   for (const table of currentTablesSnapshot) {
     for (const seat of table.seats ?? []) {
       if (!seat.locked && seat.assignedGuestId) {
@@ -160,9 +540,17 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     }
   }
 
-  // --- Build table structure with priority ordering ---
+  // Track globally assigned guests
+  const globalAssignedSet = new Set<string>();
+  lockedAssignedIds.forEach((id) => globalAssignedSet.add(id));
+
+  // Phase 1: Strategic pre-seating for sit-together pairs
   const freshTables = useSeatStore.getState().tables;
-  const tablesWithOrder = freshTables.map((t: any, idx: number) => {
+  strategicPreSeatPairs(freshTables, allGuests, globalAssignedSet, proximityRules, constraintMap, seatStore);
+
+  // Phase 2: Fill remaining seats - RESPECTS CUSTOM SEAT ORDERING
+  const tablesAfterPreSeating = useSeatStore.getState().tables;
+  const tablesWithOrder = tablesAfterPreSeating.map((t: any, idx: number) => {
     let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
     if (tableOrder === undefined) {
       const parsed = parseInt(t.id, 10);
@@ -173,333 +561,41 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   
   tablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
 
-  // --- Track assigned guests globally ---
-  const globalAssignedSet = new Set<string>();
-  lockedAssignedIds.forEach((id) => globalAssignedSet.add(id));
-
-  // --- Assign guests table by table ---
-  let globalHostIndex = 0;
-  let globalExternalIndex = 0;
-
   for (const { table } of tablesWithOrder) {
-    type SeatWithOrder = {
-      id: string;
-      locked?: boolean;
-      assignedGuestId?: string | null;
-      seatOrder: number;
-      [key: string]: any;
-    };
-
-    const seats: SeatWithOrder[] = (table.seats ?? []).map((s: any, sidx: number) => {
-      let seatOrder = typeof s.seatNumber === "number" ? s.seatNumber : undefined;
-      if (seatOrder === undefined) {
-        const parsed = parseInt(s.id, 10);
-        seatOrder = !isNaN(parsed) ? parsed : sidx + 1;
-      }
-      return { ...s, seatOrder };
-    });
+    // CRITICAL FIX: Sort seats by seatNumber (which reflects custom ordering)
+    // The seatNumber property contains the user's custom seat order
+    const seats = (table.seats ?? [])
+      .map((s: any) => ({ ...s }))
+      .sort((a: any, b: any) => {
+        // Sort by seatNumber directly - this respects custom ordering
+        const aSeatNum = typeof a.seatNumber === 'number' ? a.seatNumber : 999;
+        const bSeatNum = typeof b.seatNumber === 'number' ? b.seatNumber : 999;
+        return aSeatNum - bSeatNum;
+      });
     
-    // Sort seats within this table
-    seats.sort((a: SeatWithOrder, b: SeatWithOrder) => a.seatOrder - b.seatOrder);
+    const unlockedSeats = seats.filter((s: any) => !s.locked);
     
-    // Get unlocked seats for this table
-    const unlockedSeats = seats.filter((s: SeatWithOrder) => !s.locked);
-    const totalSeatsInTable = unlockedSeats.length;
-    
-    if (totalSeatsInTable === 0) continue;
-
-    // --- Determine which rules are active ---
-    const useRatioRule = tableRules?.ratioRule?.enabled;
-    const useSpacingRule = tableRules?.spacingRule?.enabled;
-
-    // --- COMBINED RULES MODE: Both Ratio and Spacing ---
-    if (useRatioRule && useSpacingRule) {
-      const { hostRatio, externalRatio } = tableRules!.ratioRule;
-      const { spacing, startWithExternal } = tableRules!.spacingRule;
+    // Process seats in order: Seat 1, Seat 2, Seat 3, etc.
+    for (const seat of unlockedSeats) {
+      if (seat.assignedGuestId) continue;
       
-      // Calculate targets from ratio rule
-      const { hostTarget, externalTarget } = calculateRatioCounts(
-        totalSeatsInTable,
-        hostRatio,
-        externalRatio
+      const guestToAssign = selectBestGuestForSeat(
+        allSortedCandidates,
+        globalAssignedSet,
+        seat,
+        seats,
+        constraintMap,
+        proximityRules,
+        comparator
       );
-
-      let hostAssigned = 0;
-      let externalAssigned = 0;
-      let nextIsHost = !startWithExternal; // Start based on config
-      let consecutiveCounter = 0; // Count consecutive guests of current type
-
-      for (const seat of unlockedSeats) {
-        let guestToAssign: any = null;
-        
-        // Check if we've exceeded ratio targets
-        const hostLimitReached = hostAssigned >= hostTarget;
-        const externalLimitReached = externalAssigned >= externalTarget;
-
-        // Determine what type of guest to assign next
-        if (nextIsHost) {
-          // Try to assign host
-          if (!hostLimitReached) {
-            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalHostIndex++;
-              hostAssigned++;
-              consecutiveCounter = 0; // Reset counter
-              nextIsHost = false; // Switch to external for next spacing guests
-            } else {
-              // No host available, try external
-              if (!externalLimitReached) {
-                guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-                if (guestToAssign) {
-                  globalExternalIndex++;
-                  externalAssigned++;
-                  consecutiveCounter++;
-                }
-              }
-            }
-          } else {
-            // Host limit reached, must use external
-            if (!externalLimitReached) {
-              guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-              if (guestToAssign) {
-                globalExternalIndex++;
-                externalAssigned++;
-                consecutiveCounter++;
-              }
-            }
-          }
-        } else {
-          // Try to assign external
-          if (!externalLimitReached) {
-            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalExternalIndex++;
-              externalAssigned++;
-              consecutiveCounter++;
-              
-              // Check if we've assigned 'spacing' number of external guests
-              if (consecutiveCounter >= spacing) {
-                nextIsHost = true; // Switch back to host
-                consecutiveCounter = 0;
-              }
-            } else {
-              // No external available, try host
-              if (!hostLimitReached) {
-                guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-                if (guestToAssign) {
-                  globalHostIndex++;
-                  hostAssigned++;
-                  nextIsHost = false;
-                  consecutiveCounter = 0;
-                }
-              }
-            }
-          } else {
-            // External limit reached, must use host
-            if (!hostLimitReached) {
-              guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-              if (guestToAssign) {
-                globalHostIndex++;
-                hostAssigned++;
-                nextIsHost = false;
-                consecutiveCounter = 0;
-              }
-            }
-          }
-        }
-
-        if (guestToAssign) {
-          globalAssignedSet.add(guestToAssign.id);
-          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
-        }
-      }
-
-    } else if (useSpacingRule) {
-      // --- SPACING RULE ONLY ---
-      const { spacing, startWithExternal } = tableRules!.spacingRule;
       
-      let hostAssigned = 0;
-      let externalAssigned = 0;
-      let nextIsHost = !startWithExternal;
-      let consecutiveCounter = 0;
-
-      for (const seat of unlockedSeats) {
-        let guestToAssign: any = null;
-
-        if (nextIsHost) {
-          // Try to assign a host guest
-          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-          if (guestToAssign) {
-            globalHostIndex++;
-            hostAssigned++;
-            consecutiveCounter = 0;
-            nextIsHost = false;
-          } else {
-            // No more host guests, fall back to external
-            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalExternalIndex++;
-              externalAssigned++;
-              consecutiveCounter++;
-            }
-          }
-        } else {
-          // Assign external guest
-          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-          if (guestToAssign) {
-            globalExternalIndex++;
-            externalAssigned++;
-            consecutiveCounter++;
-            
-            // Check if we've assigned 'spacing' number of guests
-            if (consecutiveCounter >= spacing) {
-              nextIsHost = true;
-              consecutiveCounter = 0;
-            }
-          } else {
-            // No more external guests, fall back to host
-            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalHostIndex++;
-              hostAssigned++;
-              nextIsHost = false;
-              consecutiveCounter = 0;
-            }
-          }
-        }
-
-        if (guestToAssign) {
-          globalAssignedSet.add(guestToAssign.id);
-          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
-        }
-      }
-
-    } else if (useRatioRule) {
-      // --- RATIO RULE ONLY ---
-      const { hostRatio, externalRatio } = tableRules!.ratioRule;
-      const { hostTarget, externalTarget } = calculateRatioCounts(
-        totalSeatsInTable,
-        hostRatio,
-        externalRatio
-      );
-
-      let hostAssigned = 0;
-      let externalAssigned = 0;
-
-      for (const seat of unlockedSeats) {
-        let guestToAssign: any = null;
-        
-        const needsMoreHost = hostAssigned < hostTarget;
-        const needsMoreExternal = externalAssigned < externalTarget;
-        
-        if (needsMoreHost && !needsMoreExternal) {
-          // Only need host
-          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-          if (guestToAssign) {
-            globalHostIndex++;
-            hostAssigned++;
-          }
-        } else if (needsMoreExternal && !needsMoreHost) {
-          // Only need external
-          guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-          if (guestToAssign) {
-            globalExternalIndex++;
-            externalAssigned++;
-          }
-        } else if (needsMoreHost && needsMoreExternal) {
-          // Need both - decide based on how far behind we are on ratio
-          const hostRatioCurrent = totalSeatsInTable > 0 ? hostAssigned / totalSeatsInTable : 0;
-          const targetHostRatio = (hostRatio + externalRatio) > 0 ? hostRatio / (hostRatio + externalRatio) : 0.5;
-          
-          if (hostRatioCurrent < targetHostRatio) {
-            // Try host first
-            guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalHostIndex++;
-              hostAssigned++;
-            } else {
-              // Fall back to external
-              guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-              if (guestToAssign) {
-                globalExternalIndex++;
-                externalAssigned++;
-              }
-            }
-          } else {
-            // Try external first
-            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalExternalIndex++;
-              externalAssigned++;
-            } else {
-              // Fall back to host
-              guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-              if (guestToAssign) {
-                globalHostIndex++;
-                hostAssigned++;
-              }
-            }
-          }
-        } else {
-          // Both targets met, fill with whatever is available
-          guestToAssign = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-          if (guestToAssign) {
-            globalHostIndex++;
-            hostAssigned++;
-          } else {
-            guestToAssign = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-            if (guestToAssign) {
-              globalExternalIndex++;
-              externalAssigned++;
-            }
-          }
-        }
-
-        if (guestToAssign) {
-          globalAssignedSet.add(guestToAssign.id);
-          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
-        }
-      }
-    } else {
-      // --- NO TABLE RULES: Combined sorted assignment ---
-      // Merge both lists while maintaining their individual sort orders
-      // Pick the "next best" guest from either list based on the comparator
-      
-      for (const seat of unlockedSeats) {
-        let guestToAssign: any = null;
-        
-        // Get next available from each list
-        const nextHost = findNextAvailableGuest(sortedHostCandidates, globalHostIndex, globalAssignedSet);
-        const nextExternal = findNextAvailableGuest(sortedExternalCandidates, globalExternalIndex, globalAssignedSet);
-        
-        // Compare and pick the better one according to sort rules
-        if (nextHost && nextExternal) {
-          // Both available - use comparator to decide
-          const comparison = comparator(nextHost, nextExternal);
-          if (comparison <= 0) {
-            // Host comes first (or equal)
-            guestToAssign = nextHost;
-            globalHostIndex++;
-          } else {
-            // External comes first
-            guestToAssign = nextExternal;
-            globalExternalIndex++;
-          }
-        } else if (nextHost) {
-          // Only host available
-          guestToAssign = nextHost;
-          globalHostIndex++;
-        } else if (nextExternal) {
-          // Only external available
-          guestToAssign = nextExternal;
-          globalExternalIndex++;
-        }
-
-        if (guestToAssign) {
-          globalAssignedSet.add(guestToAssign.id);
-          seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
-        }
+      if (guestToAssign) {
+        globalAssignedSet.add(guestToAssign.id);
+        seatStore.assignGuestToSeat(table.id, seat.id, guestToAssign.id);
       }
     }
   }
+  
+  // Detect violations
+  proximityViolations = detectViolations(proximityRules, guestStore);
 }

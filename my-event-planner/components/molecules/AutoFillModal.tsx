@@ -1,3 +1,7 @@
+// ============================================================================
+// PART 1: Enhanced AutoFillModal.tsx with Proximity Rules
+// ============================================================================
+
 'use client';
 
 import { useState } from 'react';
@@ -20,40 +24,34 @@ import {
   Divider,
   Switch,
   Paper,
+  Autocomplete,
+  Chip,
+  Alert,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Add as AddIcon, Delete as DeleteIcon, Close as CloseIcon } from '@mui/icons-material';
 import { useGuestStore } from '@/store/guestStore';
-import { autoFillSeats, SortField, SortDirection, SortRule, TableRules } from '@/utils/seatAutoFillHelper';
+import { autoFillSeats, SortField, SortDirection, SortRule, TableRules, ProximityRules } from '@/utils/seatAutoFillHelper';
 
 interface AutoFillModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-/**
- * Generate a visual pattern example for spacing rule
- */
-function generateSpacingPattern(spacing: number, maxSeats: number = 8): string {
-  const pattern: string[] = [];
-  let seatCount = 0;
-  
-  while (seatCount < maxSeats) {
-    pattern.push('H'); // Host
-    seatCount++;
-    
-    if (seatCount >= maxSeats) break;
-    
-    for (let i = 0; i < spacing && seatCount < maxSeats; i++) {
-      pattern.push('E'); // External
-      seatCount++;
-    }
-  }
-  
-  return pattern.join(' → ');
+export interface SitTogetherRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
+}
+
+export interface SitAwayRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
 }
 
 export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
   const { hostGuests, externalGuests } = useGuestStore();
+  const allGuests = [...hostGuests, ...externalGuests].filter((g) => !g.deleted);
 
   // Guest list selection
   const [includeHost, setIncludeHost] = useState(true);
@@ -64,7 +62,7 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     { field: 'ranking', direction: 'asc' },
   ]);
 
-  // Table rules - NEW
+  // Table rules
   const [tableRules, setTableRules] = useState<TableRules>({
     ratioRule: {
       enabled: false,
@@ -74,9 +72,13 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     spacingRule: {
       enabled: false,
       spacing: 1,
-      startWithExternal: false, // NEW
+      startWithExternal: false,
     },
   });
+
+  // NEW: Proximity Rules
+  const [sitTogetherRules, setSitTogetherRules] = useState<SitTogetherRule[]>([]);
+  const [sitAwayRules, setSitAwayRules] = useState<SitAwayRule[]>([]);
 
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -111,15 +113,100 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     });
   };
 
+  // --- NEW: Proximity Rules Handlers ---
+  const addSitTogetherRule = () => {
+    setSitTogetherRules([
+      ...sitTogetherRules,
+      { id: `together-${Date.now()}`, guest1Id: '', guest2Id: '' },
+    ]);
+  };
+
+  const removeSitTogetherRule = (id: string) => {
+    setSitTogetherRules(sitTogetherRules.filter((r) => r.id !== id));
+  };
+
+  const updateSitTogetherRule = (id: string, field: 'guest1Id' | 'guest2Id', value: string) => {
+    setSitTogetherRules(
+      sitTogetherRules.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+  };
+
+  const addSitAwayRule = () => {
+    setSitAwayRules([
+      ...sitAwayRules,
+      { id: `away-${Date.now()}`, guest1Id: '', guest2Id: '' },
+    ]);
+  };
+
+  const removeSitAwayRule = (id: string) => {
+    setSitAwayRules(sitAwayRules.filter((r) => r.id !== id));
+  };
+
+  const updateSitAwayRule = (id: string, field: 'guest1Id' | 'guest2Id', value: string) => {
+    setSitAwayRules(
+      sitAwayRules.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+    );
+  };
+
+  // Validate rules
+  const getValidationErrors = (): string[] => {
+    const errors: string[] = [];
+    
+    // Check for incomplete rules
+    sitTogetherRules.forEach((rule, idx) => {
+      if (!rule.guest1Id || !rule.guest2Id) {
+        errors.push(`Sit Together Rule ${idx + 1}: Both guests must be selected`);
+      } else if (rule.guest1Id === rule.guest2Id) {
+        errors.push(`Sit Together Rule ${idx + 1}: Cannot select the same guest twice`);
+      }
+    });
+    
+    sitAwayRules.forEach((rule, idx) => {
+      if (!rule.guest1Id || !rule.guest2Id) {
+        errors.push(`Sit Away Rule ${idx + 1}: Both guests must be selected`);
+      } else if (rule.guest1Id === rule.guest2Id) {
+        errors.push(`Sit Away Rule ${idx + 1}: Cannot select the same guest twice`);
+      }
+    });
+    
+    // Check for conflicting rules
+    sitTogetherRules.forEach((togetherRule) => {
+      sitAwayRules.forEach((awayRule) => {
+        if (
+          (togetherRule.guest1Id === awayRule.guest1Id && togetherRule.guest2Id === awayRule.guest2Id) ||
+          (togetherRule.guest1Id === awayRule.guest2Id && togetherRule.guest2Id === awayRule.guest1Id)
+        ) {
+          const guest1 = allGuests.find(g => g.id === togetherRule.guest1Id);
+          const guest2 = allGuests.find(g => g.id === togetherRule.guest2Id);
+          errors.push(`Conflicting rules: ${guest1?.name} and ${guest2?.name} have both Sit Together and Sit Away rules`);
+        }
+      });
+    });
+    
+    return errors;
+  };
+
+  const validationErrors = getValidationErrors();
+
   // --- Confirm Handler ---
   const handleConfirm = async () => {
+    if (validationErrors.length > 0) {
+      return;
+    }
+    
     setIsProcessing(true);
     try {
+      const proximityRules: ProximityRules = {
+        sitTogether: sitTogetherRules.filter(r => r.guest1Id && r.guest2Id),
+        sitAway: sitAwayRules.filter(r => r.guest1Id && r.guest2Id),
+      };
+      
       await autoFillSeats({
         includeHost,
         includeExternal,
         sortRules,
         tableRules,
+        proximityRules,
       });
     } finally {
       setIsProcessing(false);
@@ -134,8 +221,20 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
       <DialogContent>
         <Stack spacing={3}>
           <Typography variant="body2" color="text.secondary">
-            Configure guest lists, sorting rules, and table assignment rules for autofill.
+            Configure guest lists, sorting rules, table assignment rules, and proximity rules for autofill.
           </Typography>
+
+          {/* Validation Errors */}
+          {validationErrors.length > 0 && (
+            <Alert severity="error">
+              <Typography variant="subtitle2" gutterBottom>Please fix the following errors:</Typography>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {validationErrors.map((error, idx) => (
+                  <li key={idx}><Typography variant="caption">{error}</Typography></li>
+                ))}
+              </ul>
+            </Alert>
+          )}
 
           {/* ========== GUEST LIST SELECTION ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
@@ -230,6 +329,128 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
 
           <Divider />
 
+          {/* ========== PROXIMITY RULES (NEW) ========== */}
+          <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
+            <FormLabel component="legend" sx={{ mb: 1, fontWeight: 600 }}>
+              Proximity Rules
+            </FormLabel>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+              Define who should sit together or apart
+            </Typography>
+
+            {/* Sit Together Rules */}
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                🤝 Sit Together Rules
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                These guests will be seated adjacent to each other whenever possible
+              </Typography>
+              
+              <Stack spacing={1}>
+                {sitTogetherRules.map((rule) => (
+                  <Stack
+                    key={rule.id}
+                    direction="row"
+                    spacing={1}
+                    alignItems="center"
+                    sx={{ border: '1px solid #4caf50', p: 1, borderRadius: 1, bgcolor: 'white' }}
+                  >
+                    <Autocomplete
+                      size="small"
+                      options={allGuests}
+                      getOptionLabel={(guest) => `${guest.name} (${guest.company})`}
+                      value={allGuests.find(g => g.id === rule.guest1Id) || null}
+                      onChange={(_, guest) => updateSitTogetherRule(rule.id, 'guest1Id', guest?.id || '')}
+                      renderInput={(params) => <TextField {...params} placeholder="Select Guest 1" />}
+                      sx={{ flex: 1 }}
+                    />
+                    <Typography variant="body2">+</Typography>
+                    <Autocomplete
+                      size="small"
+                      options={allGuests}
+                      getOptionLabel={(guest) => `${guest.name} (${guest.company})`}
+                      value={allGuests.find(g => g.id === rule.guest2Id) || null}
+                      onChange={(_, guest) => updateSitTogetherRule(rule.id, 'guest2Id', guest?.id || '')}
+                      renderInput={(params) => <TextField {...params} placeholder="Select Guest 2" />}
+                      sx={{ flex: 1 }}
+                    />
+                    <IconButton onClick={() => removeSitTogetherRule(rule.id)} size="small" color="error">
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                ))}
+                
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={addSitTogetherRule}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Add Sit Together Rule
+                </Button>
+              </Stack>
+            </Box>
+
+            {/* Sit Away Rules */}
+            <Box>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                🚫 Sit Away Rules
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" mb={1}>
+                These guests will never be seated adjacent to each other
+              </Typography>
+              
+              <Stack spacing={1}>
+                {sitAwayRules.map((rule) => (
+                  <Stack
+                    key={rule.id}
+                    direction="row"
+                    spacing={1}
+                    alignItems="center"
+                    sx={{ border: '1px solid #f44336', p: 1, borderRadius: 1, bgcolor: 'white' }}
+                  >
+                    <Autocomplete
+                      size="small"
+                      options={allGuests}
+                      getOptionLabel={(guest) => `${guest.name} (${guest.company})`}
+                      value={allGuests.find(g => g.id === rule.guest1Id) || null}
+                      onChange={(_, guest) => updateSitAwayRule(rule.id, 'guest1Id', guest?.id || '')}
+                      renderInput={(params) => <TextField {...params} placeholder="Select Guest 1" />}
+                      sx={{ flex: 1 }}
+                    />
+                    <Typography variant="body2">⛔</Typography>
+                    <Autocomplete
+                      size="small"
+                      options={allGuests}
+                      getOptionLabel={(guest) => `${guest.name} (${guest.company})`}
+                      value={allGuests.find(g => g.id === rule.guest2Id) || null}
+                      onChange={(_, guest) => updateSitAwayRule(rule.id, 'guest2Id', guest?.id || '')}
+                      renderInput={(params) => <TextField {...params} placeholder="Select Guest 2" />}
+                      sx={{ flex: 1 }}
+                    />
+                    <IconButton onClick={() => removeSitAwayRule(rule.id)} size="small" color="error">
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                ))}
+                
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={addSitAwayRule}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Add Sit Away Rule
+                </Button>
+              </Stack>
+            </Box>
+          </Paper>
+
+          <Divider />
+
           {/* ========== TABLE RULES ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd' }}>
             <FormLabel component="legend" sx={{ mb: 1, fontWeight: 600 }}>
@@ -239,17 +460,8 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
               Define how guests are distributed across tables
             </Typography>
 
-            {/* Warning when both rules are enabled */}
-            {tableRules.ratioRule.enabled && tableRules.spacingRule.enabled && (
-              <Box sx={{ bgcolor: '#fff3e0', border: '1px solid #ff9800', p: 1.5, borderRadius: 1, mb: 2 }}>
-                <Typography variant="caption" color="warning.dark">
-                  ⚠️ <strong>Note:</strong> Both Ratio and Spacing rules are enabled. Spacing Rule will take priority.
-                </Typography>
-              </Box>
-            )}
-
             <Stack spacing={2}>
-              {/* ===== RATIO RULE ===== */}
+              {/* Ratio Rule */}
               <Box
                 sx={{
                   border: tableRules.ratioRule.enabled ? '2px solid #1976d2' : '1px solid #ddd',
@@ -309,29 +521,11 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
                         sx={{ width: 120 }}
                       />
                     </Stack>
-
-                    <Box sx={{ bgcolor: '#f5f5f5', p: 1.5, borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        <strong>Example:</strong> With ratio {tableRules.ratioRule.hostRatio}:
-                        {tableRules.ratioRule.externalRatio}, a 12-seat table will have ~
-                        {Math.round(
-                          (12 * tableRules.ratioRule.hostRatio) /
-                            (tableRules.ratioRule.hostRatio + tableRules.ratioRule.externalRatio)
-                        )}{' '}
-                        host and ~
-                        {12 -
-                          Math.round(
-                            (12 * tableRules.ratioRule.hostRatio) /
-                              (tableRules.ratioRule.hostRatio + tableRules.ratioRule.externalRatio)
-                          )}{' '}
-                        external guests.
-                      </Typography>
-                    </Box>
                   </Stack>
                 )}
               </Box>
 
-              {/* ===== SPACING RULE ===== */}
+              {/* Spacing Rule */}
               <Box
                 sx={{
                   border: tableRules.spacingRule.enabled ? '2px solid #1976d2' : '1px solid #ddd',
@@ -365,34 +559,24 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
                 </Stack>
 
                 {tableRules.spacingRule.enabled && (
-                  <Stack spacing={2} mt={2}>
-                    <TextField
-                      label="External Guests Between Hosts"
-                      type="number"
-                      size="small"
-                      value={tableRules.spacingRule.spacing}
-                      onChange={(e) =>
-                        setTableRules({
-                          ...tableRules,
-                          spacingRule: {
-                            ...tableRules.spacingRule,
-                            spacing: Math.max(1, parseInt(e.target.value) || 1),
-                          },
-                        })
-                      }
-                      inputProps={{ min: 1, max: 10 }}
-                      sx={{ width: 250 }}
-                      helperText="Number of external guests between each host guest"
-                    />
-
-                    <Box sx={{ bgcolor: '#f5f5f5', p: 1.5, borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        <strong>Example Pattern (spacing = {tableRules.spacingRule.spacing}):</strong>
-                        <br />
-                        {generateSpacingPattern(tableRules.spacingRule.spacing, 8)}
-                      </Typography>
-                    </Box>
-                  </Stack>
+                  <TextField
+                    label="External Guests Between Hosts"
+                    type="number"
+                    size="small"
+                    value={tableRules.spacingRule.spacing}
+                    onChange={(e) =>
+                      setTableRules({
+                        ...tableRules,
+                        spacingRule: {
+                          ...tableRules.spacingRule,
+                          spacing: Math.max(1, parseInt(e.target.value) || 1),
+                        },
+                      })
+                    }
+                    inputProps={{ min: 1, max: 10 }}
+                    sx={{ width: 250 }}
+                    helperText="Number of external guests between each host guest"
+                  />
                 )}
               </Box>
             </Stack>
@@ -408,7 +592,7 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
           variant="contained"
           color="primary"
           onClick={handleConfirm}
-          disabled={isProcessing || (!includeHost && !includeExternal)}
+          disabled={isProcessing || (!includeHost && !includeExternal) || validationErrors.length > 0}
         >
           {isProcessing ? 'Filling…' : 'Confirm Auto-Fill'}
         </Button>
