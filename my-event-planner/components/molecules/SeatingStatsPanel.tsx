@@ -1,5 +1,5 @@
 // ============================================================================
-// PART 3: Enhanced SeatingStatsPanel.tsx with Proximity Violations
+// Enhanced SeatingStatsPanel.tsx with Table Configuration Violations
 // ============================================================================
 
 'use client';
@@ -22,17 +22,17 @@ import {
 } from '@mui/material';
 import {
   InfoOutlined,
-  ArrowBack,
   Warning,
   CheckCircle,
   Error,
   Close,
   GroupAdd,
   PersonOff,
+  TableChart,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
-import { getProximityViolations } from '@/utils/seatAutoFillHelper';
+import { getProximityViolations, getTableConfigViolations } from '@/utils/seatAutoFillHelper';
 
 interface SeatingStats {
   totalSeats: number;
@@ -56,11 +56,12 @@ interface SeatingStats {
   hasUnseatedVIPs: boolean;
   hasUnseatedGuests: boolean;
   
-  // NEW: Proximity violations
+  // Violations
   proximityViolations: any[];
+  tableConfigViolations: any[];
 }
 
-type DetailView = 'overview' | 'vips' | 'violations';
+type DetailView = 'overview' | 'vips' | 'violations' | 'tableconfig';
 
 export default function SeatingStatsPanel() {
   const [expanded, setExpanded] = useState(false);
@@ -114,8 +115,9 @@ export default function SeatingStatsPanel() {
     const totalVIPsUnseated = hostVIPsUnseated.length + externalVIPsUnseated.length;
     const totalUnseated = hostUnseatedGuests.length + externalUnseatedGuests.length;
 
-    // Get proximity violations
+    // Get violations
     const proximityViolations = getProximityViolations();
+    const tableConfigViolations = getTableConfigViolations();
 
     return {
       totalSeats,
@@ -137,6 +139,7 @@ export default function SeatingStatsPanel() {
       hasUnseatedGuests: totalUnseated > 0,
       
       proximityViolations,
+      tableConfigViolations,
     };
   }, [tables, hostGuests, externalGuests]);
 
@@ -149,10 +152,13 @@ export default function SeatingStatsPanel() {
     return lookup;
   }, [hostGuests, externalGuests]);
 
+  // Total violations
+  const totalViolations = stats.proximityViolations.length + stats.tableConfigViolations.length;
+
   // Determine status color
   const getStatusColor = (): 'error' | 'warning' | 'success' => {
     if (stats.hasUnseatedVIPs || stats.proximityViolations.length > 0) return 'error';
-    if (stats.hasUnseatedGuests) return 'warning';
+    if (stats.hasUnseatedGuests || stats.tableConfigViolations.length > 0) return 'warning';
     return 'success';
   };
 
@@ -191,7 +197,7 @@ export default function SeatingStatsPanel() {
           }}
         >
           <InfoOutlined />
-          {(stats.hasUnseatedVIPs || stats.proximityViolations.length > 0) && (
+          {(stats.hasUnseatedVIPs || totalViolations > 0) && (
             <Box
               sx={{
                 position: 'absolute',
@@ -209,7 +215,7 @@ export default function SeatingStatsPanel() {
                 fontWeight: 'bold',
               }}
             >
-              {stats.totalVIPsUnseated + stats.proximityViolations.length}
+              {stats.totalVIPsUnseated + totalViolations}
             </Box>
           )}
         </Fab>
@@ -260,6 +266,8 @@ export default function SeatingStatsPanel() {
             value={detailView}
             onChange={(_, v) => setDetailView(v)}
             sx={{ borderBottom: 1, borderColor: 'divider' }}
+            variant="scrollable"
+            scrollButtons="auto"
           >
             <Tab label="Overview" value="overview" />
             <Tab 
@@ -281,7 +289,7 @@ export default function SeatingStatsPanel() {
             <Tab 
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  Violations
+                  Proximity
                   {stats.proximityViolations.length > 0 && (
                     <Chip 
                       label={stats.proximityViolations.length} 
@@ -293,6 +301,22 @@ export default function SeatingStatsPanel() {
                 </Box>
               }
               value="violations" 
+            />
+            <Tab 
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  Table Rules
+                  {stats.tableConfigViolations.length > 0 && (
+                    <Chip 
+                      label={stats.tableConfigViolations.length} 
+                      size="small" 
+                      color="warning"
+                      sx={{ height: 16, fontSize: 10 }}
+                    />
+                  )}
+                </Box>
+              }
+              value="tableconfig" 
             />
           </Tabs>
 
@@ -353,7 +377,27 @@ export default function SeatingStatsPanel() {
                   >
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
                       <Typography variant="body2" fontWeight="bold">
-                        🚨 {stats.proximityViolations.length} Proximity Rule Violations
+                        🚨 {stats.proximityViolations.length} Proximity Violations
+                      </Typography>
+                      <Typography variant="caption">View →</Typography>
+                    </Stack>
+                  </Box>
+                )}
+
+                {stats.tableConfigViolations.length > 0 && (
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      bgcolor: 'warning.light',
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: 'warning.main', color: 'white' },
+                    }}
+                    onClick={() => setDetailView('tableconfig')}
+                  >
+                    <Stack direction="row" alignItems="center" justifyContent="space-between">
+                      <Typography variant="body2" fontWeight="bold">
+                        ⚙️ {stats.tableConfigViolations.length} Table Rule Violations
                       </Typography>
                       <Typography variant="caption">View →</Typography>
                     </Stack>
@@ -623,6 +667,115 @@ export default function SeatingStatsPanel() {
                                   color="error"
                                   sx={{ mt: 0.5 }}
                                 />
+                              </ListItem>
+                            ))}
+                        </List>
+                      </Box>
+                    )}
+                  </>
+                )}
+              </Stack>
+            )}
+
+            {detailView === 'tableconfig' && (
+              <Stack spacing={2}>
+                {stats.tableConfigViolations.length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <CheckCircle sx={{ fontSize: 48, color: 'success.main', mb: 2 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      No table rule violations
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    {/* Ratio Violations */}
+                    {stats.tableConfigViolations.filter((v: any) => v.type === 'ratio').length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                          ⚖️ Ratio Violations
+                        </Typography>
+                        <List dense disablePadding>
+                          {stats.tableConfigViolations
+                            .filter((v: any) => v.type === 'ratio')
+                            .map((violation: any, idx: number) => (
+                              <ListItem
+                                key={idx}
+                                sx={{
+                                  bgcolor: violation.severity === 'major' ? '#ffebee' : '#fff3e0',
+                                  mb: 1,
+                                  borderRadius: 1,
+                                  border: `1px solid ${violation.severity === 'major' ? '#ef5350' : '#ff9800'}`,
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-start',
+                                }}
+                              >
+                                <Stack direction="row" spacing={1} alignItems="center" mb={0.5} width="100%">
+                                  <TableChart fontSize="small" color={violation.severity === 'major' ? 'error' : 'warning'} />
+                                  <Typography variant="body2" fontWeight="bold">
+                                    {violation.tableLabel}
+                                  </Typography>
+                                  <Chip
+                                    label={violation.severity}
+                                    size="small"
+                                    color={violation.severity === 'major' ? 'error' : 'warning'}
+                                    sx={{ ml: 'auto', textTransform: 'capitalize' }}
+                                  />
+                                </Stack>
+                                <Box sx={{ pl: 3, width: '100%' }}>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    <strong>Expected:</strong> {violation.expected}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    <strong>Actual:</strong> {violation.actual}
+                                  </Typography>
+                                </Box>
+                              </ListItem>
+                            ))}
+                        </List>
+                      </Box>
+                    )}
+
+                    {/* Spacing Violations */}
+                    {stats.tableConfigViolations.filter((v: any) => v.type === 'spacing').length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" color="warning.dark" gutterBottom>
+                          📏 Spacing Violations
+                        </Typography>
+                        <List dense disablePadding>
+                          {stats.tableConfigViolations
+                            .filter((v: any) => v.type === 'spacing')
+                            .map((violation: any, idx: number) => (
+                              <ListItem
+                                key={idx}
+                                sx={{
+                                  bgcolor: violation.severity === 'major' ? '#ffebee' : '#fff3e0',
+                                  mb: 1,
+                                  borderRadius: 1,
+                                  border: `1px solid ${violation.severity === 'major' ? '#ef5350' : '#ff9800'}`,
+                                  flexDirection: 'column',
+                                  alignItems: 'flex-start',
+                                }}
+                              >
+                                <Stack direction="row" spacing={1} alignItems="center" mb={0.5} width="100%">
+                                  <TableChart fontSize="small" color={violation.severity === 'major' ? 'error' : 'warning'} />
+                                  <Typography variant="body2" fontWeight="bold">
+                                    {violation.tableLabel}
+                                  </Typography>
+                                  <Chip
+                                    label={violation.severity}
+                                    size="small"
+                                    color={violation.severity === 'major' ? 'error' : 'warning'}
+                                    sx={{ ml: 'auto', textTransform: 'capitalize' }}
+                                  />
+                                </Stack>
+                                <Box sx={{ pl: 3, width: '100%' }}>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    <strong>Expected:</strong> {violation.expected}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    <strong>Actual:</strong> {violation.actual}
+                                  </Typography>
+                                </Box>
                               </ListItem>
                             ))}
                         </List>

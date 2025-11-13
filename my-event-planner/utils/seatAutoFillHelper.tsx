@@ -1,5 +1,5 @@
 // ============================================================================
-// FIXED seatAutoFillHelper.tsx - Respects Custom Seat Ordering
+// FIXED seatAutoFillHelper.tsx - With Table Rules Integration
 // ============================================================================
 
 import { useSeatStore } from "@/store/seatStore";
@@ -67,10 +67,24 @@ export interface ProximityViolation {
   seat2Id: string;
 }
 
+export interface TableConfigViolation {
+  type: 'ratio' | 'spacing';
+  tableId: string;
+  tableLabel: string;
+  expected: string;
+  actual: string;
+  severity: 'minor' | 'major';
+}
+
 let proximityViolations: ProximityViolation[] = [];
+let tableConfigViolations: TableConfigViolation[] = [];
 
 export function getProximityViolations(): ProximityViolation[] {
   return proximityViolations;
+}
+
+export function getTableConfigViolations(): TableConfigViolation[] {
+  return tableConfigViolations;
 }
 
 /** Helper: read nested field values */
@@ -210,7 +224,7 @@ function reorderByConstraints(
 }
 
 /**
- * Check if a guest can be safely placed in a seat
+ * Check if a guest can be safely placed in a seat (sit-away check)
  */
 function canSafelyPlace(
   guestId: string,
@@ -233,6 +247,126 @@ function canSafelyPlace(
   }
   
   return { safe: true };
+}
+
+/**
+ * Get current table composition for table rules
+ */
+function getTableComposition(tableSeats: any[], guestLookup: Map<string, any>) {
+  let hostCount = 0;
+  let externalCount = 0;
+  
+  for (const seat of tableSeats) {
+    if (!seat.assignedGuestId) continue;
+    const guest = guestLookup.get(seat.assignedGuestId);
+    if (!guest) continue;
+    
+    if (guest.fromHost) {
+      hostCount++;
+    } else {
+      externalCount++;
+    }
+  }
+  
+  return { hostCount, externalCount, total: hostCount + externalCount };
+}
+
+/**
+ * Check if adding a guest would significantly violate ratio rule
+ */
+function wouldViolateRatioRule(
+  tableSeats: any[],
+  guestIsHost: boolean,
+  guestLookup: Map<string, any>,
+  ratioRule: RatioRule
+): boolean {
+  if (!ratioRule.enabled) return false;
+  
+  const composition = getTableComposition(tableSeats, guestLookup);
+  const newHostCount = guestIsHost ? composition.hostCount + 1 : composition.hostCount;
+  const newExternalCount = guestIsHost ? composition.externalCount : composition.externalCount + 1;
+  const newTotal = newHostCount + newExternalCount;
+  
+  if (newTotal === 0) return false;
+  
+  const expectedHostRatio = ratioRule.hostRatio / (ratioRule.hostRatio + ratioRule.externalRatio);
+  const actualHostRatio = newHostCount / newTotal;
+  
+  // Use 30% tolerance for best effort
+  const tolerance = 0.3;
+  const deviation = Math.abs(actualHostRatio - expectedHostRatio);
+  
+  return deviation > tolerance;
+}
+
+/**
+ * Check spacing rule - look at consecutive guests of same type
+ */
+function wouldViolateSpacingRule(
+  seat: any,
+  tableSeats: any[],
+  guestIsHost: boolean,
+  guestLookup: Map<string, any>,
+  spacingRule: SpacingRule
+): boolean {
+  if (!spacingRule.enabled) return false;
+  
+  const seatIndex = tableSeats.findIndex(s => s.id === seat.id);
+  if (seatIndex < 0) return false;
+  
+  // Look back at previous consecutive external guests
+  let consecutiveExternal = 0;
+  
+  for (let i = seatIndex - 1; i >= 0; i--) {
+    const prevSeat = tableSeats[i];
+    if (!prevSeat.assignedGuestId) break;
+    
+    const prevGuest = guestLookup.get(prevSeat.assignedGuestId);
+    if (!prevGuest) break;
+    
+    if (prevGuest.fromHost) {
+      break;
+    } else {
+      consecutiveExternal++;
+    }
+  }
+  
+  // If we've had N consecutive external guests and trying to add another
+  if (!guestIsHost && consecutiveExternal >= spacingRule.spacing) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Score a guest for a seat based on table rules (lower = better)
+ */
+function scoreGuestForSeat(
+  guest: any,
+  seat: any,
+  tableSeats: any[],
+  guestLookup: Map<string, any>,
+  tableRules?: TableRules
+): number {
+  if (!tableRules) return 0;
+  
+  let score = 0;
+  const guestIsHost = guest.fromHost;
+  
+  if (tableRules.ratioRule.enabled) {
+    if (wouldViolateRatioRule(tableSeats, guestIsHost, guestLookup, tableRules.ratioRule)) {
+      score += 50; // Penalty for ratio violation
+    }
+  }
+  
+  if (tableRules.spacingRule.enabled) {
+    if (wouldViolateSpacingRule(seat, tableSeats, guestIsHost, guestLookup, tableRules.spacingRule)) {
+      score += 30; // Penalty for spacing violation
+    }
+  }
+  
+  return score;
 }
 
 /**
@@ -309,7 +443,7 @@ function strategicPreSeatPairs(
 }
 
 /**
- * Smart guest selection that ALWAYS reconsiders all unassigned guests
+ * Smart guest selection with table rules consideration
  */
 function selectBestGuestForSeat(
   allCandidates: any[],
@@ -318,7 +452,9 @@ function selectBestGuestForSeat(
   allSeats: any[],
   constraintMap: Map<string, GuestConstraints>,
   proximityRules: ProximityRules,
-  comparator: (a: any, b: any) => number
+  comparator: (a: any, b: any) => number,
+  guestLookup: Map<string, any>,
+  tableRules?: TableRules
 ): any | null {
   const adjacentSeats = getAdjacentSeats(nextSeat, allSeats);
   const adjacentGuestIds = adjacentSeats
@@ -342,7 +478,7 @@ function selectBestGuestForSeat(
     }
   }
   
-  // PRIORITY 2: Find best available guest from ALL unassigned candidates
+  // PRIORITY 2: Find best available guest considering proximity AND table rules
   const unassignedCandidates = allCandidates.filter((c) => !assignedSet.has(c.id));
   
   // Sort by constraints first, then by original sort order
@@ -361,31 +497,48 @@ function selectBestGuestForSeat(
     return comparator(a, b);
   });
   
-  // Try each candidate in order until we find one that's safe
+  // Try to find best candidate considering both proximity and table rules
+  let bestCandidate: any = null;
+  let bestScore = Infinity;
+  
   for (const candidate of sortedUnassigned) {
     const constraints = constraintMap.get(candidate.id);
     if (!constraints) continue;
     
+    // Check sit-away (mandatory)
     const safetyCheck = canSafelyPlace(candidate.id, nextSeat, allSeats, constraints, proximityRules);
+    if (!safetyCheck.safe) continue;
     
-    if (safetyCheck.safe) {
-      return candidate;
+    // Score based on table rules (best effort)
+    const tableScore = scoreGuestForSeat(candidate, nextSeat, allSeats, guestLookup, tableRules);
+    
+    if (tableScore < bestScore) {
+      bestCandidate = candidate;
+      bestScore = tableScore;
+      
+      // If we found a perfect fit, use it
+      if (bestScore === 0) break;
     }
   }
   
-  return null;
+  return bestCandidate;
 }
 
 /**
  * Detect violations after seating is complete
  */
-function detectViolations(proximityRules: ProximityRules, guestStore: any): ProximityViolation[] {
-  const violations: ProximityViolation[] = [];
+function detectViolations(
+  proximityRules: ProximityRules,
+  tableRules: TableRules | undefined,
+  guestStore: any,
+  guestLookup: Map<string, any>
+): void {
   const seatStore = useSeatStore.getState();
-  const allGuests = [...guestStore.hostGuests, ...guestStore.externalGuests];
-  const guestLookup: Record<string, any> = {};
-  allGuests.forEach((g: any) => (guestLookup[g.id] = g));
   
+  proximityViolations = [];
+  tableConfigViolations = [];
+  
+  // Detect proximity violations
   for (const table of seatStore.tables) {
     const seats = table.seats || [];
     
@@ -393,7 +546,7 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
       if (!seat.assignedGuestId) continue;
       
       const guestId = seat.assignedGuestId;
-      const guest = guestLookup[guestId];
+      const guest = guestLookup.get(guestId);
       if (!guest) continue;
       
       const adjacentSeats = getAdjacentSeats(seat, seats);
@@ -404,14 +557,14 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
       // Check sit-together violations
       const togetherPartner = getSitTogetherPartner(guestId, proximityRules.sitTogether);
       if (togetherPartner) {
-        const partner = guestLookup[togetherPartner];
+        const partner = guestLookup.get(togetherPartner);
         if (partner && !adjacentGuestIds.includes(togetherPartner)) {
           const partnerAssigned = seatStore.tables.some((t: any) =>
             t.seats.some((s: any) => s.assignedGuestId === togetherPartner)
           );
           
           if (partnerAssigned) {
-            const alreadyReported = violations.some(
+            const alreadyReported = proximityViolations.some(
               (v) =>
                 v.type === 'sit-together' &&
                 ((v.guest1Id === guestId && v.guest2Id === togetherPartner) ||
@@ -419,7 +572,7 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
             );
             
             if (!alreadyReported) {
-              violations.push({
+              proximityViolations.push({
                 type: 'sit-together',
                 guest1Id: guestId,
                 guest2Id: togetherPartner,
@@ -438,11 +591,11 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
       // Check sit-away violations
       for (const adjGuestId of adjacentGuestIds) {
         if (shouldSitAway(guestId, adjGuestId, proximityRules.sitAway)) {
-          const adjGuest = guestLookup[adjGuestId];
+          const adjGuest = guestLookup.get(adjGuestId);
           const adjSeat = seats.find((s: any) => s.assignedGuestId === adjGuestId);
           
           if (adjGuest && adjSeat) {
-            const alreadyReported = violations.some(
+            const alreadyReported = proximityViolations.some(
               (v) =>
                 v.type === 'sit-away' &&
                 ((v.guest1Id === guestId && v.guest2Id === adjGuestId) ||
@@ -450,7 +603,7 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
             );
             
             if (!alreadyReported) {
-              violations.push({
+              proximityViolations.push({
                 type: 'sit-away',
                 guest1Id: guestId,
                 guest2Id: adjGuestId,
@@ -468,11 +621,75 @@ function detectViolations(proximityRules: ProximityRules, guestStore: any): Prox
     }
   }
   
-  return violations;
+  // Detect table configuration violations
+  if (!tableRules) return;
+  
+  for (const table of seatStore.tables) {
+    const seats = table.seats || [];
+    const composition = getTableComposition(seats, guestLookup);
+    
+    // Check ratio violations
+    if (tableRules.ratioRule.enabled && composition.total > 0) {
+      const expectedRatio = tableRules.ratioRule.hostRatio / 
+        (tableRules.ratioRule.hostRatio + tableRules.ratioRule.externalRatio);
+      const actualRatio = composition.hostCount / composition.total;
+      
+      const deviation = Math.abs(actualRatio - expectedRatio);
+      const tolerance = 0.2;
+      
+      if (deviation > tolerance) {
+        const severity = deviation > 0.4 ? 'major' : 'minor';
+        
+        tableConfigViolations.push({
+          type: 'ratio',
+          tableId: table.id,
+          tableLabel: table.label,
+          expected: `${Math.round(expectedRatio * 100)}% host guests`,
+          actual: `${Math.round(actualRatio * 100)}% host (${composition.hostCount}H / ${composition.externalCount}E)`,
+          severity,
+        });
+      }
+    }
+    
+    // Check spacing violations
+    if (tableRules.spacingRule.enabled) {
+      const sortedSeats = [...seats].sort((a, b) => (a.seatNumber || 999) - (b.seatNumber || 999));
+      
+      let consecutiveExternal = 0;
+      let maxConsecutiveExternal = 0;
+      
+      for (const seat of sortedSeats) {
+        if (!seat.assignedGuestId) continue;
+        
+        const guest = guestLookup.get(seat.assignedGuestId);
+        if (!guest) continue;
+        
+        if (guest.fromHost) {
+          consecutiveExternal = 0;
+        } else {
+          consecutiveExternal++;
+          maxConsecutiveExternal = Math.max(maxConsecutiveExternal, consecutiveExternal);
+        }
+      }
+      
+      if (maxConsecutiveExternal > tableRules.spacingRule.spacing) {
+        const severity = maxConsecutiveExternal > tableRules.spacingRule.spacing * 2 ? 'major' : 'minor';
+        
+        tableConfigViolations.push({
+          type: 'spacing',
+          tableId: table.id,
+          tableLabel: table.label,
+          expected: `Max ${tableRules.spacingRule.spacing} consecutive external guests`,
+          actual: `Found ${maxConsecutiveExternal} consecutive external guests`,
+          severity,
+        });
+      }
+    }
+  }
 }
 
 /**
- * MAIN AUTOFILL FUNCTION - Respects custom seat ordering
+ * MAIN AUTOFILL FUNCTION - Respects custom seat ordering with table rules
  */
 export async function autoFillSeats(options: AutoFillOptions = {}) {
   const {
@@ -492,11 +709,13 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   }
 
   proximityViolations = [];
+  tableConfigViolations = [];
 
   // Collect candidates
   const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
   const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
   const allGuests = [...hostPool, ...externalPool];
+  const guestLookup = new Map(allGuests.map(g => [g.id, g]));
 
   // Build constraint map
   const constraintMap = buildConstraintMap(allGuests, proximityRules);
@@ -513,16 +732,16 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   const hostCandidates = hostPool.filter((g: any) => !lockedAssignedIds.has(g.id));
   const externalCandidates = externalPool.filter((g: any) => !lockedAssignedIds.has(g.id));
 
-  // Sort candidates
+  // Sort candidates SEPARATELY for each list
   const comparator = makeComparator(sortRules);
   let sortedHostCandidates = [...hostCandidates].sort(comparator);
   let sortedExternalCandidates = [...externalCandidates].sort(comparator);
   
-  // Re-order to prioritize constrained guests
+  // Re-order to prioritize constrained guests within each list
   sortedHostCandidates = reorderByConstraints(sortedHostCandidates, constraintMap);
   sortedExternalCandidates = reorderByConstraints(sortedExternalCandidates, constraintMap);
   
-  // Combine all candidates
+  // Combine all candidates (maintaining constraint priority)
   const allSortedCandidates = [...sortedHostCandidates, ...sortedExternalCandidates].sort((a, b) => {
     const ca = constraintMap.get(a.id)!;
     const cb = constraintMap.get(b.id)!;
@@ -553,7 +772,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   const tablesWithOrder = tablesAfterPreSeating.map((t: any, idx: number) => {
     let tableOrder = typeof (t as any).tableNumber === "number" ? (t as any).tableNumber : undefined;
     if (tableOrder === undefined) {
-      const parsed = parseInt(t.id, 10);
+      const parsed = parseInt(t.label.match(/\d+/)?.[0] || '999');
       tableOrder = !isNaN(parsed) ? parsed : idx;
     }
     return { table: t, tableOrder };
@@ -562,12 +781,10 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   tablesWithOrder.sort((a, b) => a.tableOrder - b.tableOrder);
 
   for (const { table } of tablesWithOrder) {
-    // CRITICAL FIX: Sort seats by seatNumber (which reflects custom ordering)
-    // The seatNumber property contains the user's custom seat order
+    // Sort seats by seatNumber (respects custom ordering)
     const seats = (table.seats ?? [])
       .map((s: any) => ({ ...s }))
       .sort((a: any, b: any) => {
-        // Sort by seatNumber directly - this respects custom ordering
         const aSeatNum = typeof a.seatNumber === 'number' ? a.seatNumber : 999;
         const bSeatNum = typeof b.seatNumber === 'number' ? b.seatNumber : 999;
         return aSeatNum - bSeatNum;
@@ -586,7 +803,9 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
         seats,
         constraintMap,
         proximityRules,
-        comparator
+        comparator,
+        guestLookup,
+        tableRules
       );
       
       if (guestToAssign) {
@@ -597,5 +816,5 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   }
   
   // Detect violations
-  proximityViolations = detectViolations(proximityRules, guestStore);
+  detectViolations(proximityRules, tableRules, guestStore, guestLookup);
 }
