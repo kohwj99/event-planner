@@ -353,7 +353,10 @@ export default function PlaygroundCanvas() {
         .text((s) => s.seatNumber);
 
       // GUEST BOXES
-      const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
+      
+      // const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
+      const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(seatsWithGuest, (s) => s.id);
+
       guestBoxes.exit().remove();
       const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box').style('pointer-events', 'none');
       guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');

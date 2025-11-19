@@ -1,8 +1,9 @@
-//ENHANCED seatAutoFillHelper.tsx - With Complete Locked Guest Support
+//ENHANCED seatAutoFillHelper.tsx - With Smart VIP-Aware Sit-Away Logic
 // ============================================================================
 
 import { useSeatStore } from "@/store/seatStore";
 import { useGuestStore } from "@/store/guestStore";
+import { detectProximityViolations, ProximityViolation } from './violationDetector';
 
 export type SortField = "name" | "country" | "organization" | "ranking";
 export type SortDirection = "asc" | "desc";
@@ -54,18 +55,18 @@ export interface AutoFillOptions {
   proximityRules?: ProximityRules;
 }
 
-export interface ProximityViolation {
-  type: 'sit-together' | 'sit-away' | 'table-config';
-  guest1Id: string;
-  guest2Id?: string;
-  guest1Name: string;
-  guest2Name?: string;
-  tableId: string;
-  tableLabel: string;
-  seat1Id?: string;
-  seat2Id?: string;
-  reason?: string;
-}
+// export interface ProximityViolation {
+//   type: 'sit-together' | 'sit-away' | 'table-config';
+//   guest1Id: string;
+//   guest2Id?: string;
+//   guest1Name: string;
+//   guest2Name?: string;
+//   tableId: string;
+//   tableLabel: string;
+//   seat1Id?: string;
+//   seat2Id?: string;
+//   reason?: string;
+// }
 
 let proximityViolations: ProximityViolation[] = [];
 
@@ -158,7 +159,13 @@ function getSitAwayGuests(guestId: string, rules: SitAwayRule[]): string[] {
   return awayGuests;
 }
 
-// NEW: Locked guest location tracking
+/** NEW: Check if guest is VIP (ranking 1-4) */
+function isVIP(guest: any): boolean {
+  const ranking = Number(guest?.ranking) || Infinity;
+  return ranking >= 1 && ranking <= 4;
+}
+
+// Locked guest location tracking
 interface LockedGuestLocation {
   guestId: string;
   tableId: string;
@@ -187,7 +194,7 @@ function buildLockedGuestMap(tables: any[]): Map<string, LockedGuestLocation> {
   return lockedMap;
 }
 
-// NEW: Check if placing guest would violate sit-away with locked guests
+// Check if placing guest would violate sit-away with locked guests
 function wouldViolateSitAwayWithLocked(
   guestId: string,
   seat: any,
@@ -203,7 +210,7 @@ function wouldViolateSitAwayWithLocked(
   for (const adjSeat of adjacentSeats) {
     if (adjSeat.locked && adjSeat.assignedGuestId) {
       if (sitAwayGuests.includes(adjSeat.assignedGuestId)) {
-        return true; // Would violate sit-away with locked guest
+        return true;
       }
     }
   }
@@ -235,7 +242,6 @@ function makeComparatorWithHostTieBreak(baseComparator: (a: any, b: any) => numb
       return sortResult;
     }
 
-    // TIE-BREAKER: Only when sort scores are identical
     const aIsHost = a.fromHost === true;
     const bIsHost = b.fromHost === true;
 
@@ -246,24 +252,16 @@ function makeComparatorWithHostTieBreak(baseComparator: (a: any, b: any) => numb
   };
 }
 
-/**
- * Get next guest from unified sorted list
- */
 function getNextGuestFromUnifiedList(
   allCandidates: any[],
   assignedGuests: Set<string>,
   comparator: (a: any, b: any) => number
 ): any | null {
   const available = allCandidates.filter(g => !assignedGuests.has(g.id));
-
   if (available.length === 0) return null;
-
   return available[0];
 }
 
-/**
- * For spacing/ratio rules: get next guest of specific type
- */
 function getNextGuestOfType(
   allCandidates: any[],
   assignedGuests: Set<string>,
@@ -272,9 +270,7 @@ function getNextGuestOfType(
   const available = allCandidates.filter(g =>
     !assignedGuests.has(g.id) && g.fromHost === isHost
   );
-
   if (available.length === 0) return null;
-
   return available[0];
 }
 
@@ -308,7 +304,6 @@ function performInitialPlacement(
     });
 
     const unlockedSeats = seats.filter((s: any) => !s.locked);
-
     const totalUnlockedSeats = unlockedSeats.length;
     let targetHostCount = 0;
     let targetExternalCount = 0;
@@ -327,10 +322,8 @@ function performInitialPlacement(
 
       while (seatIdx < unlockedSeats.length) {
         const seat = unlockedSeats[seatIdx];
-
         let nextHost = getNextGuestOfType(allCandidates, assignedGuests, true);
 
-        // NEW: Check sit-away with locked guests
         if (nextHost && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
             const availableHosts = allCandidates.filter(g =>
@@ -354,7 +347,6 @@ function performInitialPlacement(
           const spacingSeat = unlockedSeats[seatIdx];
           let nextExternal = getNextGuestOfType(allCandidates, assignedGuests, false);
 
-          // NEW: Check sit-away with locked guests
           if (nextExternal && proximityRules) {
             if (wouldViolateSitAwayWithLocked(nextExternal.id, spacingSeat, seats, lockedGuestMap, proximityRules)) {
               const availableExternals = allCandidates.filter(g =>
@@ -378,7 +370,6 @@ function performInitialPlacement(
         const seat = unlockedSeats[seatIdx];
         let nextGuest = getNextGuestFromUnifiedList(allCandidates, assignedGuests, comparatorWithTieBreak);
 
-        // NEW: Check sit-away with locked guests
         if (nextGuest && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
             const availableGuests = allCandidates.filter(g => !assignedGuests.has(g.id));
@@ -406,7 +397,6 @@ function performInitialPlacement(
         if (shouldPlaceHost) {
           let nextHost = getNextGuestOfType(allCandidates, assignedGuests, true);
 
-          // NEW: Check sit-away
           if (nextHost && proximityRules) {
             if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
               const availableHosts = allCandidates.filter(g =>
@@ -429,7 +419,6 @@ function performInitialPlacement(
         if (shouldPlaceExternal) {
           let nextExternal = getNextGuestOfType(allCandidates, assignedGuests, false);
 
-          // NEW: Check sit-away
           if (nextExternal && proximityRules) {
             if (wouldViolateSitAwayWithLocked(nextExternal.id, seat, seats, lockedGuestMap, proximityRules)) {
               const availableExternals = allCandidates.filter(g =>
@@ -451,7 +440,6 @@ function performInitialPlacement(
 
         let nextGuest = getNextGuestFromUnifiedList(allCandidates, assignedGuests, comparatorWithTieBreak);
 
-        // NEW: Check sit-away
         if (nextGuest && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
             const availableGuests = allCandidates.filter(g => !assignedGuests.has(g.id));
@@ -468,11 +456,9 @@ function performInitialPlacement(
       }
 
     } else {
-      // NO SPECIAL RULES
       for (const seat of unlockedSeats) {
         let nextGuest = getNextGuestFromUnifiedList(allCandidates, assignedGuests, comparatorWithTieBreak);
 
-        // NEW: Check sit-away with locked guests
         if (nextGuest && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
             const availableGuests = allCandidates.filter(g => !assignedGuests.has(g.id));
@@ -528,14 +514,11 @@ function applySitTogetherOptimization(
 
     const { higherPriority, lowerPriority } = pairData;
 
-    // NEW: Check if either guest is locked
     const higherIsLocked = lockedGuestMap.has(higherPriority.id);
     const lowerIsLocked = lockedGuestMap.has(lowerPriority.id);
 
-    // Case 1: Both locked - can't move
     if (higherIsLocked && lowerIsLocked) continue;
 
-    // Case 2: Higher is locked, lower is not
     if (higherIsLocked) {
       const lockedLocation = lockedGuestMap.get(higherPriority.id)!;
 
@@ -591,7 +574,6 @@ function applySitTogetherOptimization(
       continue;
     }
 
-    // Case 3: Lower is locked, higher is not
     if (lowerIsLocked) {
       const lockedLocation = lockedGuestMap.get(lowerPriority.id)!;
 
@@ -647,7 +629,6 @@ function applySitTogetherOptimization(
       continue;
     }
 
-    // Case 4: Neither locked (ORIGINAL LOGIC)
     let higherSeat: any = null;
     let higherTable: any = null;
 
@@ -717,10 +698,66 @@ function applySitTogetherOptimization(
 }
 
 // ============================================================================
-//// ============================================================================
-// STEP 4: PROXIMITY RULES - SIT AWAY (WITH LOCKED SUPPORT)
+// STEP 4: ENHANCED SIT AWAY WITH VIP-AWARE SMART SWAPPING
 // ============================================================================
 
+/**
+ * Calculate violation score for a seating arrangement
+ * Lower is better
+ */
+function calculateViolationScore(
+  seatToGuest: Map<string, string>,
+  tables: any[],
+  proximityRules: ProximityRules
+): number {
+  let score = 0;
+  
+  for (const table of tables) {
+    const seats = table.seats || [];
+    
+    for (const seat of seats) {
+      const guestId = seat.locked && seat.assignedGuestId 
+        ? seat.assignedGuestId 
+        : seatToGuest.get(seat.id);
+        
+      if (!guestId) continue;
+      
+      const adjacentSeats = getAdjacentSeats(seat, seats);
+      const adjacentGuestIds = adjacentSeats
+        .map(s => {
+          if (s.locked && s.assignedGuestId) return s.assignedGuestId;
+          return seatToGuest.get(s.id);
+        })
+        .filter(Boolean) as string[];
+      
+      // Check sit-together violations
+      const togetherPartner = getSitTogetherPartner(guestId, proximityRules.sitTogether);
+      if (togetherPartner && !adjacentGuestIds.includes(togetherPartner)) {
+        score += 10; // Sit-together violation penalty
+      }
+      
+      // Check sit-away violations
+      for (const adjGuestId of adjacentGuestIds) {
+        if (shouldSitAway(guestId, adjGuestId, proximityRules.sitAway)) {
+          score += 10; // Sit-away violation penalty
+        }
+      }
+    }
+  }
+  
+  return score;
+}
+
+/**
+ * ENHANCED: VIP-aware sit-away optimization with smart seat selection
+ * 
+ * Key Features:
+ * 1. Searches next 20 seats in sort order for best position
+ * 2. Prefers VIP-VIP and non-VIP-non-VIP swaps first
+ * 3. Only swaps across VIP/non-VIP boundary if necessary
+ * 4. Reverts to original state if no improvement found
+ * 5. Minimizes violation count for optimal arrangement
+ */
 function applySitAwayOptimization(
   seatToGuest: Map<string, string>,
   tables: any[],
@@ -752,11 +789,10 @@ function applySitAwayOptimization(
 
     const { higherPriority, lowerPriority } = pairData;
 
-    // NEW: Check if either guest is locked
     const higherIsLocked = lockedGuestMap.has(higherPriority.id);
     const lowerIsLocked = lockedGuestMap.has(lowerPriority.id);
 
-    // Case 1: Both locked - can't move either
+    // Case 1: Both locked - can't move
     if (higherIsLocked && lowerIsLocked) continue;
 
     // Case 2: Higher is locked, lower is not - move lower away
@@ -782,46 +818,27 @@ function applySitAwayOptimization(
       const adjacentSeats = getAdjacentSeats(higherLocation.seat, higherLocation.table.seats);
       const areAdjacent = adjacentSeats.some(s => seatToGuest.get(s.id) === lowerPriority.id);
 
-      if (!areAdjacent) continue;
+      if (!areAdjacent) continue; // No violation
 
-      const allSeats = [...lowerTable.seats].sort((a, b) => {
-        const aSeatNum = typeof a.seatNumber === 'number' ? a.seatNumber : 999;
-        const bSeatNum = typeof b.seatNumber === 'number' ? b.seatNumber : 999;
-        return aSeatNum - bSeatNum;
-      });
-
-      const currentIdx = allSeats.findIndex(s => s.id === lowerSeat.id);
-
-      for (let i = currentIdx + 1; i < allSeats.length; i++) {
-        const targetSeat = allSeats[i];
-        if (targetSeat.locked) continue;
-
-        const targetAdjacentSeats = getAdjacentSeats(targetSeat, allSeats);
-        const wouldViolate = targetAdjacentSeats.some(s =>
-          s.locked && s.assignedGuestId === higherPriority.id
-        );
-
-        if (!wouldViolate) {
-          const targetGuestId = seatToGuest.get(targetSeat.id);
-          seatToGuest.delete(lowerSeat.id);
-          seatToGuest.delete(targetSeat.id);
-          seatToGuest.set(targetSeat.id, lowerPriority.id);
-          if (targetGuestId) {
-            seatToGuest.set(lowerSeat.id, targetGuestId);
-          }
-          break;
-        }
-      }
+      // Smart seat selection for locked guest scenario
+      smartMoveGuest(
+        lowerPriority,
+        lowerSeat,
+        lowerTable, // Pass the actual table, not just ID
+        seatToGuest,
+        tables, // Pass all tables for cross-table search
+        proximityRules,
+        guestLookup,
+        higherPriority.id // Must avoid this locked guest
+      );
 
       continue;
     }
 
-    // Case 3: Lower is locked, higher is not - don't move higher for lower
-    if (lowerIsLocked) {
-      continue;
-    }
+    // Case 3: Lower is locked, higher is not - don't move higher
+    if (lowerIsLocked) continue;
 
-    // Case 4: Neither locked (ORIGINAL LOGIC)
+    // Case 4: Neither locked - ENHANCED LOGIC
     let higherSeat: any = null;
     let higherTable: any = null;
     let lowerSeat: any = null;
@@ -846,37 +863,204 @@ function applySitAwayOptimization(
     const adjacentSeats = getAdjacentSeats(higherSeat, higherTable.seats);
     const areAdjacent = adjacentSeats.some(s => seatToGuest.get(s.id) === lowerPriority.id);
 
-    if (!areAdjacent) continue;
+    if (!areAdjacent) continue; // No violation
 
-    const allSeats = [...higherTable.seats].sort((a, b) => {
-      const aSeatNum = typeof a.seatNumber === 'number' ? a.seatNumber : 999;
-      const bSeatNum = typeof b.seatNumber === 'number' ? b.seatNumber : 999;
-      return aSeatNum - bSeatNum;
-    });
+    // ENHANCED: Smart move with VIP awareness
+    smartMoveGuest(
+      lowerPriority,
+      lowerSeat,
+      lowerTable, // Pass the actual table
+      seatToGuest,
+      tables, // Pass all tables for cross-table search
+      proximityRules,
+      guestLookup,
+      higherPriority.id // Must avoid this guest
+    );
+  }
+}
 
-    const currentIdx = allSeats.findIndex(s => s.id === lowerSeat.id);
+/**
+ * Smart guest mover with VIP-aware swapping logic
+ * 
+ * Algorithm:
+ * 1. Save original state for potential rollback
+ * 2. Get next 20 seats in sort order from current position
+ * 3. Phase 1: Try same-tier swaps (VIP-VIP or non-VIP-non-VIP)
+ * 4. Phase 2: If Phase 1 fails, try cross-tier swaps
+ * 5. Evaluate each candidate position by violation score
+ * 6. Select position with lowest violation score
+ * 7. If no improvement, revert to original state
+ */
+function smartMoveGuest(
+  guestToMove: any,
+  currentSeat: any,
+  table: any,
+  seatToGuest: Map<string, string>,
+  allTables: any[],
+  proximityRules: ProximityRules,
+  guestLookup: Map<string, any>,
+  mustAvoidGuestId?: string
+): boolean {
+  // Save original state for rollback
+  const originalState = new Map(seatToGuest);
+  const originalScore = calculateViolationScore(originalState, allTables, proximityRules);
 
-    for (let i = currentIdx + 1; i < allSeats.length; i++) {
-      const targetSeat = allSeats[i];
-      if (targetSeat.locked) continue;
+  // Sort all seats by seatNumber (sort order)
+  const allSeats = [...table.seats].sort((a, b) => {
+    const aSeatNum = typeof a.seatNumber === 'number' ? a.seatNumber : 999;
+    const bSeatNum = typeof b.seatNumber === 'number' ? b.seatNumber : 999;
+    return aSeatNum - bSeatNum;
+  });
 
-      const targetAdjacentSeats = getAdjacentSeats(targetSeat, allSeats);
-      const wouldViolate = targetAdjacentSeats.some(s =>
-        seatToGuest.get(s.id) === higherPriority.id
-      );
+  const currentIdx = allSeats.findIndex(s => s.id === currentSeat.id);
+  if (currentIdx === -1) return false;
 
-      if (!wouldViolate) {
-        const targetGuestId = seatToGuest.get(targetSeat.id);
-        seatToGuest.delete(lowerSeat.id);
-        seatToGuest.delete(targetSeat.id);
-        seatToGuest.set(targetSeat.id, lowerPriority.id);
-        if (targetGuestId) {
-          seatToGuest.set(lowerSeat.id, targetGuestId);
-        }
-        break;
+  // Get next 20 seats (or until end of table)
+  const searchRange = 20;
+  const candidateSeats = [];
+  
+  for (let i = currentIdx + 1; i < allSeats.length && candidateSeats.length < searchRange; i++) {
+    const seat = allSeats[i];
+    if (!seat.locked) {
+      candidateSeats.push(seat);
+    }
+  }
+
+  if (candidateSeats.length === 0) {
+    return false; // No candidates to try
+  }
+
+  const isMovingGuestVIP = isVIP(guestToMove);
+
+  // Track best solution
+  let bestScore = originalScore;
+  let bestState: Map<string, string> | null = null;
+
+  // PHASE 1: Try same-tier swaps first (VIP-VIP or non-VIP-non-VIP)
+  for (const candidateSeat of candidateSeats) {
+    const occupantId = seatToGuest.get(candidateSeat.id);
+    
+    // Check if seat is empty
+    if (!occupantId) {
+      // Try moving to empty seat
+      const testState = new Map(originalState);
+      testState.delete(currentSeat.id);
+      testState.set(candidateSeat.id, guestToMove.id);
+      
+      // Check if this position avoids the mustAvoid guest
+      if (mustAvoidGuestId) {
+        const adjSeats = getAdjacentSeats(candidateSeat, allSeats);
+        const wouldViolate = adjSeats.some(s => {
+          const adjGuestId = s.locked && s.assignedGuestId 
+            ? s.assignedGuestId 
+            : testState.get(s.id);
+          return adjGuestId === mustAvoidGuestId;
+        });
+        
+        if (wouldViolate) continue; // Skip this position
+      }
+      
+      const testScore = calculateViolationScore(testState, allTables, proximityRules);
+      
+      if (testScore < bestScore) {
+        bestScore = testScore;
+        bestState = testState;
+      }
+      
+      continue;
+    }
+    
+    // Occupied seat - consider swapping
+    const occupant = guestLookup.get(occupantId);
+    if (!occupant) continue;
+    
+    const isOccupantVIP = isVIP(occupant);
+    
+    // PHASE 1: Only swap within same tier
+    if (isMovingGuestVIP === isOccupantVIP) {
+      // Try swapping
+      const testState = new Map(originalState);
+      testState.delete(currentSeat.id);
+      testState.delete(candidateSeat.id);
+      testState.set(candidateSeat.id, guestToMove.id);
+      testState.set(currentSeat.id, occupantId);
+      
+      // Check if new position avoids mustAvoid guest
+      if (mustAvoidGuestId) {
+        const adjSeats = getAdjacentSeats(candidateSeat, allSeats);
+        const wouldViolate = adjSeats.some(s => {
+          const adjGuestId = s.locked && s.assignedGuestId 
+            ? s.assignedGuestId 
+            : testState.get(s.id);
+          return adjGuestId === mustAvoidGuestId;
+        });
+        
+        if (wouldViolate) continue;
+      }
+      
+      const testScore = calculateViolationScore(testState, allTables, proximityRules);
+      
+      if (testScore < bestScore) {
+        bestScore = testScore;
+        bestState = testState;
       }
     }
   }
+
+  // PHASE 2: If no improvement, try cross-tier swaps
+  if (!bestState || bestScore >= originalScore) {
+    for (const candidateSeat of candidateSeats) {
+      const occupantId = seatToGuest.get(candidateSeat.id);
+      if (!occupantId) continue; // Already tried empty seats
+      
+      const occupant = guestLookup.get(occupantId);
+      if (!occupant) continue;
+      
+      const isOccupantVIP = isVIP(occupant);
+      
+      // PHASE 2: Try cross-tier swaps (VIP <-> non-VIP)
+      if (isMovingGuestVIP !== isOccupantVIP) {
+        const testState = new Map(originalState);
+        testState.delete(currentSeat.id);
+        testState.delete(candidateSeat.id);
+        testState.set(candidateSeat.id, guestToMove.id);
+        testState.set(currentSeat.id, occupantId);
+        
+        // Check if new position avoids mustAvoid guest
+        if (mustAvoidGuestId) {
+          const adjSeats = getAdjacentSeats(candidateSeat, allSeats);
+          const wouldViolate = adjSeats.some(s => {
+            const adjGuestId = s.locked && s.assignedGuestId 
+              ? s.assignedGuestId 
+              : testState.get(s.id);
+            return adjGuestId === mustAvoidGuestId;
+          });
+          
+          if (wouldViolate) continue;
+        }
+        
+        const testScore = calculateViolationScore(testState, allTables, proximityRules);
+        
+        if (testScore < bestScore) {
+          bestScore = testScore;
+          bestState = testState;
+        }
+      }
+    }
+  }
+
+  // Apply best solution if found
+  if (bestState && bestScore < originalScore) {
+    // Clear and apply best state
+    seatToGuest.clear();
+    for (const [seatId, guestId] of bestState.entries()) {
+      seatToGuest.set(seatId, guestId);
+    }
+    return true; // Success
+  }
+
+  // No improvement found - state already at original, no need to revert
+  return false; // Failed to improve
 }
 
 // ============================================================================
@@ -897,7 +1081,6 @@ function detectViolations(
     const seats = table.seats || [];
 
     for (const seat of seats) {
-      // NEW: Check both locked and assigned seats
       const guestId = seat.locked && seat.assignedGuestId
         ? seat.assignedGuestId
         : seatToGuest.get(seat.id);
@@ -909,7 +1092,6 @@ function detectViolations(
 
       const adjacentSeats = getAdjacentSeats(seat, seats);
 
-      // NEW: Get adjacent guest IDs from both locked and assigned
       const adjacentGuestIds = adjacentSeats
         .map(s => {
           if (s.locked && s.assignedGuestId) return s.assignedGuestId;
@@ -922,7 +1104,6 @@ function detectViolations(
       if (togetherPartner) {
         const partner = guestLookup.get(togetherPartner);
         if (partner && !adjacentGuestIds.includes(togetherPartner)) {
-          // NEW: Check if partner is assigned anywhere (locked or unlocked)
           const partnerAssigned = Array.from(seatToGuest.values()).includes(togetherPartner) ||
             tables.some(t => t.seats.some((s: any) => s.locked && s.assignedGuestId === togetherPartner));
 
@@ -953,7 +1134,6 @@ function detectViolations(
       for (const adjGuestId of adjacentGuestIds) {
         if (shouldSitAway(guestId, adjGuestId, proximityRules.sitAway)) {
           const adjGuest = guestLookup.get(adjGuestId);
-          // NEW: Find seat for both locked and assigned guests
           const adjSeat = seats.find((s: any) =>
             (s.locked && s.assignedGuestId === adjGuestId) ||
             seatToGuest.get(s.id) === adjGuestId
@@ -1012,16 +1192,17 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   // Reset violations
   proximityViolations = [];
 
-  // STEP 1: Collect and prepare guests
   const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
   const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
   const allGuests = [...hostPool, ...externalPool];
 
-  // NEW: Build locked guest map FIRST
+  // Build guest lookup
+  const guestLookup: Record<string, any> = {};
+  allGuests.forEach(g => guestLookup[g.id] = g);
+
   const tables = useSeatStore.getState().tables;
   const lockedGuestMap = buildLockedGuestMap(tables);
 
-  // Identify locked guests
   const lockedGuestIds = new Set<string>();
   seatStore.tables.forEach((t: any) =>
     (t.seats ?? []).forEach((s: any) => {
@@ -1031,11 +1212,9 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     })
   );
 
-  // Filter out locked guests
   const hostCandidates = hostPool.filter((g: any) => !lockedGuestIds.has(g.id));
   const externalCandidates = externalPool.filter((g: any) => !lockedGuestIds.has(g.id));
 
-  // STEP 2: Sort candidates
   const comparator = makeComparator(sortRules);
   const sortedHostCandidates = [...hostCandidates].sort(comparator);
   const sortedExternalCandidates = [...externalCandidates].sort(comparator);
@@ -1049,7 +1228,6 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     }
   }
 
-  // STEP 3: Initial placement (NOW WITH LOCKED GUEST AWARENESS)
   const tablesAfterClear = useSeatStore.getState().tables;
   const seatToGuest = performInitialPlacement(
     tablesAfterClear,
@@ -1062,7 +1240,6 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     proximityRules
   );
 
-  // STEP 4: Apply sit-together (NOW WITH LOCKED SUPPORT)
   applySitTogetherOptimization(
     seatToGuest,
     tablesAfterClear,
@@ -1072,7 +1249,6 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     lockedGuestMap
   );
 
-  // STEP 5: Apply sit-away (NOW WITH LOCKED SUPPORT)
   applySitAwayOptimization(
     seatToGuest,
     tablesAfterClear,
@@ -1082,7 +1258,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     lockedGuestMap
   );
 
-  // STEP 6: Commit assignments to store
+  // Apply assignments to store
   for (const [seatId, guestId] of seatToGuest.entries()) {
     for (const table of tablesAfterClear) {
       const seat = table.seats.find((s: any) => s.id === seatId);
@@ -1093,15 +1269,13 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     }
   }
 
-  // STEP 7: Detect violations (NOW CHECKS LOCKED GUESTS)
+  // Get final tables and detect violations using centralized function
   const finalTables = useSeatStore.getState().tables;
-  proximityViolations = detectViolations(
-    seatToGuest,
+  proximityViolations = detectProximityViolations(
     finalTables,
     proximityRules,
-    allGuests,
-    tableRules
+    guestLookup
   );
 
   console.log(`Autofill completed. Violations: ${proximityViolations.length}`);
-} 
+}

@@ -30,7 +30,8 @@ interface SeatStoreState {
   clearSeat: (tableId: string, seatId: string) => void;
   updateSeatOrder: (tableId: string, newOrder: number[]) => void;
   resetTables: () => void;
-
+  swapSeats: (table1Id: string, seat1Id: string, table2Id: string, seat2Id: string) => boolean;
+  findGuestSeat: (guestId: string) => { tableId: string; seatId: string } | null;
   // Chunk management
   ensureChunkExists: (row: number, col: number) => void;
   assignTableToChunk: (tableId: string, row: number, col: number) => void;
@@ -123,13 +124,13 @@ export const useSeatStore = create<SeatStoreState>()(
               t.id !== tableId
                 ? t
                 : {
-                    ...t,
-                    seats: t.seats.map((s) =>
-                      s.id === seatId
-                        ? { ...s, assignedGuestId: guestId ?? null }
-                        : s
-                    ),
-                  }
+                  ...t,
+                  seats: t.seats.map((s) =>
+                    s.id === seatId
+                      ? { ...s, assignedGuestId: guestId ?? null }
+                      : s
+                  ),
+                }
             ),
           })),
 
@@ -139,11 +140,11 @@ export const useSeatStore = create<SeatStoreState>()(
               t.id !== tableId
                 ? t
                 : {
-                    ...t,
-                    seats: t.seats.map((s) =>
-                      s.id === seatId ? { ...s, locked } : s
-                    ),
-                  }
+                  ...t,
+                  seats: t.seats.map((s) =>
+                    s.id === seatId ? { ...s, locked } : s
+                  ),
+                }
             ),
           })),
 
@@ -153,13 +154,13 @@ export const useSeatStore = create<SeatStoreState>()(
               t.id !== tableId
                 ? t
                 : {
-                    ...t,
-                    seats: t.seats.map((s) =>
-                      s.id === seatId
-                        ? { ...s, assignedGuestId: null, locked: false }
-                        : s
-                    ),
-                  }
+                  ...t,
+                  seats: t.seats.map((s) =>
+                    s.id === seatId
+                      ? { ...s, assignedGuestId: null, locked: false }
+                      : s
+                  ),
+                }
             ),
           })),
 
@@ -169,12 +170,12 @@ export const useSeatStore = create<SeatStoreState>()(
               t.id !== tableId
                 ? t
                 : {
-                    ...t,
-                    seats: t.seats.map((s, i) => ({
-                      ...s,
-                      seatNumber: newOrder[i] ?? s.seatNumber,
-                    })),
-                  }
+                  ...t,
+                  seats: t.seats.map((s, i) => ({
+                    ...s,
+                    seatNumber: newOrder[i] ?? s.seatNumber,
+                  })),
+                }
             ),
           })),
 
@@ -192,6 +193,124 @@ export const useSeatStore = create<SeatStoreState>()(
             selectedTableId: null,
             selectedSeatId: null,
           }),
+
+        findGuestSeat: (guestId) => {
+          const state = get();
+          for (const table of state.tables) {
+            for (const seat of table.seats) {
+              if (seat.assignedGuestId === guestId) {
+                return { tableId: table.id, seatId: seat.id };
+              }
+            }
+          }
+          return null;
+        },
+
+        swapSeats: (table1Id, seat1Id, table2Id, seat2Id) => {
+          const state = get();
+
+          // Find tables
+          const table1 = state.tables.find((t) => t.id === table1Id);
+          const table2 = state.tables.find((t) => t.id === table2Id);
+
+          if (!table1 || !table2) {
+            console.error('Swap failed: Tables not found');
+            return false;
+          }
+
+          // Find seats
+          const seat1 = table1.seats.find((s) => s.id === seat1Id);
+          const seat2 = table2.seats.find((s) => s.id === seat2Id);
+
+          if (!seat1 || !seat2) {
+            console.error('Swap failed: Seats not found');
+            return false;
+          }
+
+          // Validate swap
+          if (seat1.locked || seat2.locked) {
+            console.error('Swap failed: One or both seats are locked');
+            return false;
+          }
+
+          if (!seat1.assignedGuestId || !seat2.assignedGuestId) {
+            console.error('Swap failed: One or both seats are empty');
+            return false;
+          }
+
+          // Store the guest IDs BEFORE any state changes
+          const guest1Id = seat1.assignedGuestId;
+          const guest2Id = seat2.assignedGuestId;
+
+          console.log('Swapping:', {
+            guest1Id,
+            seat1: `${table1.label} - Seat ${seat1.seatNumber}`,
+            guest2Id,
+            seat2: `${table2.label} - Seat ${seat2.seatNumber}`,
+          });
+
+          // Perform the swap with a single state update
+          set((state) => {
+            const newTables = state.tables.map((table) => {
+              // SAME TABLE: update both seats in one pass
+              if (table.id === table1Id && table1Id === table2Id) {
+                return {
+                  ...table,
+                  seats: table.seats.map((seat) => {
+                    if (seat.id === seat1Id) return { ...seat, assignedGuestId: guest2Id };
+                    if (seat.id === seat2Id) return { ...seat, assignedGuestId: guest1Id };
+                    return seat;
+                  }),
+                };
+              }
+
+              // Different tables: update each table's seat individually
+              if (table.id === table1Id) {
+                return {
+                  ...table,
+                  seats: table.seats.map((seat) =>
+                    seat.id === seat1Id ? { ...seat, assignedGuestId: guest2Id } : seat
+                  ),
+                };
+              }
+
+              if (table.id === table2Id) {
+                return {
+                  ...table,
+                  seats: table.seats.map((seat) =>
+                    seat.id === seat2Id ? { ...seat, assignedGuestId: guest1Id } : seat
+                  ),
+                };
+              }
+
+              return table;
+            });
+
+            return { tables: newTables };
+          });
+
+          // Verify the swap
+          const newState = get();
+          const verifyTable1 = newState.tables.find((t) => t.id === table1Id);
+          const verifyTable2 = newState.tables.find((t) => t.id === table2Id);
+          const verifySeat1 = verifyTable1?.seats.find((s) => s.id === seat1Id);
+          const verifySeat2 = verifyTable2?.seats.find((s) => s.id === seat2Id);
+
+          const swapSuccessful =
+            verifySeat1?.assignedGuestId === guest2Id &&
+            verifySeat2?.assignedGuestId === guest1Id;
+
+          if (swapSuccessful) {
+            console.log('Swap successful:', {
+              seat1Now: verifySeat1?.assignedGuestId,
+              seat2Now: verifySeat2?.assignedGuestId,
+            });
+          } else {
+            console.error('Swap verification failed!');
+          }
+
+          return swapSuccessful;
+        },
 
         /* ---------- CHUNK MANAGEMENT ---------- */
         ensureChunkExists: (row, col) =>

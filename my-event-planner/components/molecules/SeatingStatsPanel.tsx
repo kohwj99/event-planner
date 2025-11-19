@@ -33,29 +33,30 @@ import {
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { getProximityViolations } from '@/utils/seatAutoFillHelper';
+import { detectProximityViolations } from '@/utils/violationDetector';
 
 interface SeatingStats {
   totalSeats: number;
   seatedCount: number;
   unseatedCount: number;
-  
+
   // Host stats
   hostTotal: number;
   hostSeated: number;
   hostUnseated: number;
   hostVIPsUnseated: string[];
-  
+
   // External stats
   externalTotal: number;
   externalSeated: number;
   externalUnseated: number;
   externalVIPsUnseated: string[];
-  
+
   // Overall VIP status
   totalVIPsUnseated: number;
   hasUnseatedVIPs: boolean;
   hasUnseatedGuests: boolean;
-  
+
   // NEW: Proximity violations
   proximityViolations: any[];
 }
@@ -65,17 +66,23 @@ type DetailView = 'overview' | 'vips' | 'violations';
 export default function SeatingStatsPanel() {
   const [expanded, setExpanded] = useState(false);
   const [detailView, setDetailView] = useState<DetailView>('overview');
-  
+
   const tables = useSeatStore((s) => s.tables);
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
-
+  const guestLookup = useMemo(() => {
+    const lookup: Record<string, any> = {};
+    [...hostGuests, ...externalGuests].forEach((g) => {
+      lookup[g.id] = g;
+    });
+    return lookup;
+  }, [hostGuests, externalGuests]);
   // Calculate statistics
   const stats = useMemo((): SeatingStats => {
     // Get all seated guest IDs
     const seatedGuestIds = new Set<string>();
     let totalSeats = 0;
-    
+
     tables.forEach((table) => {
       table.seats.forEach((seat) => {
         totalSeats++;
@@ -115,39 +122,38 @@ export default function SeatingStatsPanel() {
     const totalUnseated = hostUnseatedGuests.length + externalUnseatedGuests.length;
 
     // Get proximity violations
-    const proximityViolations = getProximityViolations();
+    // const proximityViolations = getProximityViolations();
+    const proximityViolations = detectProximityViolations(
+      tables,
+      { sitTogether: [], sitAway: [] }, // TODO: Get actual rules from state if available
+      guestLookup
+    );
 
     return {
       totalSeats,
       seatedCount: seatedGuestIds.size,
       unseatedCount: totalSeats - seatedGuestIds.size,
-      
+
       hostTotal: activeHostGuests.length,
       hostSeated: hostSeatedIds.length,
       hostUnseated: hostUnseatedGuests.length,
       hostVIPsUnseated,
-      
+
       externalTotal: activeExternalGuests.length,
       externalSeated: externalSeatedIds.length,
       externalUnseated: externalUnseatedGuests.length,
       externalVIPsUnseated,
-      
+
       totalVIPsUnseated,
       hasUnseatedVIPs: totalVIPsUnseated > 0,
       hasUnseatedGuests: totalUnseated > 0,
-      
+
       proximityViolations,
     };
   }, [tables, hostGuests, externalGuests]);
 
   // Get guest lookup
-  const guestLookup = useMemo(() => {
-    const lookup: Record<string, any> = {};
-    [...hostGuests, ...externalGuests].forEach((g) => {
-      lookup[g.id] = g;
-    });
-    return lookup;
-  }, [hostGuests, externalGuests]);
+
 
   // Determine status color
   const getStatusColor = (): 'error' | 'warning' | 'success' => {
@@ -229,11 +235,11 @@ export default function SeatingStatsPanel() {
           <Box
             sx={{
               p: 2,
-              bgcolor: getStatusColor() === 'error' 
-                ? 'error.main' 
-                : getStatusColor() === 'warning' 
-                ? 'warning.main' 
-                : 'success.main',
+              bgcolor: getStatusColor() === 'error'
+                ? 'error.main'
+                : getStatusColor() === 'warning'
+                  ? 'warning.main'
+                  : 'success.main',
               color: 'white',
               display: 'flex',
               alignItems: 'center',
@@ -262,37 +268,37 @@ export default function SeatingStatsPanel() {
             sx={{ borderBottom: 1, borderColor: 'divider' }}
           >
             <Tab label="Overview" value="overview" />
-            <Tab 
+            <Tab
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   VIPs
                   {stats.totalVIPsUnseated > 0 && (
-                    <Chip 
-                      label={stats.totalVIPsUnseated} 
-                      size="small" 
+                    <Chip
+                      label={stats.totalVIPsUnseated}
+                      size="small"
                       color="error"
                       sx={{ height: 16, fontSize: 10 }}
                     />
                   )}
                 </Box>
               }
-              value="vips" 
+              value="vips"
             />
-            <Tab 
+            <Tab
               label={
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                   Violations
                   {stats.proximityViolations.length > 0 && (
-                    <Chip 
-                      label={stats.proximityViolations.length} 
-                      size="small" 
+                    <Chip
+                      label={stats.proximityViolations.length}
+                      size="small"
                       color="error"
                       sx={{ height: 16, fontSize: 10 }}
                     />
                   )}
                 </Box>
               }
-              value="violations" 
+              value="violations"
             />
           </Tabs>
 
