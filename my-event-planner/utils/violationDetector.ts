@@ -1,6 +1,10 @@
-// src/utils/violationDetector.ts
+// src/utils/violationDetector.ts - STREAMLINED & COMPREHENSIVE
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
+
+// ============================================================================
+// TYPE DEFINITIONS
+// ============================================================================
 
 export interface ProximityViolation {
   type: 'sit-together' | 'sit-away';
@@ -20,6 +24,10 @@ export interface ProximityRules {
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
 }
 
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
 /**
  * Get adjacent seats based on adjacentSeats property
  */
@@ -31,7 +39,7 @@ function getAdjacentSeats(seat: Seat, allSeats: Seat[]): Seat[] {
 }
 
 /**
- * Check if two guests should sit together
+ * Check if two guests should sit together based on rules
  */
 function shouldSitTogether(
   guest1Id: string,
@@ -46,7 +54,7 @@ function shouldSitTogether(
 }
 
 /**
- * Check if two guests should sit away
+ * Check if two guests should sit away based on rules
  */
 function shouldSitAway(
   guest1Id: string,
@@ -75,7 +83,39 @@ function getSitTogetherPartner(
 }
 
 /**
- * MAIN FUNCTION: Detect all proximity violations in the current seating arrangement
+ * Check if a violation has already been reported (to avoid duplicates)
+ */
+function isDuplicateViolation(
+  violations: ProximityViolation[],
+  type: 'sit-together' | 'sit-away',
+  guest1Id: string,
+  guest2Id: string
+): boolean {
+  return violations.some(
+    (v) =>
+      v.type === type &&
+      ((v.guest1Id === guest1Id && v.guest2Id === guest2Id) ||
+        (v.guest1Id === guest2Id && v.guest2Id === guest1Id))
+  );
+}
+
+// ============================================================================
+// MAIN VIOLATION DETECTION
+// ============================================================================
+
+/**
+ * PRIMARY FUNCTION: Detect all proximity violations in the current seating arrangement
+ * 
+ * This function:
+ * 1. Checks sit-together violations (guests who should be adjacent but aren't)
+ * 2. Checks sit-away violations (guests who shouldn't be adjacent but are)
+ * 3. Handles both locked and unlocked seats
+ * 4. Avoids duplicate violation reporting
+ * 
+ * @param tables - All tables with their current seating
+ * @param proximityRules - Sit-together and sit-away rules
+ * @param guestLookup - Map of guest IDs to guest objects
+ * @returns Array of all violations found
  */
 export function detectProximityViolations(
   tables: Table[],
@@ -84,15 +124,13 @@ export function detectProximityViolations(
 ): ProximityViolation[] {
   const violations: ProximityViolation[] = [];
 
+  // Iterate through all tables and seats
   for (const table of tables) {
     const seats = table.seats || [];
 
     for (const seat of seats) {
-      // Get guest ID (from locked seat or regular assignment)
-      const guestId = seat.locked && seat.assignedGuestId
-        ? seat.assignedGuestId
-        : seat.assignedGuestId;
-
+      // Get guest ID (handles both locked and unlocked seats)
+      const guestId = seat.assignedGuestId;
       if (!guestId) continue;
 
       const guest = guestLookup[guestId];
@@ -101,34 +139,29 @@ export function detectProximityViolations(
       // Get adjacent seats
       const adjacentSeats = getAdjacentSeats(seat, seats);
 
-      // Get adjacent guest IDs
+      // Get adjacent guest IDs (handles locked seats)
       const adjacentGuestIds = adjacentSeats
-        .map((s) => {
-          if (s.locked && s.assignedGuestId) return s.assignedGuestId;
-          return s.assignedGuestId;
-        })
+        .map((s) => s.assignedGuestId)
         .filter(Boolean) as string[];
 
-      // Check sit-together violations
+      // ===================================================================
+      // CHECK SIT-TOGETHER VIOLATIONS
+      // ===================================================================
       const togetherPartner = getSitTogetherPartner(guestId, proximityRules.sitTogether);
+      
       if (togetherPartner) {
         const partner = guestLookup[togetherPartner];
+        
+        // Check if partner is NOT adjacent
         if (partner && !adjacentGuestIds.includes(togetherPartner)) {
-          // Check if partner is seated at all
-          const partnerAssigned = tables.some((t) =>
+          // Verify partner is seated somewhere (not just absent from guest list)
+          const partnerIsSeated = tables.some((t) =>
             t.seats.some((s) => s.assignedGuestId === togetherPartner)
           );
 
-          if (partnerAssigned) {
-            // Avoid duplicate violations
-            const alreadyReported = violations.some(
-              (v) =>
-                v.type === 'sit-together' &&
-                ((v.guest1Id === guestId && v.guest2Id === togetherPartner) ||
-                  (v.guest1Id === togetherPartner && v.guest2Id === guestId))
-            );
-
-            if (!alreadyReported) {
+          if (partnerIsSeated) {
+            // Avoid duplicate violations (A-B and B-A)
+            if (!isDuplicateViolation(violations, 'sit-together', guestId, togetherPartner)) {
               violations.push({
                 type: 'sit-together',
                 guest1Id: guestId,
@@ -138,32 +171,24 @@ export function detectProximityViolations(
                 tableId: table.id,
                 tableLabel: table.label,
                 seat1Id: seat.id,
+                reason: `${guest.name} and ${partner.name} should sit together but are not adjacent`,
               });
             }
           }
         }
       }
 
-      // Check sit-away violations
+      // ===================================================================
+      // CHECK SIT-AWAY VIOLATIONS
+      // ===================================================================
       for (const adjGuestId of adjacentGuestIds) {
         if (shouldSitAway(guestId, adjGuestId, proximityRules.sitAway)) {
           const adjGuest = guestLookup[adjGuestId];
-          const adjSeat = seats.find(
-            (s) =>
-              (s.locked && s.assignedGuestId === adjGuestId) ||
-              s.assignedGuestId === adjGuestId
-          );
+          const adjSeat = seats.find((s) => s.assignedGuestId === adjGuestId);
 
           if (adjGuest && adjSeat) {
-            // Avoid duplicate violations
-            const alreadyReported = violations.some(
-              (v) =>
-                v.type === 'sit-away' &&
-                ((v.guest1Id === guestId && v.guest2Id === adjGuestId) ||
-                  (v.guest1Id === adjGuestId && v.guest2Id === guestId))
-            );
-
-            if (!alreadyReported) {
+            // Avoid duplicate violations (A-B and B-A)
+            if (!isDuplicateViolation(violations, 'sit-away', guestId, adjGuestId)) {
               violations.push({
                 type: 'sit-away',
                 guest1Id: guestId,
@@ -174,6 +199,7 @@ export function detectProximityViolations(
                 tableLabel: table.label,
                 seat1Id: seat.id,
                 seat2Id: adjSeat.id,
+                reason: `${guest.name} and ${adjGuest.name} should not sit together but are adjacent`,
               });
             }
           }
@@ -185,8 +211,23 @@ export function detectProximityViolations(
   return violations;
 }
 
+// ============================================================================
+// SWAP SIMULATION
+// ============================================================================
+
 /**
- * Simulate a swap and detect violations in the hypothetical arrangement
+ * Simulate a seat swap and detect violations in the hypothetical arrangement
+ * 
+ * Used by the swap modal to predict violations before actually performing a swap
+ * 
+ * @param tables - All tables
+ * @param table1Id - First table ID
+ * @param seat1Id - First seat ID
+ * @param table2Id - Second table ID
+ * @param seat2Id - Second seat ID
+ * @param proximityRules - Proximity rules
+ * @param guestLookup - Guest lookup map
+ * @returns Array of violations that would exist after the swap
  */
 export function detectViolationsAfterSwap(
   tables: Table[],
@@ -207,6 +248,7 @@ export function detectViolationsAfterSwap(
   const simSeat2 = simTable2?.seats.find((s) => s.id === seat2Id);
 
   if (!simSeat1 || !simSeat2) {
+    console.warn('Swap simulation failed: seats not found');
     return [];
   }
 
@@ -219,8 +261,15 @@ export function detectViolationsAfterSwap(
   return detectProximityViolations(simulatedTables, proximityRules, guestLookup);
 }
 
+// ============================================================================
+// VIOLATION COUNTING & ANALYSIS
+// ============================================================================
+
 /**
  * Count violations by type
+ * 
+ * @param violations - Array of violations
+ * @returns Object with counts by type and total
  */
 export function countViolations(violations: ProximityViolation[]) {
   const sitTogetherCount = violations.filter((v) => v.type === 'sit-together').length;
@@ -230,5 +279,117 @@ export function countViolations(violations: ProximityViolation[]) {
     sitTogether: sitTogetherCount,
     sitAway: sitAwayCount,
     total: sitTogetherCount + sitAwayCount,
+  };
+}
+
+/**
+ * Get violations grouped by table
+ * 
+ * Useful for displaying table-specific violation information
+ * 
+ * @param violations - Array of violations
+ * @returns Map of table IDs to their violations
+ */
+export function getViolationsByTable(
+  violations: ProximityViolation[]
+): Map<string, ProximityViolation[]> {
+  const byTable = new Map<string, ProximityViolation[]>();
+
+  for (const violation of violations) {
+    const tableViolations = byTable.get(violation.tableId) || [];
+    tableViolations.push(violation);
+    byTable.set(violation.tableId, tableViolations);
+  }
+
+  return byTable;
+}
+
+/**
+ * Get violations for a specific guest
+ * 
+ * Useful for showing a guest's specific proximity issues
+ * 
+ * @param violations - Array of violations
+ * @param guestId - Guest ID to filter by
+ * @returns Array of violations involving this guest
+ */
+export function getViolationsForGuest(
+  violations: ProximityViolation[],
+  guestId: string
+): ProximityViolation[] {
+  return violations.filter(
+    (v) => v.guest1Id === guestId || v.guest2Id === guestId
+  );
+}
+
+/**
+ * Check if a specific seating arrangement would create violations
+ * 
+ * Used to validate manual seat assignments
+ * 
+ * @param tableId - Table ID
+ * @param seatId - Seat ID
+ * @param guestId - Guest to assign
+ * @param tables - All tables
+ * @param proximityRules - Proximity rules
+ * @param guestLookup - Guest lookup map
+ * @returns Object indicating if assignment is valid and why
+ */
+export function validateSeatAssignment(
+  tableId: string,
+  seatId: string,
+  guestId: string,
+  tables: Table[],
+  proximityRules: ProximityRules,
+  guestLookup: Record<string, any>
+): {
+  isValid: boolean;
+  warnings: string[];
+  violations: ProximityViolation[];
+} {
+  // Simulate the assignment
+  const simulatedTables = JSON.parse(JSON.stringify(tables)) as Table[];
+  const simTable = simulatedTables.find((t) => t.id === tableId);
+  const simSeat = simTable?.seats.find((s) => s.id === seatId);
+
+  if (!simTable || !simSeat) {
+    return {
+      isValid: false,
+      warnings: ['Table or seat not found'],
+      violations: [],
+    };
+  }
+
+  // Store original guest ID
+  const originalGuestId = simSeat.assignedGuestId;
+
+  // Apply the assignment
+  simSeat.assignedGuestId = guestId;
+
+  // Detect violations
+  const violations = detectProximityViolations(
+    simulatedTables,
+    proximityRules,
+    guestLookup
+  );
+
+  // Get violations involving this guest
+  const guestViolations = getViolationsForGuest(violations, guestId);
+
+  // Restore original state
+  simSeat.assignedGuestId = originalGuestId;
+
+  const warnings: string[] = [];
+  
+  if (guestViolations.length > 0) {
+    guestViolations.forEach((v) => {
+      warnings.push(v.reason || 'Proximity rule violation');
+    });
+  }
+
+  return {
+    isValid: guestViolations.length === 0,
+    warnings,
+    violations: guestViolations,
   };
 }
