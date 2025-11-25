@@ -3,12 +3,15 @@ import { devtools, persist } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
 import { Event, EventDay, Session, EventType } from "@/types/Event";
 import { Guest } from "@/store/guestStore";
+import { Table } from "@/types/Table";
+import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
 
 interface EventStoreState {
   /* -------------------- 📦 State -------------------- */
   events: Event[];
   activeEventId: string | null;
+  activeSessionId: string | null; // 🆕 Track active session for seat planner
 
   /* -------------------- 📝 Event CRUD -------------------- */
   createEvent: (
@@ -21,13 +24,14 @@ interface EventStoreState {
   deleteEvent: (id: string) => void;
   updateEventDetails: (id: string, data: Partial<Event>) => void;
   setActiveEvent: (id: string | null) => void;
+  setActiveSession: (sessionId: string | null) => void; // 🆕
 
   /* -------------------- 📇 Master Guest List -------------------- */
   addMasterGuest: (eventId: string, guest: Guest) => void;
 
   /* -------------------- 📅 Day & Session Management -------------------- */
   addDay: (eventId: string, date: string) => void;
-  deleteDay: (eventId: string, dayId: string) => void; // 🆕 NEW
+  deleteDay: (eventId: string, dayId: string) => void;
   
   addSession: (
     eventId: string, 
@@ -36,7 +40,7 @@ interface EventStoreState {
       name: string;
       description: string;
       sessionType: EventType;
-      startTime: string; // ISO
+      startTime: string;
     }
   ) => void;
 
@@ -49,6 +53,22 @@ interface EventStoreState {
 
   deleteSession: (eventId: string, dayId: string, sessionId: string) => void;
 
+  /* -------------------- 👥 Session Guest Management -------------------- */
+  setSessionGuests: (
+    eventId: string,
+    dayId: string,
+    sessionId: string,
+    hostGuestIds: string[],
+    externalGuestIds: string[]
+  ) => void; // 🆕
+
+  getSessionGuests: (sessionId: string) => {
+    hostGuests: Guest[];
+    externalGuests: Guest[];
+  } | null; // 🆕
+
+  getEventIdForSession: (sessionId: string) => string | null; // 🆕
+
   /* -------------------- 🧠 Seat Plan Snapshot -------------------- */
   saveSessionSeatPlan: (
     eventId: string, 
@@ -56,6 +76,11 @@ interface EventStoreState {
     sessionId: string, 
     seatPlan: Session['seatPlan']
   ) => void;
+
+  loadSessionSeatPlan: (sessionId: string) => {
+    tables: Table[];
+    chunks: Record<string, Chunk>;
+  } | null; // 🆕
 
   /* -------------------- 📊 Statistics & Audit -------------------- */
   getPriorStats: (eventId: string, currentSessionId: string) => AdjacencyMap;
@@ -73,6 +98,7 @@ export const useEventStore = create<EventStoreState>()(
       (set, get) => ({
         events: [],
         activeEventId: null,
+        activeSessionId: null,
 
         /* ---------- Event CRUD ---------- */
         createEvent: (name, description, eventType, startDate) =>
@@ -104,6 +130,7 @@ export const useEventStore = create<EventStoreState>()(
           })),
 
         setActiveEvent: (id) => set({ activeEventId: id }),
+        setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
 
         /* ---------- Master Guest List ---------- */
         addMasterGuest: (eventId, guest) =>
@@ -131,7 +158,6 @@ export const useEventStore = create<EventStoreState>()(
             ),
           })),
 
-        // 🆕 DELETE DAY - removes day and all its sessions
         deleteDay: (eventId, dayId) =>
           set((state) => ({
             events: state.events.map((e) =>
@@ -165,6 +191,8 @@ export const useEventStore = create<EventStoreState>()(
                             sessionType: sessionData.sessionType,
                             startTime: sessionData.startTime,
                             endTime: new Date(new Date(sessionData.startTime).getTime() + 60*60*1000).toISOString(),
+                            inheritedHostGuestIds: [], // 🆕 Empty by default
+                            inheritedExternalGuestIds: [], // 🆕 Empty by default
                             seatPlan: {
                               tables: [],
                               chunks: {},
@@ -214,6 +242,70 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
+        /* ---------- 🆕 Session Guest Management ---------- */
+        setSessionGuests: (eventId, dayId, sessionId, hostGuestIds, externalGuestIds) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => {
+                  if (d.id !== dayId) return d;
+                  return {
+                    ...d,
+                    sessions: d.sessions.map((s) =>
+                      s.id !== sessionId
+                        ? s
+                        : {
+                            ...s,
+                            inheritedHostGuestIds: hostGuestIds,
+                            inheritedExternalGuestIds: externalGuestIds,
+                          }
+                    ),
+                  };
+                }),
+              };
+            }),
+          })),
+
+        getSessionGuests: (sessionId) => {
+          const state = get();
+          
+          // Find the event and session
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                // Get full guest objects from IDs
+                const hostGuests = event.masterHostGuests.filter(g => 
+                  session.inheritedHostGuestIds?.includes(g.id)
+                );
+                const externalGuests = event.masterExternalGuests.filter(g => 
+                  session.inheritedExternalGuestIds?.includes(g.id)
+                );
+                
+                return { hostGuests, externalGuests };
+              }
+            }
+          }
+          
+          return null;
+        },
+
+        getEventIdForSession: (sessionId) => {
+          const state = get();
+          
+          for (const event of state.events) {
+            for (const day of event.days) {
+              if (day.sessions.some(s => s.id === sessionId)) {
+                return event.id;
+              }
+            }
+          }
+          
+          return null;
+        },
+
         /* ---------- Seat Plan Snapshot ---------- */
         saveSessionSeatPlan: (eventId, dayId, sessionId, seatPlan) =>
           set((state) => {
@@ -242,6 +334,24 @@ export const useEventStore = create<EventStoreState>()(
               }),
             };
           }),
+
+        loadSessionSeatPlan: (sessionId) => {
+          const state = get();
+          
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                return {
+                  tables: session.seatPlan.tables,
+                  chunks: session.seatPlan.chunks,
+                };
+              }
+            }
+          }
+          
+          return null;
+        },
 
         /* ---------- Statistics & Audit ---------- */
         getPriorStats: (eventId, currentSessionId) => {

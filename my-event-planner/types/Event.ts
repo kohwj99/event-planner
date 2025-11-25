@@ -13,9 +13,13 @@ export interface Session {
   id: string;
   name: string;
   description: string;
-  sessionType: EventType; // 🆕 Specific type for the session
+  sessionType: EventType; // Specific type for the session
   startTime: string;      // ISO string
   endTime: string;        // ISO string
+  
+  // 🆕 Session-level guest inheritance
+  inheritedHostGuestIds: string[];     // IDs from masterHostGuests
+  inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
   // Statistics Tracking
   lastModified?: string;    
@@ -38,8 +42,8 @@ export interface Event {
   id: string;
   name: string;
   description: string;
-  eventType: EventType; // 🆕 The overall event category
-  startDate: string;    // 🆕 The starting date of the event
+  eventType: EventType; // The overall event category
+  startDate: string;    // The starting date of the event
   createdAt: string;
   
   masterHostGuests: Guest[];

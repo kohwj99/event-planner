@@ -7,15 +7,12 @@ import { EventType } from "@/types/Event";
 import { 
   Typography, Button, Paper, IconButton, Box
 } from "@mui/material";
-import AddIcon from "@mui/icons-material/Add";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 
-// Atomic Components
 import EventDetailHeader from "@/components/organisms/EventDetailHeader";
 import DayColumn from "@/components/organisms/DayColumn";
 import CreateSessionModal from "@/components/molecules/CreateSessionModal";
 import ConfirmDeleteModal from "@/components/molecules/ConfirmDeleteModal";
+import SessionGuestListModal from "@/components/molecules/SessionGuestListModal";
 
 export default function EventDetailPage() {
   const { id } = useParams() as { id: string };
@@ -44,6 +41,14 @@ export default function EventDetailPage() {
     sessionId: "", 
     sessionName: "",
     dayId: "" 
+  });
+
+  // Session Guest Management State
+  const [guestModal, setGuestModal] = useState({
+    open: false,
+    sessionId: "",
+    sessionName: "",
+    dayId: ""
   });
 
   if (!event) return <div>Event not found</div>;
@@ -78,6 +83,15 @@ export default function EventDetailPage() {
   const handleConfirmDeleteSession = () => {
     deleteSession(event.id, deleteSessionModal.dayId, deleteSessionModal.sessionId);
     setDeleteSessionModal({ open: false, sessionId: "", sessionName: "", dayId: "" });
+  };
+
+  /* --- 🧠 Logic: Manage Session Guests --- */
+  const handleManageSessionGuests = (sessionId: string, sessionName: string) => {
+    // Find the day that contains this session
+    const day = event.days.find(d => d.sessions.some(s => s.id === sessionId));
+    if (day) {
+      setGuestModal({ open: true, sessionId, sessionName, dayId: day.id });
+    }
   };
 
   /* --- 🧠 Logic: Create Session --- */
@@ -125,6 +139,7 @@ export default function EventDetailPage() {
               onDeleteDay={handleDeleteDayClick}
               onDeleteSession={handleDeleteSessionClick}
               onSessionClick={(sessionId) => router.push(`/session/${sessionId}`)}
+              onManageSessionGuests={handleManageSessionGuests}
             />
           ))}
 
@@ -166,6 +181,16 @@ export default function EventDetailPage() {
         message={`Are you sure you want to delete "${deleteSessionModal.sessionName}"?`}
         onClose={() => setDeleteSessionModal({ open: false, sessionId: "", sessionName: "", dayId: "" })}
         onConfirm={handleConfirmDeleteSession}
+      />
+
+      {/* --- SESSION GUEST MANAGEMENT MODAL --- */}
+      <SessionGuestListModal
+        open={guestModal.open}
+        onClose={() => setGuestModal({ open: false, sessionId: "", sessionName: "", dayId: "" })}
+        eventId={event.id}
+        dayId={guestModal.dayId}
+        sessionId={guestModal.sessionId}
+        sessionName={guestModal.sessionName}
       />
 
     </Box>

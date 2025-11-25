@@ -11,6 +11,7 @@ interface DayColumnProps {
   onDeleteDay: (dayId: string, dayIndex: number, sessionCount: number) => void;
   onDeleteSession: (sessionId: string, sessionName: string, dayId: string) => void;
   onSessionClick: (sessionId: string) => void;
+  onManageSessionGuests: (sessionId: string, sessionName: string) => void; // 🆕
 }
 
 export default function DayColumn({ 
@@ -19,7 +20,8 @@ export default function DayColumn({
   onAddSession, 
   onDeleteDay,
   onDeleteSession,
-  onSessionClick 
+  onSessionClick,
+  onManageSessionGuests
 }: DayColumnProps) {
   // Sort sessions by startTime chronologically
   const sortedSessions = [...day.sessions].sort((a, b) => 
@@ -86,6 +88,7 @@ export default function DayColumn({
             session={session}
             onClick={() => onSessionClick(session.id)}
             onDelete={() => onDeleteSession(session.id, session.name, day.id)}
+            onManageGuests={() => onManageSessionGuests(session.id, session.name)}
           />
         ))}
 

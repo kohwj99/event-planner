@@ -1,19 +1,31 @@
-import { Paper, Typography, Chip, IconButton } from "@mui/material";
+import { Paper, Typography, Chip, IconButton, Box } from "@mui/material";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import DeleteIcon from "@mui/icons-material/Delete";
+import GroupsIcon from "@mui/icons-material/Groups";
 import { Session } from "@/types/Event";
 
 interface SessionCardProps {
   session: Session;
   onClick: () => void;
   onDelete: () => void;
+  onManageGuests?: () => void;
 }
 
-export default function SessionCard({ session, onClick, onDelete }: SessionCardProps) {
+export default function SessionCard({ session, onClick, onDelete, onManageGuests }: SessionCardProps) {
   const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent triggering onClick
+    e.stopPropagation();
     onDelete();
   };
+
+  const handleManageGuests = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onManageGuests) {
+      onManageGuests();
+    }
+  };
+
+  const totalAttendees = (session.inheritedHostGuestIds?.length || 0) + 
+                         (session.inheritedExternalGuestIds?.length || 0);;
 
   return (
     <Paper 
@@ -53,7 +65,7 @@ export default function SessionCard({ session, onClick, onDelete }: SessionCardP
         <DeleteIcon fontSize="small" />
       </IconButton>
 
-      <div className="flex justify-between items-start mb-1">
+      <Box display="flex" justifyContent="space-between" alignItems="start" mb={1}>
         <Chip 
           label={session.sessionType} 
           size="small" 
@@ -61,7 +73,24 @@ export default function SessionCard({ session, onClick, onDelete }: SessionCardP
           variant="outlined" 
           sx={{ fontSize: '0.7rem', height: 20 }}
         />
-      </div>
+        
+        {/* Attendee Count Badge */}
+        <Chip
+          icon={<GroupsIcon sx={{ fontSize: 14 }} />}
+          label={totalAttendees}
+          size="small"
+          color={totalAttendees > 0 ? "success" : "default"}
+          onClick={handleManageGuests}
+          sx={{ 
+            fontSize: '0.7rem', 
+            height: 20,
+            cursor: onManageGuests ? 'pointer' : 'default',
+            '&:hover': onManageGuests ? {
+              backgroundColor: 'rgba(46, 125, 50, 0.12)',
+            } : {}
+          }}
+        />
+      </Box>
       
       <Typography variant="h6" fontSize="1rem" fontWeight="bold" sx={{ pr: 4 }}>
         {session.name}
