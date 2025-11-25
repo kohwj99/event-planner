@@ -27,8 +27,8 @@ interface EventStoreState {
 
   /* -------------------- 📅 Day & Session Management -------------------- */
   addDay: (eventId: string, date: string) => void;
+  deleteDay: (eventId: string, dayId: string) => void; // 🆕 NEW
   
-  // 🆕 Enhanced addSession to accept all form data
   addSession: (
     eventId: string, 
     dayId: string, 
@@ -84,7 +84,7 @@ export const useEventStore = create<EventStoreState>()(
                 name,
                 description,
                 eventType,
-                startDate, // 🆕 Saved
+                startDate,
                 createdAt: new Date().toISOString(),
                 masterHostGuests: [],
                 masterExternalGuests: [],
@@ -131,6 +131,19 @@ export const useEventStore = create<EventStoreState>()(
             ),
           })),
 
+        // 🆕 DELETE DAY - removes day and all its sessions
+        deleteDay: (eventId, dayId) =>
+          set((state) => ({
+            events: state.events.map((e) =>
+              e.id !== eventId
+                ? e
+                : {
+                    ...e,
+                    days: e.days.filter((d) => d.id !== dayId),
+                  }
+            ),
+          })),
+
         /* ---------- Session Management ---------- */
         addSession: (eventId, dayId, sessionData) =>
           set((state) => ({
@@ -151,7 +164,6 @@ export const useEventStore = create<EventStoreState>()(
                             description: sessionData.description,
                             sessionType: sessionData.sessionType,
                             startTime: sessionData.startTime,
-                            // Default EndTime to start + 1 hour for now
                             endTime: new Date(new Date(sessionData.startTime).getTime() + 60*60*1000).toISOString(),
                             seatPlan: {
                               tables: [],
@@ -221,7 +233,7 @@ export const useEventStore = create<EventStoreState>()(
                           : {
                               ...s,
                               seatPlan,
-                              lastModified: now, // 🚩 Audit Timestamp
+                              lastModified: now,
                             }
                       ),
                     };
@@ -240,7 +252,6 @@ export const useEventStore = create<EventStoreState>()(
           const currentSession = allSessions.find((s) => s.id === currentSessionId);
           if (!currentSession) return {};
 
-          // Strict type filtering
           const previousSessions = allSessions.filter((s: Session) => 
              s.startTime < currentSession.startTime && s.id !== currentSessionId
           );
