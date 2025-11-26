@@ -1,79 +1,131 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
-import { Session } from '@/types/Event';
 
-export const useSessionLoader = (eventId: string, dayId: string, sessionId: string) => {
-  const [isLoaded, setIsLoaded] = useState(false);
+export const useSessionLoader = (sessionId: string | null) => {
+  const lastSessionIdRef = useRef<string | null>(null);
+  const hasLoadedRef = useRef<boolean>(false);
 
-  // Access Stores
-  const event = useEventStore((state) => state.events.find((e) => e.id === eventId));
+  // Event Store
+  const getSessionById = useEventStore((state) => state.getSessionById);
+  const loadSessionSeatPlan = useEventStore((state) => state.loadSessionSeatPlan);
   const saveSessionSeatPlan = useEventStore((state) => state.saveSessionSeatPlan);
-  
-  // We use the direct setState methods for bulk loading to avoid creating 
-  // excessive actions in your existing stores just for hydration.
-  const setSeatStoreState = useSeatStore.setState; 
+  const getSessionGuests = useEventStore((state) => state.getSessionGuests);
+  const setActiveSession = useEventStore((state) => state.setActiveSession);
+
+  // Seat Store - Direct setState for bulk operations
+  const setSeatStoreState = useSeatStore.setState;
+  const resetTables = useSeatStore((state) => state.resetTables);
+
+  // Guest Store
   const resetGuests = useGuestStore((state) => state.resetGuests);
   const addGuest = useGuestStore((state) => state.addGuest);
 
-  // 1. LOAD: Hydrate the editor when the ID changes
-  useEffect(() => {
-    if (!eventId || !dayId || !sessionId || !event) return;
-
-    const day = event.days.find((d) => d.id === dayId);
-    const session = day?.sessions.find((s: Session) => s.id === sessionId);
-
-    if (session) {
-      console.log(`Loading Session: ${session.name}`);
-
-      // A. Load Tables & Chunks (Direct Zustand State Set)
-      // We overwrite the current transient state with the saved session state
-      setSeatStoreState({ 
-        tables: session.seatPlan.tables || [], 
-        chunks: session.seatPlan.chunks || {} 
-      });
-
-      // B. Load Guests
-      resetGuests();
-      
-      // Combine master lists
-      const allMasterGuests = [...event.masterHostGuests, ...event.masterExternalGuests];
-
-      // Determine which guests to load:
-      // If activeGuestIds exists and is not empty, load specific guests.
-      // Otherwise (new session), load everyone.
-      const activeIds = session.seatPlan.activeGuestIds || [];
-      
-      const guestsToLoad = activeIds.length > 0
-        ? allMasterGuests.filter((g) => activeIds.includes(g.id))
-        : allMasterGuests;
-
-      guestsToLoad.forEach((g) => addGuest(g));
-
-      setIsLoaded(true);
-    }
-  }, [eventId, dayId, sessionId, event, setSeatStoreState, resetGuests, addGuest]);
-
-  // 2. SAVE: Function to call manually or on unmount
+  // Save current session before switching
   const saveCurrentSession = useCallback(() => {
-    if (!eventId || !dayId || !sessionId) return;
+    const currentSessionId = lastSessionIdRef.current;
+    if (!currentSessionId) return;
 
-    // Get snapshots of current editor state
+    const sessionData = getSessionById(currentSessionId);
+    if (!sessionData) return;
+
     const { tables, chunks } = useSeatStore.getState();
-    const { hostGuests, externalGuests } = useGuestStore.getState();
 
-    // Extract IDs for the "Active" list
-    const activeGuestIds = [...hostGuests, ...externalGuests].map((g) => g.id);
-
-    saveSessionSeatPlan(eventId, dayId, sessionId, {
-      tables,
-      chunks,
-      activeGuestIds
+    // Collect all assigned guest IDs from seats
+    const activeGuestIds = new Set<string>();
+    tables.forEach(table => {
+      table.seats.forEach(seat => {
+        if (seat.assignedGuestId) {
+          activeGuestIds.add(seat.assignedGuestId);
+        }
+      });
     });
 
-    console.log('Session Saved');
-  }, [eventId, dayId, sessionId, saveSessionSeatPlan]);
+    console.log(`💾 Saving session: ${sessionData.session.name}`);
+    saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
+      tables,
+      chunks,
+      activeGuestIds: Array.from(activeGuestIds),
+    });
+  }, [getSessionById, saveSessionSeatPlan]);
 
-  return { isLoaded, saveCurrentSession };
+  // Load session data
+  const loadSession = useCallback((newSessionId: string) => {
+    console.log(`📂 Loading session: ${newSessionId}`);
+
+    const sessionData = getSessionById(newSessionId);
+    if (!sessionData) {
+      console.error('Session not found');
+      return;
+    }
+
+    // Load seat plan
+    const seatPlan = loadSessionSeatPlan(newSessionId);
+    if (seatPlan && seatPlan.tables.length > 0) {
+      // Existing session with data
+      console.log('Loading existing seat plan with', seatPlan.tables.length, 'tables');
+      setSeatStoreState({
+        tables: seatPlan.tables,
+        chunks: seatPlan.chunks,
+        selectedTableId: null,
+        selectedSeatId: null,
+      });
+    } else {
+      // New session - initialize with proper chunk structure
+      console.log('Initializing new session with default chunk');
+      // Use resetTables which properly initializes the default chunk
+      resetTables();
+    }
+
+    // Load guests
+    resetGuests();
+    const sessionGuests = getSessionGuests(newSessionId);
+    if (sessionGuests) {
+      [...sessionGuests.hostGuests, ...sessionGuests.externalGuests].forEach(guest => {
+        addGuest(guest);
+      });
+    }
+
+    setActiveSession(newSessionId);
+    lastSessionIdRef.current = newSessionId;
+    hasLoadedRef.current = true;
+  }, [getSessionById, loadSessionSeatPlan, getSessionGuests, setSeatStoreState, resetGuests, addGuest, setActiveSession, resetTables]);
+
+  // Handle session changes
+  useEffect(() => {
+    if (!sessionId) {
+      // Cleanup when navigating away
+      if (lastSessionIdRef.current) {
+        saveCurrentSession();
+        lastSessionIdRef.current = null;
+        hasLoadedRef.current = false;
+      }
+      return;
+    }
+
+    // Save previous session if switching
+    if (lastSessionIdRef.current && lastSessionIdRef.current !== sessionId) {
+      saveCurrentSession();
+      hasLoadedRef.current = false;
+    }
+
+    // Load new session
+    if (lastSessionIdRef.current !== sessionId || !hasLoadedRef.current) {
+      loadSession(sessionId);
+    }
+  }, [sessionId, saveCurrentSession, loadSession, setActiveSession]);
+
+  // Save on unmount
+  useEffect(() => {
+    return () => {
+      if (lastSessionIdRef.current) {
+        saveCurrentSession();
+      }
+    };
+  }, [saveCurrentSession]);
+
+  return {
+    saveCurrentSession,
+  };
 };

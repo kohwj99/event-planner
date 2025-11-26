@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Button } from '@mui/material';
 import AutoFillModal from '@/components/molecules/AutoFillModal';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 
 export default function AutoFillButton() {
   const [open, setOpen] = useState(false);
@@ -14,8 +15,9 @@ export default function AutoFillButton() {
         variant="contained"
         color="primary"
         onClick={() => setOpen(true)}
+        startIcon={<AutoAwesomeIcon />}
       >
-        Auto-Fill Seats
+        AutoFill
       </Button>
 
       <AutoFillModal open={open} onClose={() => setOpen(false)} />

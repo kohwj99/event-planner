@@ -1,70 +1,82 @@
-'use client';
+// 'use client';
 
-import AppBar from '@mui/material/AppBar';
-import Toolbar from '@mui/material/Toolbar';
-import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
-import Stack from '@mui/material/Stack';
-import { useSeatStore } from '@/store/seatStore';
-import { exportToPDF } from '@/utils/exportToPDF';
-import { exportToPPTX } from '@/utils/exportToPPTX';
-import { useState } from 'react';
-import GuestListModal from './GuestListModal';
-import AutoFillButton from '../atoms/AutoFillButton';
+// import AppBar from '@mui/material/AppBar';
+// import Toolbar from '@mui/material/Toolbar';
+// import Typography from '@mui/material/Typography';
+// import Button from '@mui/material/Button';
+// import Stack from '@mui/material/Stack';
+// import { useSeatStore } from '@/store/seatStore';
+// import { exportToPDF } from '@/utils/exportToPDF';
+// import { exportToPPTX } from '@/utils/exportToPPTX';
+// import { useState } from 'react';
+// import AutoFillButton from '../atoms/AutoFillButton';
+// import ExportModal from '../molecules/ExportModal';
 
-export default function PlaygroundTopControlPanel() {
-  const { tables, resetTables } = useSeatStore();
-  const [guestModalOpen, setGuestModalOpen] = useState(false);
-  const [autoModalOpen, setAutoModalOpen] = useState(false);
+// interface PlaygroundTopControlPanelProps {
+//   onManageGuests?: () => void;
+// }
 
-  const handleReset = () => {
-    resetTables();
-  }
+// export default function PlaygroundTopControlPanel({ onManageGuests }: PlaygroundTopControlPanelProps) {
+//   const { tables, resetTables } = useSeatStore();
+//   const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  return (
-    <AppBar position="static" color="default" elevation={1}>
-      <Toolbar sx={{ justifyContent: 'space-between', px: 3 }}>
-        <Typography variant="h6" fontWeight="bold">
-          Seat Planner
-        </Typography>
+//   const handleReset = () => {
+//     if (confirm('Are you sure you want to reset all tables? This will clear all seating arrangements.')) {
+//       resetTables();
+//     }
+//   }
 
-        <Stack direction="row" spacing={2} p={2} bgcolor="#e3f2fd">
+//   const handleExportPDF = () => {
+//     exportToPDF("playground-canvas");
+//   };
 
-          <Button variant="contained" color="primary" onClick={() => setGuestModalOpen(true)}>
-            Manage Guests
-          </Button>
+//   const handleExportPPTX = () => {
+//     exportToPPTX(tables);
+//   };
 
-          <AutoFillButton/>
+//   return (
+//     <>
+//       <AppBar position="static" color="default" elevation={1}>
+//         <Toolbar sx={{ justifyContent: 'space-between', px: 3 }}>
+//           <Typography variant="h6" fontWeight="bold">
+//             Seat Planner
+//           </Typography>
 
-          <Button
-            variant="contained"
-            color="secondary"
-            onClick={() => exportToPDF("playground-canvas")}
-          >
-            Export PDF
-          </Button>
+//           <Stack direction="row" spacing={2} p={2} bgcolor="#e3f2fd">
 
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={() => exportToPPTX(tables)}
-          >
-            Export PPT
-          </Button>
+//             <Button variant="contained" color="primary" onClick={onManageGuests}>
+//               Manage Guests
+//             </Button>
 
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleReset}
-          >
-            Reset
-          </Button>
+//             <AutoFillButton/>
 
-        </Stack>
-      </Toolbar>
+//             <Button
+//               variant="contained"
+//               color="secondary"
+//               onClick={() => setExportModalOpen(true)}
+//             >
+//               Export
+//             </Button>
 
-      {/* Guest List Modal */}
-      <GuestListModal open={guestModalOpen} onClose={() => setGuestModalOpen(false)} />
-    </AppBar>
-  );
-}
+//             <Button
+//               variant="contained"
+//               color="error"
+//               onClick={handleReset}
+//             >
+//               Reset
+//             </Button>
+
+//           </Stack>
+//         </Toolbar>
+//       </AppBar>
+
+//       {/* Export Modal */}
+//       <ExportModal
+//         open={exportModalOpen}
+//         onClose={() => setExportModalOpen(false)}
+//         onExportPDF={handleExportPDF}
+//         onExportPPTX={handleExportPPTX}
+//       />
+//     </>
+//   );
+// }

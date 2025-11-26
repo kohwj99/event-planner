@@ -11,20 +11,20 @@ interface EventStoreState {
   /* -------------------- 📦 State -------------------- */
   events: Event[];
   activeEventId: string | null;
-  activeSessionId: string | null; // 🆕 Track active session for seat planner
+  activeSessionId: string | null;
 
-  /* -------------------- 📝 Event CRUD -------------------- */
+  /* -------------------- 🔍 Event CRUD -------------------- */
   createEvent: (
-    name: string, 
-    description: string, 
-    eventType: EventType, 
+    name: string,
+    description: string,
+    eventType: EventType,
     startDate: string
   ) => void;
-  
+
   deleteEvent: (id: string) => void;
   updateEventDetails: (id: string, data: Partial<Event>) => void;
   setActiveEvent: (id: string | null) => void;
-  setActiveSession: (sessionId: string | null) => void; // 🆕
+  setActiveSession: (sessionId: string | null) => void;
 
   /* -------------------- 📇 Master Guest List -------------------- */
   addMasterGuest: (eventId: string, guest: Guest) => void;
@@ -32,10 +32,10 @@ interface EventStoreState {
   /* -------------------- 📅 Day & Session Management -------------------- */
   addDay: (eventId: string, date: string) => void;
   deleteDay: (eventId: string, dayId: string) => void;
-  
+
   addSession: (
-    eventId: string, 
-    dayId: string, 
+    eventId: string,
+    dayId: string,
     sessionData: {
       name: string;
       description: string;
@@ -60,27 +60,29 @@ interface EventStoreState {
     sessionId: string,
     hostGuestIds: string[],
     externalGuestIds: string[]
-  ) => void; // 🆕
+  ) => void;
 
   getSessionGuests: (sessionId: string) => {
     hostGuests: Guest[];
     externalGuests: Guest[];
-  } | null; // 🆕
+  } | null;
 
-  getEventIdForSession: (sessionId: string) => string | null; // 🆕
+  getEventIdForSession: (sessionId: string) => string | null;
+  getSessionById: (sessionId: string) => { session: Session; dayId: string; eventId: string } | null;
 
   /* -------------------- 🧠 Seat Plan Snapshot -------------------- */
   saveSessionSeatPlan: (
-    eventId: string, 
-    dayId: string, 
-    sessionId: string, 
+    eventId: string,
+    dayId: string,
+    sessionId: string,
     seatPlan: Session['seatPlan']
   ) => void;
 
   loadSessionSeatPlan: (sessionId: string) => {
     tables: Table[];
     chunks: Record<string, Chunk>;
-  } | null; // 🆕
+    activeGuestIds: string[];
+  } | null;
 
   /* -------------------- 📊 Statistics & Audit -------------------- */
   getPriorStats: (eventId: string, currentSessionId: string) => AdjacencyMap;
@@ -122,6 +124,7 @@ export const useEventStore = create<EventStoreState>()(
         deleteEvent: (id) =>
           set((state) => ({
             events: state.events.filter((e) => e.id !== id),
+            activeEventId: state.activeEventId === id ? null : state.activeEventId,
           })),
 
         updateEventDetails: (id, data) =>
@@ -164,9 +167,9 @@ export const useEventStore = create<EventStoreState>()(
               e.id !== eventId
                 ? e
                 : {
-                    ...e,
-                    days: e.days.filter((d) => d.id !== dayId),
-                  }
+                  ...e,
+                  days: e.days.filter((d) => d.id !== dayId),
+                }
             ),
           })),
 
@@ -181,51 +184,67 @@ export const useEventStore = create<EventStoreState>()(
                   d.id !== dayId
                     ? d
                     : {
-                        ...d,
-                        sessions: [
-                          ...d.sessions,
-                          {
-                            id: uuidv4(),
-                            name: sessionData.name,
-                            description: sessionData.description,
-                            sessionType: sessionData.sessionType,
-                            startTime: sessionData.startTime,
-                            endTime: new Date(new Date(sessionData.startTime).getTime() + 60*60*1000).toISOString(),
-                            inheritedHostGuestIds: [], // 🆕 Empty by default
-                            inheritedExternalGuestIds: [], // 🆕 Empty by default
-                            seatPlan: {
-                              tables: [],
-                              chunks: {},
-                              activeGuestIds: [],
-                            },
+                      ...d,
+                      sessions: [
+                        ...d.sessions,
+                        {
+                          id: uuidv4(),
+                          name: sessionData.name,
+                          description: sessionData.description,
+                          sessionType: sessionData.sessionType,
+                          startTime: new Date(sessionData.startTime).toISOString(),
+                          endTime: new Date(new Date(sessionData.startTime).getTime() + 60 * 60 * 1000).toISOString(),
+                          inheritedHostGuestIds: [],
+                          inheritedExternalGuestIds: [],
+                          seatPlan: {
+                            tables: [],
+                            chunks: {},
+                            activeGuestIds: [],
                           },
-                        ],
-                      }
+                        },
+                      ],
+                    }
                 ),
               };
             }),
           })),
 
         updateSession: (eventId, dayId, sessionId, data) =>
-          set((state) => ({
-            events: state.events.map((e) => {
-              if (e.id !== eventId) return e;
-              return {
-                ...e,
-                days: e.days.map((d) => {
-                  if (d.id !== dayId) return d;
-                  return {
-                    ...d,
-                    sessions: d.sessions.map((s) => 
-                      s.id !== sessionId ? s : { ...s, ...data }
-                    ),
-                  };
-                }),
-              };
-            }),
-          })),
+          set((state) => {
+            // Defensive normalization
+            const normalizedData = { ...data };
+            if (data && data.startTime) {
+              // If it's already a Date object, use it; otherwise parse string to Date and toISOString
+              const parsed = new Date(data.startTime);
+              if (!isNaN(parsed.getTime())) {
+                normalizedData.startTime = parsed.toISOString();
+              } else {
+                // fallback: leave as-is (but this should not happen)
+                normalizedData.startTime = data.startTime;
+              }
+            }
 
-        deleteSession: (eventId, dayId, sessionId) => 
+            return {
+              events: state.events.map((e) => {
+                if (e.id !== eventId) return e;
+                return {
+                  ...e,
+                  days: e.days.map((d) => {
+                    if (d.id !== dayId) return d;
+                    return {
+                      ...d,
+                      sessions: d.sessions.map((s) =>
+                        s.id !== sessionId ? s : { ...s, ...normalizedData }
+                      ),
+                    };
+                  }),
+                };
+              }),
+            };
+          }),
+
+
+        deleteSession: (eventId, dayId, sessionId) =>
           set((state) => ({
             events: state.events.map((e) => {
               if (e.id !== eventId) return e;
@@ -242,7 +261,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ---------- 🆕 Session Guest Management ---------- */
+        /* ---------- Session Guest Management ---------- */
         setSessionGuests: (eventId, dayId, sessionId, hostGuestIds, externalGuestIds) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -257,10 +276,10 @@ export const useEventStore = create<EventStoreState>()(
                       s.id !== sessionId
                         ? s
                         : {
-                            ...s,
-                            inheritedHostGuestIds: hostGuestIds,
-                            inheritedExternalGuestIds: externalGuestIds,
-                          }
+                          ...s,
+                          inheritedHostGuestIds: hostGuestIds,
+                          inheritedExternalGuestIds: externalGuestIds,
+                        }
                     ),
                   };
                 }),
@@ -270,31 +289,29 @@ export const useEventStore = create<EventStoreState>()(
 
         getSessionGuests: (sessionId) => {
           const state = get();
-          
-          // Find the event and session
+
           for (const event of state.events) {
             for (const day of event.days) {
               const session = day.sessions.find(s => s.id === sessionId);
               if (session) {
-                // Get full guest objects from IDs
-                const hostGuests = event.masterHostGuests.filter(g => 
+                const hostGuests = event.masterHostGuests.filter(g =>
                   session.inheritedHostGuestIds?.includes(g.id)
                 );
-                const externalGuests = event.masterExternalGuests.filter(g => 
+                const externalGuests = event.masterExternalGuests.filter(g =>
                   session.inheritedExternalGuestIds?.includes(g.id)
                 );
-                
+
                 return { hostGuests, externalGuests };
               }
             }
           }
-          
+
           return null;
         },
 
         getEventIdForSession: (sessionId) => {
           const state = get();
-          
+
           for (const event of state.events) {
             for (const day of event.days) {
               if (day.sessions.some(s => s.id === sessionId)) {
@@ -302,7 +319,22 @@ export const useEventStore = create<EventStoreState>()(
               }
             }
           }
-          
+
+          return null;
+        },
+
+        getSessionById: (sessionId) => {
+          const state = get();
+
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                return { session, dayId: day.id, eventId: event.id };
+              }
+            }
+          }
+
           return null;
         },
 
@@ -323,10 +355,10 @@ export const useEventStore = create<EventStoreState>()(
                         s.id !== sessionId
                           ? s
                           : {
-                              ...s,
-                              seatPlan,
-                              lastModified: now,
-                            }
+                            ...s,
+                            seatPlan,
+                            lastModified: now,
+                          }
                       ),
                     };
                   }),
@@ -337,19 +369,20 @@ export const useEventStore = create<EventStoreState>()(
 
         loadSessionSeatPlan: (sessionId) => {
           const state = get();
-          
+
           for (const event of state.events) {
             for (const day of event.days) {
               const session = day.sessions.find(s => s.id === sessionId);
               if (session) {
                 return {
-                  tables: session.seatPlan.tables,
-                  chunks: session.seatPlan.chunks,
+                  tables: session.seatPlan.tables || [],
+                  chunks: session.seatPlan.chunks || {},
+                  activeGuestIds: session.seatPlan.activeGuestIds || [],
                 };
               }
             }
           }
-          
+
           return null;
         },
 
@@ -362,8 +395,8 @@ export const useEventStore = create<EventStoreState>()(
           const currentSession = allSessions.find((s) => s.id === currentSessionId);
           if (!currentSession) return {};
 
-          const previousSessions = allSessions.filter((s: Session) => 
-             s.startTime < currentSession.startTime && s.id !== currentSessionId
+          const previousSessions = allSessions.filter((s: Session) =>
+            s.startTime < currentSession.startTime && s.id !== currentSessionId
           );
 
           const guestMap: Record<string, Guest> = {};
@@ -375,46 +408,46 @@ export const useEventStore = create<EventStoreState>()(
         },
 
         checkSessionAuditStatus: (eventId, sessionId) => {
-            const event = get().events.find((e) => e.id === eventId);
-            if (!event) return "clean";
+          const event = get().events.find((e) => e.id === eventId);
+          if (!event) return "clean";
 
-            const allSessions = event.days.flatMap((d) => d.sessions);
-            const currentSession = allSessions.find((s) => s.id === sessionId);
-            
-            if (!currentSession || !currentSession.lastStatsCheck) return "clean";
+          const allSessions = event.days.flatMap((d) => d.sessions);
+          const currentSession = allSessions.find((s) => s.id === sessionId);
 
-            const previousSessions = allSessions.filter((s: Session) => 
-                 s.startTime < currentSession.startTime && s.id !== sessionId
-            );
+          if (!currentSession || !currentSession.lastStatsCheck) return "clean";
 
-            let maxPrevModified = "";
-            previousSessions.forEach((s: Session) => {
-                if (s.lastModified && s.lastModified > maxPrevModified) {
-                    maxPrevModified = s.lastModified;
-                }
-            });
+          const previousSessions = allSessions.filter((s: Session) =>
+            s.startTime < currentSession.startTime && s.id !== sessionId
+          );
 
-            if (maxPrevModified > currentSession.lastStatsCheck) {
-                return "review_required";
+          let maxPrevModified = "";
+          previousSessions.forEach((s: Session) => {
+            if (s.lastModified && s.lastModified > maxPrevModified) {
+              maxPrevModified = s.lastModified;
             }
+          });
 
-            return "clean";
+          if (maxPrevModified > currentSession.lastStatsCheck) {
+            return "review_required";
+          }
+
+          return "clean";
         },
 
         acknowledgeSessionWarnings: (eventId, sessionId) => {
-            const now = new Date().toISOString();
-            set((state) => ({
-                events: state.events.map(e => e.id !== eventId ? e : {
-                    ...e,
-                    days: e.days.map(d => ({
-                        ...d,
-                        sessions: d.sessions.map(s => s.id !== sessionId ? s : {
-                            ...s,
-                            lastStatsCheck: now
-                        })
-                    }))
+          const now = new Date().toISOString();
+          set((state) => ({
+            events: state.events.map(e => e.id !== eventId ? e : {
+              ...e,
+              days: e.days.map(d => ({
+                ...d,
+                sessions: d.sessions.map(s => s.id !== sessionId ? s : {
+                  ...s,
+                  lastStatsCheck: now
                 })
-            }))
+              }))
+            })
+          }))
         },
 
         /* ---------- Import / Export ---------- */
@@ -427,13 +460,13 @@ export const useEventStore = create<EventStoreState>()(
           try {
             const eventData: Event = JSON.parse(jsonString);
             if (!eventData.id || !eventData.days) return false;
-            
+
             set((state) => {
-                const exists = state.events.some(e => e.id === eventData.id);
-                if (exists) {
-                    return { events: state.events.map(e => e.id === eventData.id ? eventData : e) };
-                }
-                return { events: [...state.events, eventData] };
+              const exists = state.events.some(e => e.id === eventData.id);
+              if (exists) {
+                return { events: state.events.map(e => e.id === eventData.id ? eventData : e) };
+              }
+              return { events: [...state.events, eventData] };
             });
             return true;
           } catch (e) {
