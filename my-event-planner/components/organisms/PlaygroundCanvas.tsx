@@ -23,6 +23,7 @@ import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
 import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
+import { useEventStore } from '@/store/eventStore';
 
 export default function PlaygroundCanvas() {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -30,7 +31,6 @@ export default function PlaygroundCanvas() {
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
-
   const {
     tables,
     chunks,
@@ -85,90 +85,6 @@ export default function PlaygroundCanvas() {
     if (r <= 4) return ' ⭐';
     return '';
   }
-
-  //attempted at making a function that will run on button click to arrange the textbox as compact as possible but failed, moving on first
-  const autoArrangeGuestBoxes = (table: Table) => {
-    const seats = table.seats || [];
-    const seatR = 12; // default seat radius if needed
-    const initialDist = 50; // fixed distance from table edge
-
-    // Prepare box data with radial angle
-    const boxes: {
-      seat: Seat;
-      width: number;
-      height: number;
-      angle: number;
-      textX: number;
-      textY: number;
-    }[] = [];
-
-    seats.forEach((s, i) => {
-      if (!s.assignedGuestId) return;
-      const guest = guestLookup[s.assignedGuestId];
-      if (!guest) return;
-
-      const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
-      const stars = getRankStars(guest.ranking);
-      const line1 = `${name}${stars}`;
-      const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-      const estTextWidth = Math.max(line1.length, line2.length) * 7;
-      const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-      const height = 14 * 2 + 12;
-
-      // Compute initial angle around table
-      const angle = (i / seats.length) * 2 * Math.PI;
-
-      // Initial position along the ring
-      const textX = table.x + Math.cos(angle) * (table.radius + initialDist);
-      const textY = table.y + Math.sin(angle) * (table.radius + initialDist);
-
-      boxes.push({ seat: s, width, height, angle, textX, textY });
-    });
-
-    // --- Tangential relaxation to prevent overlap ---
-    const maxIter = 200;
-    const stepAngle = 0.02; // ~1 degree in radians
-    const padding = 6;
-
-    for (let iter = 0; iter < maxIter; iter++) {
-      let moved = false;
-      for (let i = 0; i < boxes.length; i++) {
-        const a = boxes[i];
-        const aRect = boxRectFromCenter({ x: a.textX, y: a.textY, width: a.width, height: a.height });
-
-        for (let j = i + 1; j < boxes.length; j++) {
-          const b = boxes[j];
-          const bRect = boxRectFromCenter({ x: b.textX, y: b.textY, width: b.width, height: b.height });
-
-          if (rectsOverlap(aRect, bRect, padding)) {
-            // Move both boxes tangentially along the ring
-            a.angle += stepAngle;
-            b.angle -= stepAngle;
-            a.textX = table.x + Math.cos(a.angle) * (table.radius + initialDist);
-            a.textY = table.y + Math.sin(a.angle) * (table.radius + initialDist);
-            b.textX = table.x + Math.cos(b.angle) * (table.radius + initialDist);
-            b.textY = table.y + Math.sin(b.angle) * (table.radius + initialDist);
-            moved = true;
-          }
-        }
-      }
-      if (!moved) break;
-    }
-
-    // --- Save positions to store ---
-    const newSeats = seats.map((s) => {
-      const b = boxes.find((bx) => bx.seat.id === s.id);
-      if (!b) return s;
-      return { ...s, textX: b.textX, textY: b.textY };
-    });
-
-    useSeatStore.getState().updateTable(table.id, { seats: newSeats });
-  };
-
-
-
-
-
 
   /** ---------- SVG + Zoom ---------- */
   useEffect(() => {
@@ -304,13 +220,18 @@ export default function PlaygroundCanvas() {
       const connectors = connectorsLayer.selectAll<SVGLineElement, Seat>('line.connector-line').data(seatsWithGuest, (s: any) => s.id);
       connectors.exit().remove();
       const connectorsEnter = connectors.enter().append('line').attr('class', 'connector-line').attr('stroke', '#90a4ae').attr('stroke-width', 1).attr('pointer-events', 'none');
+
       connectorsEnter.merge(connectors as any).each(function (s: Seat) {
         const relX = s.x - tableDatum.x;
         const relY = s.y - tableDatum.y;
         let nx = 0, ny = 0;
-        if (tableDatum.shape === 'round') {
-          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
-        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
+
+        // --- UPDATED LOGIC: Use radial vectors for BOTH round and rectangle tables ---
+        // This ensures rectangular tables get an "oval" formation of guests instead of a grid
+        const len = Math.sqrt(relX * relX + relY * relY) || 1;
+        nx = relX / len;
+        ny = relY / len;
+
         const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
         if (!guest) return;
         const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
@@ -353,8 +274,6 @@ export default function PlaygroundCanvas() {
         .text((s) => s.seatNumber);
 
       // GUEST BOXES
-      
-      // const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(tableDatum.seats || [], (s) => s.id);
       const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(seatsWithGuest, (s) => s.id);
 
       guestBoxes.exit().remove();
@@ -365,42 +284,92 @@ export default function PlaygroundCanvas() {
 
       // --- Compute relaxed guest box positions ---
       const boxData: any[] = [];
+
       (tableDatum.seats || []).forEach((s) => {
         const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
         if (!guest) return;
+
         const relX = s.x - tableDatum.x;
         const relY = s.y - tableDatum.y;
-        let nx = 0, ny = 0;
-        if (tableDatum.shape === 'round') {
-          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
-        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
+
+        // Radial direction vector
+        const len = Math.sqrt(relX * relX + relY * relY) || 1;
+        const nx = relX / len;
+        const ny = relY / len;
+
         const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
         const stars = getRankStars(guest.ranking);
         const line1 = `${name}${stars}`;
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+
         const estTextWidth = Math.max(line1.length, line2.length) * 7;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
         const height = 14 * 2 + 12;
+
         const seatR = s.radius ?? 8;
-        const dist = seatR + connectorGap + width / 2;
-        boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist });
+
+        // NEW: Orientation-aware radial sizing (fixes top/bottom spacing)
+        const verticalBias = Math.abs(ny);
+        const horizontalBias = Math.abs(nx);
+
+        const radialSize =
+          (verticalBias * height) +
+          (horizontalBias * width);
+
+        let dist = seatR + connectorGap + radialSize / 2;
+
+        // NEW: Pull top/bottom boxes slightly closer
+        if (Math.abs(ny) > 0.85) {
+          dist *= 0.75;
+        }
+
+        boxData.push({
+          s,
+          guest,
+          nx,
+          ny,
+          width,
+          height,
+          relX,
+          relY,
+          minRadialDist: dist,
+
+          // Initial center
+          x: relX + nx * dist,
+          y: relY + ny * dist,
+        });
       });
 
       /** Radial outward relaxation to prevent overlap */
-      const maxIterations = 100; const step = 10; const padding = 6;
+      const maxIterations = 150;
+      const step = 2;
+      const padding = 6;
+
       for (let iter = 0; iter < maxIterations; iter++) {
         let moved = false;
+
         for (let i = 0; i < boxData.length; i++) {
-          const a = boxData[i], aRect = boxRectFromCenter(a);
+          const a = boxData[i];
+          const aRect = boxRectFromCenter(a);
+
           for (let j = i + 1; j < boxData.length; j++) {
-            const b = boxData[j], bRect = boxRectFromCenter(b);
+            const b = boxData[j];
+            const bRect = boxRectFromCenter(b);
+
             if (rectsOverlap(aRect, bRect, padding)) {
-              a.x += a.nx * step; a.y += a.ny * step; b.x += b.nx * step; b.y += b.ny * step; moved = true;
+              // Push outward radially (preserves oval)
+              a.x += a.nx * step;
+              a.y += a.ny * step;
+              b.x += b.nx * step;
+              b.y += b.ny * step;
+              moved = true;
             }
           }
         }
+
         if (!moved) break;
       }
+
 
       // Render relaxed guest boxes
       boxData.forEach((b) => {
@@ -453,25 +422,6 @@ export default function PlaygroundCanvas() {
   /** ---------- Add Table ---------- */
   const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
   const handleAddTableClick = () => setIsAddTableModalOpen(true);
-  // const handleAddTable = (config: TableConfig) => {
-  //   const svgEl = svgRef.current; if (!svgEl) return; const rect = svgEl.getBoundingClientRect(); const centerX = rect.width / 2; const centerY = rect.height / 2;
-  //   const t = d3.zoomTransform(svgEl);
-  //   const worldX = Math.max(0, (centerX - t.x) / t.k); const worldY = Math.max(0, (centerY - t.y) / t.k);
-  //   for (let i = 0; i < config.quantity; i++) {
-  //     const id = `t${Date.now()}-${i}`;
-  //     const label = config.label ? `${config.label} ${tables.length + i + 1}` : `Table ${tables.length + i + 1}`;
-  //     const offsetX = (i % 3) * 200; const offsetY = Math.floor(i / 3) * 200;
-  //     const x = worldX + offsetX; const y = worldY + offsetY;
-  //     let table;
-  //     if (config.type === 'round') { table = createRoundTable(id, x, y, 60, config.roundSeats || 8, label); }
-  //     else { const { top, bottom, left, right } = config.rectangleSeats || { top: 2, bottom: 2, left: 1, right: 1 }; table = createRectangleTable(id, x, y, top, bottom, left, right, label); }
-  //     addTable(table);
-  //     const row = Math.floor(y / CHUNK_HEIGHT); const col = Math.floor(x / CHUNK_WIDTH); ensureChunkExists(row, col); assignTableToChunk(id, row, col);
-  //   }
-  //   expandWorldIfNeeded();
-  // };
-
-  // In PlaygroundCanvas.tsx - Update the handleAddTable function
 
   const handleAddTable = (config: TableConfig) => {
     const svgEl = svgRef.current;
@@ -539,7 +489,7 @@ export default function PlaygroundCanvas() {
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
       {/* NEW: Add Statistics Panel - TOP RIGHT */}
-      <SeatingStatsPanel />
+      <SeatingStatsPanel/>
       <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
         <Tooltip title="Add Table">
           <Fab color="primary" size="medium" onClick={handleAddTableClick}><AddIcon /></Fab>
@@ -556,15 +506,6 @@ export default function PlaygroundCanvas() {
           <Tooltip title="Zoom In">
             <Fab size="small" onClick={() => zoomByFactor(1.25)}><ZoomInIcon fontSize="small" /></Fab>
           </Tooltip>
-          {/* 
-          <Tooltip title="Auto-Arrange Textboxes">
-            <Fab size="small" onClick={() => {
-              tables.forEach((table) => autoArrangeGuestBoxes(table));
-            }}>
-              ARRANGE
-            </Fab>
-          </Tooltip> */}
-
         </Stack>
 
         <Box sx={{ width: 120, mt: 2 }}>
