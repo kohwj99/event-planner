@@ -22,7 +22,7 @@ import {
   Schedule,
   Visibility,
 } from '@mui/icons-material';
-import { useTrackingStore } from '@/store/trackingStore';
+import { useEventStore } from '@/store/eventStore';
 
 interface DayColumnProps {
   day: EventDay;
@@ -46,7 +46,7 @@ export default function DayColumn({
   onManageSessionGuests,
 }: DayColumnProps) {
   const [isMounted, setIsMounted] = useState(false);
-  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
+  const isSessionTracked = useEventStore((s) => s.isSessionTracked);
 
   useEffect(() => {
     setIsMounted(true);

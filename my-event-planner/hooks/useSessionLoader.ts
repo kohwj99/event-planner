@@ -2,9 +2,18 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
-import { useTrackingStore } from '@/store/trackingStore';
-import { useHydrationContext } from '@/components/providers/StoreHydrationProvider';
 
+/**
+ * Hook for loading and saving session data
+ * 
+ * This hook manages:
+ * 1. Loading session seat plans when navigating to a session
+ * 2. Saving seat plans when navigating away
+ * 3. Recording adjacency data for tracked sessions
+ * 
+ * NOTE: All tracking functionality is now in eventStore.
+ * No separate trackingStore import is needed.
+ */
 export const useSessionLoader = (sessionId: string | null) => {
   const lastSessionIdRef = useRef<string | null>(null);
   const hasLoadedRef = useRef<boolean>(false);
@@ -17,18 +26,23 @@ export const useSessionLoader = (sessionId: string | null) => {
   }, []);
 
   // Hydration check - CRITICAL for preventing data loss on refresh
-  const { isHydrated } = useHydrationContext();
+  // Now using eventStore's hydration state directly
+  const hasHydrated = useEventStore((state) => state._hasHydrated);
   
   // Combined check: mounted AND hydrated
-  const isReady = isMounted && isHydrated;
+  const isReady = isMounted && hasHydrated;
 
-  // Event Store
+  // Event Store - includes all tracking functionality
   const getSessionById = useEventStore((state) => state.getSessionById);
   const loadSessionSeatPlan = useEventStore((state) => state.loadSessionSeatPlan);
   const saveSessionSeatPlan = useEventStore((state) => state.saveSessionSeatPlan);
   const getSessionGuests = useEventStore((state) => state.getSessionGuests);
   const setActiveSession = useEventStore((state) => state.setActiveSession);
-  const updateSessionTrackingStatus = useEventStore((state) => state.updateSessionTrackingStatus);
+  
+  // Tracking functions - now from eventStore
+  const isSessionTracked = useEventStore((state) => state.isSessionTracked);
+  const recordSessionAdjacency = useEventStore((state) => state.recordSessionAdjacency);
+  const getSessionPlanningOrder = useEventStore((state) => state.getSessionPlanningOrder);
 
   // Seat Store - Direct setState for bulk operations
   const setSeatStoreState = useSeatStore.setState;
@@ -37,11 +51,6 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Guest Store
   const resetGuests = useGuestStore((state) => state.resetGuests);
   const addGuest = useGuestStore((state) => state.addGuest);
-
-  // Tracking Store
-  const isSessionTracked = useTrackingStore((state) => state.isSessionTracked);
-  const recordSessionAdjacency = useTrackingStore((state) => state.recordSessionAdjacency);
-  const getSessionPlanningOrder = useTrackingStore((state) => state.getSessionPlanningOrder);
 
   // Save current session before switching
   const saveCurrentSession = useCallback(() => {
@@ -72,13 +81,13 @@ export const useSessionLoader = (sessionId: string | null) => {
       activeGuestIds: Array.from(activeGuestIds),
     });
 
-    // 🆕 Check if this session is tracked (using tracking store as source of truth)
+    // Check if this session is tracked (using eventStore as source of truth)
     const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
     
     if (tracked) {
       console.log(`👁️ Recording adjacency data for tracked session`);
       
-      // Record adjacency data (this also updates planning order in tracking store)
+      // Record adjacency data (this also updates planning order)
       recordSessionAdjacency(
         sessionData.eventId,
         currentSessionId,
@@ -86,18 +95,9 @@ export const useSessionLoader = (sessionId: string | null) => {
         tables
       );
       
-      // 🆕 CRITICAL: Sync planning order back to event store for persistence
+      // Log the planning order for debugging
       const planningOrder = getSessionPlanningOrder(sessionData.eventId, currentSessionId);
-      
-      if (planningOrder > 0) {
-        console.log(`📝 Syncing planning order ${planningOrder} to event store`);
-        updateSessionTrackingStatus(
-          sessionData.eventId,
-          currentSessionId,
-          true,
-          planningOrder
-        );
-      }
+      console.log(`📊 Session planning order: ${planningOrder}`);
     }
   }, [
     getSessionById, 
@@ -105,7 +105,6 @@ export const useSessionLoader = (sessionId: string | null) => {
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
-    updateSessionTrackingStatus
   ]);
 
   // Load session data
@@ -151,7 +150,7 @@ export const useSessionLoader = (sessionId: string | null) => {
 
   // Handle session changes - ONLY after hydration is complete
   useEffect(() => {
-    // 🆕 CRITICAL: Don't do anything until mounted and stores are hydrated
+    // CRITICAL: Don't do anything until mounted and stores are hydrated
     if (!isReady) {
       console.log('⏳ Waiting for store hydration before loading session...');
       return;

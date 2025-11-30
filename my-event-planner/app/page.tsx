@@ -1,29 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useEventStore } from "@/store/eventStore";
 import {
   Container, Typography, Button, Card, CardContent, CardActionArea,
   CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
   CircularProgress, Box
 } from "@mui/material";
+
 import Grid from "@mui/material/Grid";
+
 import { useRouter } from "next/navigation";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
-import { useHydrationContext } from "@/components/providers/StoreHydrationProvider";
 
 export default function HomePage() {
   const router = useRouter();
-  const { events, createEvent, deleteEvent, setActiveEvent } = useEventStore();
-  const { isHydrated } = useHydrationContext();
-  
-  // Track if component has mounted to prevent hydration mismatch
+  const { events, createEvent, deleteEvent, setActiveEvent, _hasHydrated } = useEventStore();
+
+  // Track if component has mounted (for SSR safety)
   const [isMounted, setIsMounted] = useState(false);
   
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // Combined hydration check
+  const isReady = isMounted && _hasHydrated;
 
   const [open, setOpen] = useState(false);
 
@@ -32,6 +35,13 @@ export default function HomePage() {
     description: "",
     date: new Date().toISOString().split('T')[0] // Default today
   });
+
+  // Log hydration status for debugging
+  useEffect(() => {
+    if (isReady) {
+      console.log('✅ App hydrated - events loaded:', events.length);
+    }
+  }, [isReady, events.length]);
 
   const handleCreate = () => {
     createEvent(
@@ -53,25 +63,29 @@ export default function HomePage() {
     router.push(`/events/${id}`);
   };
 
-  // Show loading state while mounting or hydrating
-  // Use isMounted to ensure consistent server/client render
-  const showLoading = !isMounted || !isHydrated;
-
+  // Show loading state until hydration is complete
+  // Use consistent container structure to prevent hydration mismatch
   return (
     <Container maxWidth="xl" sx={{ mt: 4 }}>
-      {showLoading ? (
+      {!isReady ? (
+        // Loading state
         <Box 
-          display="flex" 
-          justifyContent="center" 
-          alignItems="center" 
-          minHeight="50vh"
-          flexDirection="column"
-          gap={2}
+          sx={{ 
+            display: 'flex', 
+            flexDirection: 'column',
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            minHeight: '50vh',
+            gap: 2
+          }}
         >
-          <CircularProgress />
-          <Typography color="text.secondary">Loading events...</Typography>
+          <CircularProgress size={48} />
+          <Typography variant="body1" color="text.secondary">
+            Loading events...
+          </Typography>
         </Box>
       ) : (
+        // Main content
         <>
           <div className="flex justify-between items-center mb-8">
             <Typography variant="h3" fontWeight="bold" color="primary">
@@ -102,6 +116,12 @@ export default function HomePage() {
                       <Typography variant="body2" noWrap>
                         {event.description}
                       </Typography>
+                      {/* Show tracking status if enabled */}
+                      {event.trackingEnabled && (
+                        <Typography variant="caption" color="primary" sx={{ mt: 1, display: 'block' }}>
+                          📊 Tracking: {event.trackedGuestIds?.length || 0} guests
+                        </Typography>
+                      )}
                     </CardContent>
                   </CardActionArea>
                   <CardActions sx={{ justifyContent: "flex-end" }}>
@@ -118,35 +138,60 @@ export default function HomePage() {
               </Grid>
             ))}
           </Grid>
+
+          {/* Empty state */}
+          {events.length === 0 && (
+            <Box 
+              sx={{ 
+                textAlign: 'center', 
+                py: 8,
+                color: 'text.secondary'
+              }}
+            >
+              <Typography variant="h5" gutterBottom>
+                No events yet
+              </Typography>
+              <Typography variant="body1" sx={{ mb: 3 }}>
+                Create your first event to get started
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setOpen(true)}
+              >
+                Create Event
+              </Button>
+            </Box>
+          )}
+
+          {/* Create Event Dialog */}
+          <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
+            <DialogTitle>Create New Event</DialogTitle>
+            <DialogContent>
+              <TextField
+                autoFocus margin="dense" label="Event Name" fullWidth
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              />
+              <TextField
+                margin="dense" label="Start Date" type="date" fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+              />
+              <TextField
+                margin="dense" label="Description" fullWidth multiline rows={3}
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              />
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreate} variant="contained">Create</Button>
+            </DialogActions>
+          </Dialog>
         </>
       )}
-
-      {/* Create Event Dialog */}
-      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Create New Event</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus margin="dense" label="Event Name" fullWidth
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          />
-          <TextField
-            margin="dense" label="Start Date" type="date" fullWidth
-            InputLabelProps={{ shrink: true }}
-            value={formData.date}
-            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-          />
-          <TextField
-            margin="dense" label="Description" fullWidth multiline rows={3}
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleCreate} variant="contained">Create</Button>
-        </DialogActions>
-      </Dialog>
     </Container>
   );
 }

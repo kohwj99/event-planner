@@ -38,7 +38,6 @@ import {
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
-import { useTrackingStore } from '@/store/trackingStore';
 import { useEventStore } from '@/store/eventStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
 import { getProximityViolations } from '@/utils/seatAutoFillHelper';
@@ -84,10 +83,10 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
   
-  // Tracking store
-  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
-  const getTrackedGuests = useTrackingStore((s) => s.getTrackedGuests);
-  const getHistoricalAdjacencyCount = useTrackingStore((s) => s.getHistoricalAdjacencyCount);
+  // Tracking - now from eventStore (consolidated)
+  const isSessionTracked = useEventStore((s) => s.isSessionTracked);
+  const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
+  const getHistoricalAdjacencyCount = useEventStore((s) => s.getHistoricalAdjacencyCount);
   
   const guestLookup = useMemo(() => {
     const lookup: Record<string, any> = {};

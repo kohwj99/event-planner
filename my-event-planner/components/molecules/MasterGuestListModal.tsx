@@ -25,7 +25,6 @@ import {
 import { useState, useMemo, useCallback } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
-import { useTrackingStore } from '@/store/trackingStore';
 import { 
   Delete, 
   Search, 
@@ -62,9 +61,9 @@ export default function MasterGuestListModal({
   const updateEventTrackedGuests = useEventStore((s) => s.updateEventTrackedGuests);
 
   // Tracking Store
-  const toggleGuestTracking = useTrackingStore((s) => s.toggleGuestTracking);
-  const isGuestTracked = useTrackingStore((s) => s.isGuestTracked);
-  const getTrackedGuests = useTrackingStore((s) => s.getTrackedGuests);
+  const toggleGuestTracking = useEventStore((s) => s.toggleGuestTracking);
+  const isGuestTracked = useEventStore((s) => s.isGuestTracked);
+  const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
 
   const [tab, setTab] = useState<'host' | 'external'>('host');
   const [filter, setFilter] = useState('');

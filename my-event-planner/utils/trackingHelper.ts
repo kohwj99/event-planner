@@ -2,9 +2,12 @@
  * Tracking Helper Functions
  * 
  * Provides utilities for analyzing Boss Adjacency tracking data
+ * 
+ * NOTE: All tracking data is now stored in eventStore.
+ * These helpers use eventStore directly for better consistency.
  */
 
-import { useTrackingStore } from "@/store/trackingStore";
+import { useEventStore } from "@/store/eventStore";
 import { Guest } from "@/store/guestStore";
 
 /* -------------------- 📊 ANALYSIS FUNCTIONS -------------------- */
@@ -23,7 +26,7 @@ export function getTrackedGuestAdjacencySummary(
   count: number;
   percentage: number;
 }> {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const history = store.getTrackedGuestHistory(eventId, upToSessionId, trackedGuestId);
   
   if (history.length === 0) return [];
@@ -57,7 +60,7 @@ export function checkAdjacencyThreshold(
   trackedGuestId: string,
   threshold: number = 2
 ): Array<{ guestId: string; count: number; exceeded: boolean }> {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const adjacencyCount = store.getHistoricalAdjacencyCount(eventId, upToSessionId, trackedGuestId);
 
   return Object.entries(adjacencyCount).map(([guestId, count]) => ({
@@ -89,7 +92,7 @@ export function getAllTrackedGuestsWarnings(
   upToSessionId: string,
   threshold: number = 2
 ): Map<string, string[]> {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const trackedGuests = store.getTrackedGuests(eventId);
   
   const warnings = new Map<string, string[]>();
@@ -119,7 +122,7 @@ export function validateSeatingAgainstHistory(
   historicalCount: number;
   violation: boolean;
 }> {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const warnings: Array<{
     trackedGuestId: string;
     adjacentGuestId: string;
@@ -165,7 +168,7 @@ export function getEventAdjacencyReport(eventId: string): {
     topAdjacencies: Array<{ guestId: string; count: number }>;
   }>;
 } {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const allRecords = store.getEventAdjacencyRecords(eventId);
   const trackedGuests = store.getTrackedGuests(eventId);
 
@@ -219,7 +222,7 @@ export function exportAdjacencyDataForEvent(
   adjacentGuestName: string;
   adjacentGuestCompany: string;
 }> {
-  const store = useTrackingStore.getState();
+  const store = useEventStore.getState();
   const allRecords = store.getEventAdjacencyRecords(eventId);
   const guestMap = new Map(allGuests.map(g => [g.id, g]));
 

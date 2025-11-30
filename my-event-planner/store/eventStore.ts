@@ -1,12 +1,20 @@
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import { v4 as uuidv4 } from "uuid";
-import { Event, EventDay, Session, EventType } from "@/types/Event";
+import {
+  Event,
+  EventDay,
+  Session,
+  EventType,
+  SessionAdjacencyRecord,
+  PlanningOrderTracker,
+  DEFAULT_EVENT_TRACKING,
+  ensureTrackingFields
+} from "@/types/Event";
 import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
-import { useTrackingStore } from "@/store/trackingStore";
 
 interface EventStoreState {
   /* -------------------- 📦 State -------------------- */
@@ -98,19 +106,64 @@ interface EventStoreState {
   exportEventJSON: (eventId: string) => string;
   importEventJSON: (jsonString: string) => boolean;
 
-  /* -------------------- 🎯 TRACKING METADATA SYNC -------------------- */
+  /* ==================== 🎯 CONSOLIDATED TRACKING ==================== */
+
+  /* -------------------- 👤 Guest Tracking -------------------- */
+  toggleGuestTracking: (eventId: string, guestId: string) => void;
+  isGuestTracked: (eventId: string, guestId: string) => boolean;
+  getTrackedGuests: (eventId: string) => string[];
+  setTrackedGuests: (eventId: string, guestIds: string[]) => void;
+  clearEventGuestTracking: (eventId: string) => void;
+
+  /* -------------------- 📋 Session Tracking -------------------- */
+  toggleSessionTracking: (eventId: string, sessionId: string) => void;
+  setSessionTracking: (eventId: string, sessionId: string, tracked: boolean) => void;
+  isSessionTracked: (eventId: string, sessionId: string) => boolean;
+  getTrackedSessions: (eventId: string) => string[];
+  clearEventSessionTracking: (eventId: string) => void;
+
+  /* -------------------- 📈 Planning Order Management -------------------- */
+  getSessionPlanningOrder: (eventId: string, sessionId: string) => number;
+  resetSessionPlanningOrder: (eventId: string, sessionId: string) => void;
+
+  /* -------------------- 🔗 Adjacency Recording -------------------- */
+  recordSessionAdjacency: (
+    eventId: string,
+    sessionId: string,
+    sessionStartTime: string,
+    tables: Table[]
+  ) => void;
+  removeSessionAdjacency: (eventId: string, sessionId: string) => void;
+  getEventAdjacencyRecords: (eventId: string) => SessionAdjacencyRecord[];
+
+  /* -------------------- 📊 Analysis Helpers -------------------- */
+  getHistoricalAdjacencyCount: (
+    eventId: string,
+    currentSessionId: string,
+    trackedGuestId: string
+  ) => Record<string, number>;
+
+  getTrackedGuestHistory: (
+    eventId: string,
+    currentSessionId: string,
+    trackedGuestId: string
+  ) => Array<{ guestId: string; count: number }>;
+
+  getSessionsNeedingReview: (eventId: string) => string[];
+  acknowledgeSessionReview: (eventId: string, sessionId: string) => void;
+
+  /* -------------------- 🧹 Cleanup -------------------- */
+  clearEventTracking: (eventId: string) => void;
+
+  /* -------------------- 🔄 Legacy Sync (for backward compatibility) -------------------- */
   updateSessionTrackingStatus: (
     eventId: string,
     sessionId: string,
     isTracked: boolean,
     planningOrder?: number
   ) => void;
-
   updateEventTrackedGuests: (eventId: string, trackedGuestIds: string[]) => void;
-
   markSessionForReview: (eventId: string, sessionId: string, needsReview: boolean) => void;
-
-  syncTrackingFromStore: (eventId: string) => void;
 }
 
 export const useEventStore = create<EventStoreState>()(
@@ -122,12 +175,12 @@ export const useEventStore = create<EventStoreState>()(
         activeSessionId: null,
         _hasHydrated: false,
 
-        /* ---------- Hydration ---------- */
+        /* ==================== HYDRATION ==================== */
         setHasHydrated: (state) => {
           set({ _hasHydrated: state });
         },
 
-        /* ---------- Event CRUD ---------- */
+        /* ==================== EVENT CRUD ==================== */
         createEvent: (name, description, eventType, startDate) =>
           set((state) => ({
             events: [
@@ -142,20 +195,17 @@ export const useEventStore = create<EventStoreState>()(
                 masterHostGuests: [],
                 masterExternalGuests: [],
                 days: [],
+                // Initialize with tracking fields
+                ...DEFAULT_EVENT_TRACKING,
               },
             ],
           })),
 
         deleteEvent: (id) => {
-          set((state) => {
-            // Clean up tracking data for this event
-            useTrackingStore.getState().clearEventTracking(id);
-
-            return {
-              events: state.events.filter((e) => e.id !== id),
-              activeEventId: state.activeEventId === id ? null : state.activeEventId,
-            };
-          });
+          set((state) => ({
+            events: state.events.filter((e) => e.id !== id),
+            activeEventId: state.activeEventId === id ? null : state.activeEventId,
+          }));
         },
 
         updateEventDetails: (id, data) =>
@@ -166,7 +216,7 @@ export const useEventStore = create<EventStoreState>()(
         setActiveEvent: (id) => set({ activeEventId: id }),
         setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
 
-        /* ---------- Master Guest List ---------- */
+        /* ==================== MASTER GUEST LIST ==================== */
         addMasterGuest: (eventId, guest) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -179,7 +229,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ---------- Day Management ---------- */
+        /* ==================== DAY MANAGEMENT ==================== */
         addDay: (eventId, date) =>
           set((state) => ({
             events: state.events.map((e) =>
@@ -192,7 +242,33 @@ export const useEventStore = create<EventStoreState>()(
             ),
           })),
 
-        deleteDay: (eventId, dayId) =>
+        // deleteDay: (eventId, dayId) =>
+        //   set((state) => ({
+        //     events: state.events.map((e) =>
+        //       e.id !== eventId
+        //         ? e
+        //         : {
+        //             ...e,
+        //             days: e.days.filter((d) => d.id !== dayId),
+        //           }
+        //     ),
+        //   })),
+        deleteDay: (eventId, dayId) => {
+          const state = get()
+
+          // 1. Find the target day
+          const targetDay = state.events
+            .find((e) => e.id === eventId)
+            ?.days.find((d) => d.id === dayId)
+
+          // 2. Delete ALL sessions in that day using your existing method
+          if (targetDay?.sessions?.length) {
+            targetDay.sessions.forEach((session) => {
+              state.deleteSession(eventId, dayId, session.id)
+            })
+          }
+
+          // 3. Now safely delete the day itself
           set((state) => ({
             events: state.events.map((e) =>
               e.id !== eventId
@@ -202,9 +278,10 @@ export const useEventStore = create<EventStoreState>()(
                   days: e.days.filter((d) => d.id !== dayId),
                 }
             ),
-          })),
+          }))
+        },
 
-        /* ---------- Session Management ---------- */
+        /* ==================== SESSION MANAGEMENT ==================== */
         addSession: (eventId, dayId, sessionData) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -245,12 +322,10 @@ export const useEventStore = create<EventStoreState>()(
             // Defensive normalization
             const normalizedData = { ...data };
             if (data && data.startTime) {
-              // If it's already a Date object, use it; otherwise parse string to Date and toISOString
               const parsed = new Date(data.startTime);
               if (!isNaN(parsed.getTime())) {
                 normalizedData.startTime = parsed.toISOString();
               } else {
-                // fallback: leave as-is (but this should not happen)
                 normalizedData.startTime = data.startTime;
               }
             }
@@ -274,25 +349,63 @@ export const useEventStore = create<EventStoreState>()(
             };
           }),
 
+        deleteSession: (eventId, dayId, sessionId) => {
+          // Also remove adjacency records for this session
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
 
-        deleteSession: (eventId, dayId, sessionId) =>
-          set((state) => ({
-            events: state.events.map((e) => {
-              if (e.id !== eventId) return e;
-              return {
-                ...e,
-                days: e.days.map((d) => {
-                  if (d.id !== dayId) return d;
-                  return {
-                    ...d,
-                    sessions: d.sessions.filter(s => s.id !== sessionId)
-                  };
-                }),
-              };
-            }),
-          })),
+          if (event) {
+            const filteredRecords = (event.adjacencyRecords || []).filter(
+              r => r.sessionId !== sessionId
+            );
 
-        /* ---------- Session Guest Management ---------- */
+            const updatedTracker = event.planningOrderTracker
+              ? {
+                ...event.planningOrderTracker,
+                sessionOrderMap: Object.fromEntries(
+                  Object.entries(event.planningOrderTracker.sessionOrderMap)
+                    .filter(([sid]) => sid !== sessionId)
+                ),
+              }
+              : DEFAULT_EVENT_TRACKING.planningOrderTracker;
+
+            set((state) => ({
+              events: state.events.map((e) => {
+                if (e.id !== eventId) return e;
+                return {
+                  ...e,
+                  adjacencyRecords: filteredRecords,
+                  planningOrderTracker: updatedTracker,
+                  days: e.days.map((d) => {
+                    if (d.id !== dayId) return d;
+                    return {
+                      ...d,
+                      sessions: d.sessions.filter(s => s.id !== sessionId)
+                    };
+                  }),
+                };
+              }),
+            }));
+          } else {
+            set((state) => ({
+              events: state.events.map((e) => {
+                if (e.id !== eventId) return e;
+                return {
+                  ...e,
+                  days: e.days.map((d) => {
+                    if (d.id !== dayId) return d;
+                    return {
+                      ...d,
+                      sessions: d.sessions.filter(s => s.id !== sessionId)
+                    };
+                  }),
+                };
+              }),
+            }));
+          }
+        },
+
+        /* ==================== SESSION GUEST MANAGEMENT ==================== */
         setSessionGuests: (eventId, dayId, sessionId, hostGuestIds, externalGuestIds) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -369,7 +482,7 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ---------- Seat Plan Snapshot ---------- */
+        /* ==================== SEAT PLAN SNAPSHOT ==================== */
         saveSessionSeatPlan: (eventId, dayId, sessionId, seatPlan) =>
           set((state) => {
             const now = new Date().toISOString();
@@ -418,7 +531,7 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ---------- Statistics & Audit ---------- */
+        /* ==================== STATISTICS & AUDIT ==================== */
         getPriorStats: (eventId, currentSessionId) => {
           const event = get().events.find((e) => e.id === eventId);
           if (!event) return {};
@@ -482,7 +595,7 @@ export const useEventStore = create<EventStoreState>()(
           }))
         },
 
-        /* ---------- Import / Export ---------- */
+        /* ==================== IMPORT / EXPORT ==================== */
         exportEventJSON: (eventId) => {
           const event = get().events.find((e) => e.id === eventId);
           return event ? JSON.stringify(event, null, 2) : "";
@@ -493,12 +606,15 @@ export const useEventStore = create<EventStoreState>()(
             const eventData: Event = JSON.parse(jsonString);
             if (!eventData.id || !eventData.days) return false;
 
+            // Ensure tracking fields exist
+            const eventWithTracking = ensureTrackingFields(eventData);
+
             set((state) => {
               const exists = state.events.some(e => e.id === eventData.id);
               if (exists) {
-                return { events: state.events.map(e => e.id === eventData.id ? eventData : e) };
+                return { events: state.events.map(e => e.id === eventData.id ? eventWithTracking : e) };
               }
-              return { events: [...state.events, eventData] };
+              return { events: [...state.events, eventWithTracking] };
             });
             return true;
           } catch (e) {
@@ -507,7 +623,476 @@ export const useEventStore = create<EventStoreState>()(
           }
         },
 
-        /* ---------- Tracking Metadata Sync ---------- */
+        /* ==================== 🎯 GUEST TRACKING ==================== */
+        toggleGuestTracking: (eventId, guestId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+
+              const currentTracked = e.trackedGuestIds || [];
+              const isCurrentlyTracked = currentTracked.includes(guestId);
+
+              const newTracked = isCurrentlyTracked
+                ? currentTracked.filter(id => id !== guestId)
+                : [...currentTracked, guestId];
+
+              return {
+                ...e,
+                trackedGuestIds: newTracked,
+                trackingEnabled: newTracked.length > 0,
+              };
+            }),
+          })),
+
+        isGuestTracked: (eventId, guestId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event || !event.trackedGuestIds) return false;
+          return event.trackedGuestIds.includes(guestId);
+        },
+
+        getTrackedGuests: (eventId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          return event?.trackedGuestIds || [];
+        },
+
+        setTrackedGuests: (eventId, guestIds) =>
+          set((state) => ({
+            events: state.events.map((e) =>
+              e.id !== eventId
+                ? e
+                : {
+                  ...e,
+                  trackedGuestIds: guestIds,
+                  trackingEnabled: guestIds.length > 0,
+                }
+            ),
+          })),
+
+        clearEventGuestTracking: (eventId) =>
+          set((state) => ({
+            events: state.events.map((e) =>
+              e.id !== eventId
+                ? e
+                : {
+                  ...e,
+                  trackedGuestIds: [],
+                  trackingEnabled: false,
+                }
+            ),
+          })),
+
+        /* ==================== 📋 SESSION TRACKING ==================== */
+        toggleSessionTracking: (eventId, sessionId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        isTrackedForAdjacency: !s.isTrackedForAdjacency,
+                      }
+                  ),
+                })),
+              };
+            }),
+          })),
+
+        setSessionTracking: (eventId, sessionId, tracked) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        isTrackedForAdjacency: tracked,
+                      }
+                  ),
+                })),
+              };
+            }),
+          })),
+
+        isSessionTracked: (eventId, sessionId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event) return false;
+
+          for (const day of event.days) {
+            const session = day.sessions.find(s => s.id === sessionId);
+            if (session) {
+              return session.isTrackedForAdjacency === true;
+            }
+          }
+
+          return false;
+        },
+
+        getTrackedSessions: (eventId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event) return [];
+
+          const trackedSessions: string[] = [];
+          event.days.forEach(day => {
+            day.sessions.forEach(session => {
+              if (session.isTrackedForAdjacency) {
+                trackedSessions.push(session.id);
+              }
+            });
+          });
+
+          return trackedSessions;
+        },
+
+        clearEventSessionTracking: (eventId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) => ({
+                    ...s,
+                    isTrackedForAdjacency: false,
+                    planningOrder: undefined,
+                    needsAdjacencyReview: false,
+                  })),
+                })),
+              };
+            }),
+          })),
+
+        /* ==================== 📈 PLANNING ORDER MANAGEMENT ==================== */
+        getSessionPlanningOrder: (eventId, sessionId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event || !event.planningOrderTracker) return -1;
+          return event.planningOrderTracker.sessionOrderMap[sessionId] ?? -1;
+        },
+
+        resetSessionPlanningOrder: (eventId, sessionId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId || !e.planningOrderTracker) return e;
+
+              const updatedMap = { ...e.planningOrderTracker.sessionOrderMap };
+              delete updatedMap[sessionId];
+
+              return {
+                ...e,
+                planningOrderTracker: {
+                  ...e.planningOrderTracker,
+                  sessionOrderMap: updatedMap,
+                },
+              };
+            }),
+          })),
+
+        /* ==================== 🔗 ADJACENCY RECORDING ==================== */
+        recordSessionAdjacency: (eventId, sessionId, sessionStartTime, tables) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event) {
+            console.warn(`recordSessionAdjacency: Event ${eventId} not found`);
+            return;
+          }
+
+          const trackedGuests = event.trackedGuestIds || [];
+          if (trackedGuests.length === 0) {
+            console.warn(`No tracked guests for event ${eventId}`);
+            return;
+          }
+
+          let tracker = event.planningOrderTracker || DEFAULT_EVENT_TRACKING.planningOrderTracker;
+
+          const currentOrder = tracker.sessionOrderMap[sessionId];
+          const isReplanning = currentOrder !== undefined;
+          const planningOrder = isReplanning ? currentOrder : tracker.nextOrder;
+
+          const existingRecords = event.adjacencyRecords || [];
+          const filteredRecords = existingRecords.filter(r => r.sessionId !== sessionId);
+
+          const newRecords: SessionAdjacencyRecord[] = [];
+
+          // Build guest-to-seat mapping
+          const guestSeatMap = new Map<string, { tableId: string; seatId: string; seat: any }>();
+
+          tables.forEach(table => {
+            table.seats.forEach(seat => {
+              if (seat.assignedGuestId) {
+                guestSeatMap.set(seat.assignedGuestId, {
+                  tableId: table.id,
+                  seatId: seat.id,
+                  seat: seat,
+                });
+              }
+            });
+          });
+
+          // For each tracked guest, find adjacent guests
+          trackedGuests.forEach(trackedGuestId => {
+            const guestSeatData = guestSeatMap.get(trackedGuestId);
+
+            if (!guestSeatData) return;
+
+            const { seat } = guestSeatData;
+            const adjacentSeatIds = seat.adjacentSeats || [];
+
+            if (adjacentSeatIds.length === 0) return;
+
+            const adjacentGuestIds: string[] = [];
+
+            adjacentSeatIds.forEach((adjacentSeatId: string) => {
+              for (const table of tables) {
+                const adjacentSeat = table.seats.find(s => s.id === adjacentSeatId);
+
+                if (adjacentSeat) {
+                  if (adjacentSeat.assignedGuestId && !adjacentSeat.locked) {
+                    adjacentGuestIds.push(adjacentSeat.assignedGuestId);
+                  }
+                  break;
+                }
+              }
+            });
+
+            if (adjacentGuestIds.length > 0) {
+              newRecords.push({
+                sessionId,
+                sessionStartTime,
+                planningOrder,
+                trackedGuestId,
+                adjacentGuestIds,
+                needsReview: false,
+              });
+            }
+          });
+
+          // Mark downstream sessions for review if replanning
+          const updatedRecords = filteredRecords.map(record => {
+            if (isReplanning && record.planningOrder > planningOrder) {
+              return { ...record, needsReview: true };
+            }
+            return record;
+          });
+
+          const allRecords = [...updatedRecords, ...newRecords].sort(
+            (a, b) => a.planningOrder - b.planningOrder
+          );
+
+          const updatedTracker: PlanningOrderTracker = {
+            sessionOrderMap: {
+              ...tracker.sessionOrderMap,
+              [sessionId]: planningOrder,
+            },
+            nextOrder: isReplanning ? tracker.nextOrder : tracker.nextOrder + 1,
+          };
+
+          // Also update session's planningOrder field
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                adjacencyRecords: allRecords,
+                planningOrderTracker: updatedTracker,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        planningOrder: planningOrder,
+                      }
+                  ),
+                })),
+              };
+            }),
+          }));
+
+          console.log(`✅ Recorded adjacency for session ${sessionId}`, {
+            planningOrder,
+            isReplanning,
+            newRecordsCount: newRecords.length,
+            downstreamSessionsMarked: isReplanning
+              ? updatedRecords.filter(r => r.needsReview).length
+              : 0
+          });
+        },
+
+        removeSessionAdjacency: (eventId, sessionId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+
+              const existingRecords = e.adjacencyRecords || [];
+              const filteredRecords = existingRecords.filter(r => r.sessionId !== sessionId);
+
+              const tracker = e.planningOrderTracker;
+              if (tracker) {
+                const updatedMap = { ...tracker.sessionOrderMap };
+                delete updatedMap[sessionId];
+
+                return {
+                  ...e,
+                  adjacencyRecords: filteredRecords,
+                  planningOrderTracker: {
+                    ...tracker,
+                    sessionOrderMap: updatedMap,
+                  },
+                };
+              }
+
+              return {
+                ...e,
+                adjacencyRecords: filteredRecords,
+              };
+            }),
+          })),
+
+        getEventAdjacencyRecords: (eventId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+          return event?.adjacencyRecords || [];
+        },
+
+        /* ==================== 📊 ANALYSIS HELPERS ==================== */
+        getHistoricalAdjacencyCount: (eventId, currentSessionId, trackedGuestId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event || !event.planningOrderTracker) return {};
+
+          const tracker = event.planningOrderTracker;
+          const currentOrder = tracker.sessionOrderMap[currentSessionId];
+
+          if (currentOrder === undefined) {
+            return {};
+          }
+
+          const allRecords = event.adjacencyRecords || [];
+          const relevantRecords = allRecords.filter(
+            r => r.planningOrder < currentOrder && r.trackedGuestId === trackedGuestId
+          );
+
+          const adjacencyCount: Record<string, number> = {};
+
+          relevantRecords.forEach(record => {
+            record.adjacentGuestIds.forEach(guestId => {
+              adjacencyCount[guestId] = (adjacencyCount[guestId] || 0) + 1;
+            });
+          });
+
+          return adjacencyCount;
+        },
+
+        getTrackedGuestHistory: (eventId, currentSessionId, trackedGuestId) => {
+          const adjacencyCount = get().getHistoricalAdjacencyCount(
+            eventId,
+            currentSessionId,
+            trackedGuestId
+          );
+
+          return Object.entries(adjacencyCount)
+            .map(([guestId, count]) => ({ guestId, count }))
+            .sort((a, b) => b.count - a.count);
+        },
+
+        getSessionsNeedingReview: (eventId) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event) return [];
+
+          const allRecords = event.adjacencyRecords || [];
+          const sessionsNeedingReview = new Set<string>();
+
+          allRecords.forEach(record => {
+            if (record.needsReview) {
+              sessionsNeedingReview.add(record.sessionId);
+            }
+          });
+
+          return Array.from(sessionsNeedingReview);
+        },
+
+        acknowledgeSessionReview: (eventId, sessionId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+
+              const allRecords = e.adjacencyRecords || [];
+              const updatedRecords = allRecords.map(record => {
+                if (record.sessionId === sessionId) {
+                  return { ...record, needsReview: false };
+                }
+                return record;
+              });
+
+              return {
+                ...e,
+                adjacencyRecords: updatedRecords,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        needsAdjacencyReview: false,
+                      }
+                  ),
+                })),
+              };
+            }),
+          })),
+
+        /* ==================== 🧹 CLEANUP ==================== */
+        clearEventTracking: (eventId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                trackedGuestIds: [],
+                trackingEnabled: false,
+                adjacencyRecords: [],
+                planningOrderTracker: DEFAULT_EVENT_TRACKING.planningOrderTracker,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) => ({
+                    ...s,
+                    isTrackedForAdjacency: false,
+                    planningOrder: undefined,
+                    needsAdjacencyReview: false,
+                  })),
+                })),
+              };
+            }),
+          })),
+
+        /* ==================== 🔄 LEGACY SYNC (backward compatibility) ==================== */
         updateSessionTrackingStatus: (eventId, sessionId, isTracked, planningOrder) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -563,68 +1148,9 @@ export const useEventStore = create<EventStoreState>()(
               };
             }),
           })),
-
-        /**
-         * Sync tracking data FROM the trackingStore TO the eventStore
-         * This should be called after both stores have hydrated
-         */
-        syncTrackingFromStore: (eventId) => {
-          const trackingStore = useTrackingStore.getState();
-          const eventStore = get();
-          
-          const event = eventStore.events.find(e => e.id === eventId);
-          if (!event) {
-            console.warn(`syncTrackingFromStore: Event ${eventId} not found`);
-            return;
-          }
-
-          // Get tracked data from tracking store
-          const trackedGuestIds = trackingStore.getTrackedGuests(eventId);
-          const trackedSessionIds = trackingStore.getTrackedSessions(eventId);
-
-          console.log(`🔄 Syncing tracking data for event ${event.name}:`, {
-            trackedGuests: trackedGuestIds.length,
-            trackedSessions: trackedSessionIds.length,
-          });
-
-          // Update event's tracked guests
-          if (trackedGuestIds.length > 0) {
-            set((state) => ({
-              events: state.events.map((e) =>
-                e.id !== eventId
-                  ? e
-                  : {
-                    ...e,
-                    trackedGuestIds,
-                    trackingEnabled: true,
-                  }
-              ),
-            }));
-          }
-
-          // Update each session's tracking status
-          const trackedSessionSet = new Set(trackedSessionIds);
-          set((state) => ({
-            events: state.events.map((e) => {
-              if (e.id !== eventId) return e;
-              return {
-                ...e,
-                days: e.days.map((d) => ({
-                  ...d,
-                  sessions: d.sessions.map((s) => ({
-                    ...s,
-                    isTrackedForAdjacency: trackedSessionSet.has(s.id),
-                  })),
-                })),
-              };
-            }),
-          }));
-
-          console.log(`✅ Tracking sync complete for event ${event.name}`);
-        },
       }),
 
-      { 
+      {
         name: "event-master-store",
         onRehydrateStorage: () => (state) => {
           console.log('🔄 EventStore: Hydration complete');

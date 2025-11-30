@@ -4,7 +4,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import GroupsIcon from "@mui/icons-material/Groups";
 import Visibility from "@mui/icons-material/Visibility";
 import { Session } from "@/types/Event";
-import { useTrackingStore } from "@/store/trackingStore";
+import { useEventStore } from "@/store/eventStore";
 
 interface SessionCardProps {
   session: Session;
@@ -15,7 +15,7 @@ interface SessionCardProps {
 }
 
 export default function SessionCard({ session, eventId, onClick, onDelete, onManageGuests }: SessionCardProps) {
-  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
+  const isSessionTracked = useEventStore((s) => s.isSessionTracked);
   const isTracked = isSessionTracked(eventId, session.id);
 
   const handleDelete = (e: React.MouseEvent) => {

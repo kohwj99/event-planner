@@ -9,6 +9,43 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
+/* -------------------- 📊 ADJACENCY TRACKING TYPES -------------------- */
+
+/**
+ * Record of which guests were adjacent to a tracked guest in a specific session
+ */
+export interface SessionAdjacencyRecord {
+  sessionId: string;
+  sessionStartTime: string;
+  planningOrder: number;
+  trackedGuestId: string;
+  adjacentGuestIds: string[];
+  needsReview?: boolean;
+}
+
+/**
+ * Tracks the order in which sessions were planned (for adjacency analysis)
+ */
+export interface PlanningOrderTracker {
+  sessionOrderMap: Record<string, number>;
+  nextOrder: number;
+}
+
+/**
+ * Default values for event tracking fields (for migration/initialization)
+ */
+export const DEFAULT_EVENT_TRACKING = {
+  trackedGuestIds: [] as string[],
+  trackingEnabled: false,
+  adjacencyRecords: [] as SessionAdjacencyRecord[],
+  planningOrderTracker: {
+    sessionOrderMap: {},
+    nextOrder: 1,
+  } as PlanningOrderTracker,
+};
+
+/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
+
 export interface Session {
   id: string;
   name: string;
@@ -43,6 +80,8 @@ export interface EventDay {
   sessions: Session[];
 }
 
+/* -------------------- 🎯 EVENT TYPE -------------------- */
+
 export interface Event {
   id: string;
   name: string;
@@ -54,9 +93,24 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // 🆕 Boss Adjacency Tracking Configuration
-  trackedGuestIds?: string[];        // IDs of guests being tracked
-  trackingEnabled?: boolean;         // Whether tracking is enabled for this event
+  // 🆕 Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  trackedGuestIds?: string[];                    // IDs of guests being tracked
+  trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
+  adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data
+  planningOrderTracker?: PlanningOrderTracker;   // Session planning order management
   
   days: EventDay[];
+}
+
+/**
+ * Helper to ensure an event has all tracking fields (for migration)
+ */
+export function ensureTrackingFields(event: Event): Event {
+  return {
+    ...event,
+    trackedGuestIds: event.trackedGuestIds ?? DEFAULT_EVENT_TRACKING.trackedGuestIds,
+    trackingEnabled: event.trackingEnabled ?? DEFAULT_EVENT_TRACKING.trackingEnabled,
+    adjacencyRecords: event.adjacencyRecords ?? DEFAULT_EVENT_TRACKING.adjacencyRecords,
+    planningOrderTracker: event.planningOrderTracker ?? DEFAULT_EVENT_TRACKING.planningOrderTracker,
+  };
 }

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventStore } from "@/store/eventStore";
-import { useTrackingStore } from "@/store/trackingStore";
 import { EventType } from "@/types/Event";
 import {
   Typography, Button, Paper, IconButton, Box
@@ -27,7 +26,7 @@ export default function EventDetailPage() {
   const deleteSession = useEventStore(state => state.deleteSession);
 
   // Tracking Store
-  const setSessionTracking = useTrackingStore(state => state.setSessionTracking);
+  const setSessionTracking = useEventStore(state => state.setSessionTracking);
 
   // Local State
   const [sessionModal, setSessionModal] = useState({ open: false, dayId: "" });
