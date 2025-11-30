@@ -19,10 +19,13 @@ import {
   Chip,
   Alert,
   LinearProgress,
+  Switch,
+  Tooltip,
 } from '@mui/material';
 import { useState, useMemo } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
+import { useTrackingStore } from '@/store/trackingStore';
 import { 
   Delete, 
   Search, 
@@ -31,7 +34,8 @@ import {
   Save, 
   Cancel,
   Download,
-  Add
+  Add,
+  Visibility,
 } from '@mui/icons-material';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
@@ -55,6 +59,10 @@ export default function MasterGuestListModal({
   const event = useEventStore((s) => s.events.find(e => e.id === eventId));
   const addMasterGuest = useEventStore((s) => s.addMasterGuest);
   const updateEventDetails = useEventStore((s) => s.updateEventDetails);
+
+  // Tracking Store
+  const toggleGuestTracking = useTrackingStore((s) => s.toggleGuestTracking);
+  const isGuestTracked = useTrackingStore((s) => s.isGuestTracked);
 
   const [tab, setTab] = useState<'host' | 'external'>('host');
   const [filter, setFilter] = useState('');
@@ -90,6 +98,10 @@ export default function MasterGuestListModal({
     );
   }, [filter, guests]);
 
+  const trackedCount = useMemo(() => {
+    return guests.filter(g => isGuestTracked(eventId, g.id)).length;
+  }, [guests, eventId, isGuestTracked]);
+
   /* -------------------- 📥 FILE UPLOAD HANDLERS -------------------- */
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,7 +125,7 @@ export default function MasterGuestListModal({
       setUploadError('Failed to process file. Please check the format and try again.');
     } finally {
       setUploading(false);
-      e.target.value = ''; // Reset input
+      e.target.value = '';
     }
   };
 
@@ -265,11 +277,24 @@ export default function MasterGuestListModal({
     updateEventDetails(eventId, { [listKey]: updatedList });
   };
 
+  /* -------------------- 👁️ TRACKING TOGGLE -------------------- */
+  const handleTrackingToggle = (guestId: string) => {
+    toggleGuestTracking(eventId, guestId);
+  };
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
       <DialogTitle>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Master Guest Lists - {event.name}</Typography>
+          <Box>
+            <Typography variant="h6">Master Guest Lists - {event.name}</Typography>
+            {trackedCount > 0 && (
+              <Typography variant="caption" color="primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+                <Visibility fontSize="small" />
+                {trackedCount} guest{trackedCount !== 1 ? 's' : ''} tracked for Boss Adjacency
+              </Typography>
+            )}
+          </Box>
           <Stack direction="row" spacing={1}>
             <Button
               size="small"
@@ -471,6 +496,7 @@ export default function MasterGuestListModal({
           ) : (
             filteredGuests.map((guest) => {
               const isEditing = editingId === guest.id;
+              const isTracked = isGuestTracked(eventId, guest.id);
 
               return (
                 <Stack
@@ -481,7 +507,8 @@ export default function MasterGuestListModal({
                   sx={{
                     p: 1.5,
                     borderBottom: '1px solid #eee',
-                    '&:hover': { bgcolor: '#f9f9f9' },
+                    bgcolor: isTracked ? '#f0f7ff' : 'transparent',
+                    '&:hover': { bgcolor: isTracked ? '#e3f2fd' : '#f9f9f9' },
                   }}
                 >
                   {isEditing ? (
@@ -580,6 +607,19 @@ export default function MasterGuestListModal({
                       />
 
                       <Box flexGrow={1} />
+
+                      {/* Boss Adjacency Tracking Toggle */}
+                      <Tooltip title={isTracked ? "Tracked for Boss Adjacency" : "Track for Boss Adjacency"}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Visibility fontSize="small" sx={{ color: isTracked ? 'primary.main' : 'text.disabled' }} />
+                          <Switch
+                            size="small"
+                            checked={isTracked}
+                            onChange={() => handleTrackingToggle(guest.id)}
+                            color="primary"
+                          />
+                        </Box>
+                      </Tooltip>
 
                       <IconButton size="small" onClick={() => startEdit(guest)}>
                         <Edit fontSize="small" />

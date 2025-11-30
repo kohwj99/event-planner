@@ -2,6 +2,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { useTrackingStore } from '@/store/trackingStore';
 
 export const useSessionLoader = (sessionId: string | null) => {
   const lastSessionIdRef = useRef<string | null>(null);
@@ -13,6 +14,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   const saveSessionSeatPlan = useEventStore((state) => state.saveSessionSeatPlan);
   const getSessionGuests = useEventStore((state) => state.getSessionGuests);
   const setActiveSession = useEventStore((state) => state.setActiveSession);
+  const updateSessionTrackingStatus = useEventStore((state) => state.updateSessionTrackingStatus);
 
   // Seat Store - Direct setState for bulk operations
   const setSeatStoreState = useSeatStore.setState;
@@ -21,6 +23,11 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Guest Store
   const resetGuests = useGuestStore((state) => state.resetGuests);
   const addGuest = useGuestStore((state) => state.addGuest);
+
+  // Tracking Store
+  const isSessionTracked = useTrackingStore((state) => state.isSessionTracked);
+  const recordSessionAdjacency = useTrackingStore((state) => state.recordSessionAdjacency);
+  const getSessionPlanningOrder = useTrackingStore((state) => state.getSessionPlanningOrder);
 
   // Save current session before switching
   const saveCurrentSession = useCallback(() => {
@@ -43,12 +50,49 @@ export const useSessionLoader = (sessionId: string | null) => {
     });
 
     console.log(`💾 Saving session: ${sessionData.session.name}`);
+    
+    // Save seat plan to event store
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
     });
-  }, [getSessionById, saveSessionSeatPlan]);
+
+    // 🆕 Check if this session is tracked
+    const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
+    
+    if (tracked) {
+      console.log(`👁️ Recording adjacency data for tracked session`);
+      
+      // Record adjacency data (this also updates planning order in tracking store)
+      recordSessionAdjacency(
+        sessionData.eventId,
+        currentSessionId,
+        sessionData.session.startTime,
+        tables
+      );
+      
+      // 🆕 CRITICAL: Sync planning order back to event store for persistence
+      const planningOrder = getSessionPlanningOrder(sessionData.eventId, currentSessionId);
+      
+      if (planningOrder > 0) {
+        console.log(`📝 Syncing planning order ${planningOrder} to event store`);
+        updateSessionTrackingStatus(
+          sessionData.eventId,
+          currentSessionId,
+          true,
+          planningOrder
+        );
+      }
+    }
+  }, [
+    getSessionById, 
+    saveSessionSeatPlan, 
+    isSessionTracked, 
+    recordSessionAdjacency,
+    getSessionPlanningOrder,
+    updateSessionTrackingStatus
+  ]);
 
   // Load session data
   const loadSession = useCallback((newSessionId: string) => {
@@ -74,7 +118,6 @@ export const useSessionLoader = (sessionId: string | null) => {
     } else {
       // New session - initialize with proper chunk structure
       console.log('Initializing new session with default chunk');
-      // Use resetTables which properly initializes the default chunk
       resetTables();
     }
 

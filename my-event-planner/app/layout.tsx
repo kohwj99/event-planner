@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { useEventStore } from "@/store/eventStore";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,11 +18,26 @@ export const metadata: Metadata = {
   description: "For your next event",
 };
 
+
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+
+//   useEffect(() => {
+//   // 🚨 CRITICAL: Load tracking metadata on app mount BEFORE any navigation
+//   console.log('🔄 Initializing tracking metadata...');
+//   const loadTrackingMetadata = useEventStore.getState().loadTrackingMetadataIntoStore;
+
+//   if (loadTrackingMetadata) {
+//     loadTrackingMetadata();
+//     console.log('✅ Tracking metadata loaded');
+//   } else {
+//     console.error('❌ loadTrackingMetadataIntoStore not found in eventStore');
+//   }
+// }, []);
   return (
     <html lang="en">
       <body

@@ -6,6 +6,7 @@ import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
+import { useTrackingStore } from "@/store/trackingStore";
 
 interface EventStoreState {
   /* -------------------- 📦 State -------------------- */
@@ -92,6 +93,20 @@ interface EventStoreState {
   /* -------------------- 💾 Import / Export -------------------- */
   exportEventJSON: (eventId: string) => string;
   importEventJSON: (jsonString: string) => boolean;
+
+  /* -------------------- 🎯 TRACKING METADATA SYNC -------------------- */
+  updateSessionTrackingStatus: (
+    eventId: string,
+    sessionId: string,
+    isTracked: boolean,
+    planningOrder?: number
+  ) => void;
+
+  updateEventTrackedGuests: (eventId: string, trackedGuestIds: string[]) => void;
+
+  markSessionForReview: (eventId: string, sessionId: string, needsReview: boolean) => void;
+
+  loadTrackingMetadataIntoStore: () => void;
 }
 
 export const useEventStore = create<EventStoreState>()(
@@ -121,11 +136,17 @@ export const useEventStore = create<EventStoreState>()(
             ],
           })),
 
-        deleteEvent: (id) =>
-          set((state) => ({
-            events: state.events.filter((e) => e.id !== id),
-            activeEventId: state.activeEventId === id ? null : state.activeEventId,
-          })),
+        deleteEvent: (id) => {
+          set((state) => {
+            // Clean up tracking data for this event
+            useTrackingStore.getState().clearEventTracking(id);
+
+            return {
+              events: state.events.filter((e) => e.id !== id),
+              activeEventId: state.activeEventId === id ? null : state.activeEventId,
+            };
+          });
+        },
 
         updateEventDetails: (id, data) =>
           set((state) => ({
@@ -155,9 +176,9 @@ export const useEventStore = create<EventStoreState>()(
               e.id !== eventId
                 ? e
                 : {
-                    ...e,
-                    days: [...e.days, { id: uuidv4(), date, sessions: [] }],
-                  }
+                  ...e,
+                  days: [...e.days, { id: uuidv4(), date, sessions: [] }],
+                }
             ),
           })),
 
@@ -473,8 +494,105 @@ export const useEventStore = create<EventStoreState>()(
             console.error("JSON Parse Error", e);
             return false;
           }
-        }
+        },
+
+        /* ---------- Tracking Metadata Sync ---------- */
+        updateSessionTrackingStatus: (eventId, sessionId, isTracked, planningOrder) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        isTrackedForAdjacency: isTracked,
+                        planningOrder: planningOrder ?? s.planningOrder,
+                      }
+                  ),
+                })),
+              };
+            }),
+          })),
+
+        updateEventTrackedGuests: (eventId, trackedGuestIds) =>
+          set((state) => ({
+            events: state.events.map((e) =>
+              e.id !== eventId
+                ? e
+                : {
+                  ...e,
+                  trackedGuestIds,
+                  trackingEnabled: trackedGuestIds.length > 0,
+                }
+            ),
+          })),
+
+        markSessionForReview: (eventId, sessionId, needsReview) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) =>
+                    s.id !== sessionId
+                      ? s
+                      : {
+                        ...s,
+                        needsAdjacencyReview: needsReview,
+                      }
+                  ),
+                })),
+              };
+            }),
+          })),
+
+        loadTrackingMetadataIntoStore: () => {
+          const state = get();
+          const trackingStore = useTrackingStore.getState();
+
+          console.log('🔄 Loading tracking metadata from event store...');
+
+          state.events.forEach((event) => {
+            // Load tracked guests
+            if (event.trackedGuestIds && event.trackedGuestIds.length > 0) {
+              event.trackedGuestIds.forEach((guestId) => {
+                if (!trackingStore.isGuestTracked(event.id, guestId)) {
+                  trackingStore.toggleGuestTracking(event.id, guestId);
+                }
+              });
+              console.log(`✅ Loaded ${event.trackedGuestIds.length} tracked guests for event ${event.name}`);
+            }
+
+            // Load tracked sessions
+            let trackedSessionCount = 0;
+            event.days.forEach((day) => {
+              day.sessions.forEach((session) => {
+                if (session.isTrackedForAdjacency) {
+                  if (!trackingStore.isSessionTracked(event.id, session.id)) {
+                    trackingStore.setSessionTracking(event.id, session.id, true);
+                  }
+                  trackedSessionCount++;
+                }
+              });
+            });
+
+            if (trackedSessionCount > 0) {
+              console.log(`✅ Loaded ${trackedSessionCount} tracked sessions for event ${event.name}`);
+            }
+          });
+
+          console.log('✅ Tracking metadata sync complete');
+        },
       }),
+
+
       { name: "event-master-store" }
     )
   )

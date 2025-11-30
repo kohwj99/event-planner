@@ -25,6 +25,11 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
+  // 🆕 Boss Adjacency Tracking Metadata
+  isTrackedForAdjacency?: boolean;  // Whether this session is tracked
+  planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
+  needsAdjacencyReview?: boolean;   // Flag if upstream session changed
+
   seatPlan: {
     tables: Table[];
     chunks: Record<string, Chunk>;
@@ -48,6 +53,10 @@ export interface Event {
   
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
+  
+  // 🆕 Boss Adjacency Tracking Configuration
+  trackedGuestIds?: string[];        // IDs of guests being tracked
+  trackingEnabled?: boolean;         // Whether tracking is enabled for this event
   
   days: EventDay[];
 }

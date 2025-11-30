@@ -32,6 +32,7 @@ import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightCo
 import GuestManagementModal from '@/components/molecules/GuestManagementModal';
 import ExportModal from '@/components/molecules/ExportModal';
 import AutoFillButton from '@/components/atoms/AutoFillButton';
+import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
 
@@ -276,6 +277,12 @@ export default function SessionDetailPage() {
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden" id="playground-canvas">
             <PlayGroundCanvas />
+            
+            {/* Seating Stats Panel with Boss Adjacency */}
+            <SeatingStatsPanel 
+              eventId={eventId} 
+              sessionId={sessionId} 
+            />
           </div>
 
           {/* Right Panel */}

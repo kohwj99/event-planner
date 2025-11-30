@@ -1,4 +1,4 @@
-// SeatingStatsPanel.tsx - WITH CENTRALIZED VIOLATION DETECTION
+// SeatingStatsPanel.tsx - WITH BOSS ADJACENCY TRACKING
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -16,6 +16,14 @@ import {
   ListItemText,
   Tabs,
   Tab,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
 import {
   InfoOutlined,
@@ -25,9 +33,13 @@ import {
   Close,
   GroupAdd,
   PersonOff,
+  Visibility,
+  ExpandMore,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { useTrackingStore } from '@/store/trackingStore';
+import { useEventStore } from '@/store/eventStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
 import { getProximityViolations } from '@/utils/seatAutoFillHelper';
 
@@ -57,15 +69,25 @@ interface SeatingStats {
   proximityViolations: any[];
 }
 
-type DetailView = 'overview' | 'vips' | 'violations';
+type DetailView = 'overview' | 'vips' | 'violations' | 'adjacency';
 
-export default function SeatingStatsPanel() {
+interface SeatingStatsPanelProps {
+  eventId: string;
+  sessionId: string;
+}
+
+export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [detailView, setDetailView] = useState<DetailView>('overview');
 
   const tables = useSeatStore((s) => s.tables);
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
+  
+  // Tracking store
+  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
+  const getTrackedGuests = useTrackingStore((s) => s.getTrackedGuests);
+  const getHistoricalAdjacencyCount = useTrackingStore((s) => s.getHistoricalAdjacencyCount);
   
   const guestLookup = useMemo(() => {
     const lookup: Record<string, any> = {};
@@ -74,6 +96,45 @@ export default function SeatingStatsPanel() {
     });
     return lookup;
   }, [hostGuests, externalGuests]);
+
+  // Check if this session is tracked
+  const sessionTracked = isSessionTracked(eventId, sessionId);
+  const trackedGuestIds = getTrackedGuests(eventId);
+
+  // Calculate adjacency history for tracked guests
+  const adjacencyHistory = useMemo(() => {
+    if (!sessionTracked || trackedGuestIds.length === 0) {
+      return [];
+    }
+
+    return trackedGuestIds.map(trackedGuestId => {
+      const guest = guestLookup[trackedGuestId];
+      if (!guest) return null;
+
+      // Get historical adjacency count (previous sessions only)
+      const adjacencyCount = getHistoricalAdjacencyCount(eventId, sessionId, trackedGuestId);
+
+      // Convert to array and sort by count
+      const adjacencies = Object.entries(adjacencyCount)
+        .map(([guestId, count]) => ({
+          guestId,
+          guest: guestLookup[guestId],
+          count: count as number,
+        }))
+        .filter(a => a.guest) // Only include valid guests
+        .sort((a, b) => b.count - a.count);
+
+      const totalAdjacencies = adjacencies.reduce((sum, a) => sum + a.count, 0);
+
+      return {
+        trackedGuestId,
+        trackedGuest: guest,
+        adjacencies,
+        totalAdjacencies,
+        uniqueGuests: adjacencies.length,
+      };
+    }).filter(Boolean);
+  }, [sessionTracked, trackedGuestIds, eventId, sessionId, guestLookup, getHistoricalAdjacencyCount]);
 
   // Calculate statistics
   const stats = useMemo((): SeatingStats => {
@@ -122,10 +183,7 @@ export default function SeatingStatsPanel() {
     // Get proximity violations from last autofill run
     let proximityViolations = getProximityViolations();
     
-    // If no violations from autofill, detect current violations
     if (proximityViolations.length === 0) {
-      // We don't have the current proximity rules here, so we can only detect if rules were set
-      // This is acceptable since violations are primarily relevant after autofill
       proximityViolations = [];
     }
 
@@ -221,7 +279,7 @@ export default function SeatingStatsPanel() {
         <Paper
           elevation={6}
           sx={{
-            width: 420,
+            width: 480,
             maxHeight: '80vh',
             overflow: 'hidden',
             display: 'flex',
@@ -263,6 +321,8 @@ export default function SeatingStatsPanel() {
             value={detailView}
             onChange={(_, v) => setDetailView(v)}
             sx={{ borderBottom: 1, borderColor: 'divider' }}
+            variant="scrollable"
+            scrollButtons="auto"
           >
             <Tab label="Overview" value="overview" />
             <Tab
@@ -297,6 +357,17 @@ export default function SeatingStatsPanel() {
               }
               value="violations"
             />
+            {sessionTracked && trackedGuestIds.length > 0 && (
+              <Tab
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    <Visibility fontSize="small" />
+                    Adjacency
+                  </Box>
+                }
+                value="adjacency"
+              />
+            )}
           </Tabs>
 
           {/* Content */}
@@ -358,6 +429,30 @@ export default function SeatingStatsPanel() {
                       <Typography variant="body2" fontWeight="bold">
                         🚨 {stats.proximityViolations.length} Proximity Rule Violations
                       </Typography>
+                      <Typography variant="caption">View →</Typography>
+                    </Stack>
+                  </Box>
+                )}
+
+                {/* Boss Adjacency Info */}
+                {sessionTracked && trackedGuestIds.length > 0 && (
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      bgcolor: '#e3f2fd',
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      '&:hover': { bgcolor: '#2196f3', color: 'white' },
+                    }}
+                    onClick={() => setDetailView('adjacency')}
+                  >
+                    <Stack direction="row" alignItems="center" justifyContent="space-between">
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Visibility fontSize="small" />
+                        <Typography variant="body2" fontWeight="bold">
+                          Boss Adjacency Tracked
+                        </Typography>
+                      </Stack>
                       <Typography variant="caption">View →</Typography>
                     </Stack>
                   </Box>
@@ -634,6 +729,104 @@ export default function SeatingStatsPanel() {
                         </List>
                       </Box>
                     )}
+                  </>
+                )}
+              </Stack>
+            )}
+
+            {detailView === 'adjacency' && (
+              <Stack spacing={2}>
+                {adjacencyHistory.length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <Visibility sx={{ fontSize: 48, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      No tracked guests in this session
+                    </Typography>
+                  </Box>
+                ) : (
+                  <>
+                    <Typography variant="caption" color="text.secondary" sx={{ px: 1 }}>
+                      Historical adjacency counts from previous sessions (chronological)
+                    </Typography>
+
+                    {adjacencyHistory.map((history: any) => (
+                      <Accordion key={history.trackedGuestId} defaultExpanded={adjacencyHistory.length === 1}>
+                        <AccordionSummary expandIcon={<ExpandMore />}>
+                          <Stack direction="row" spacing={2} alignItems="center" width="100%">
+                            <Visibility color="primary" fontSize="small" />
+                            <Box flexGrow={1}>
+                              <Typography variant="subtitle2" fontWeight={600}>
+                                {history.trackedGuest.salutation} {history.trackedGuest.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {history.trackedGuest.company}
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1}>
+                              <Chip
+                                label={`${history.uniqueGuests} guests`}
+                                size="small"
+                                color="primary"
+                                variant="outlined"
+                              />
+                              <Chip
+                                label={`${history.totalAdjacencies} total`}
+                                size="small"
+                                color="default"
+                              />
+                            </Stack>
+                          </Stack>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          {history.adjacencies.length === 0 ? (
+                            <Typography variant="body2" color="text.secondary" align="center" py={2}>
+                              No previous adjacencies recorded
+                            </Typography>
+                          ) : (
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>Guest</TableCell>
+                                  <TableCell>Company</TableCell>
+                                  <TableCell align="center">Count</TableCell>
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {history.adjacencies.map((adj: any) => (
+                                  <TableRow
+                                    key={adj.guestId}
+                                    sx={{
+                                      bgcolor: adj.count >= 3 ? '#ffebee' : adj.count >= 2 ? '#fff3e0' : 'transparent',
+                                    }}
+                                  >
+                                    <TableCell>
+                                      <Typography variant="body2" fontWeight={500}>
+                                        {adj.guest.salutation} {adj.guest.name}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {adj.guest.title}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Typography variant="body2">
+                                        {adj.guest.company}
+                                      </Typography>
+                                    </TableCell>
+                                    <TableCell align="center">
+                                      <Chip
+                                        label={`${adj.count}x`}
+                                        size="small"
+                                        color={adj.count >= 3 ? 'error' : adj.count >= 2 ? 'warning' : 'default'}
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </AccordionDetails>
+                      </Accordion>
+                    ))}
                   </>
                 )}
               </Stack>

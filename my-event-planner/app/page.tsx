@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useEventStore } from "@/store/eventStore"; // Ensure this path matches your folder structure
-import { 
+import {
   Container, Typography, Button, Card, CardContent, CardActionArea,
-  CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions 
+  CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions
 } from "@mui/material";
 
 // 1️⃣ FIX: Import the modern Grid2 component
-import Grid from "@mui/material/Grid"; 
+import Grid from "@mui/material/Grid";
 
 import { useRouter } from "next/navigation";
 import AddIcon from "@mui/icons-material/Add";
@@ -17,28 +17,41 @@ import DeleteIcon from "@mui/icons-material/Delete";
 export default function HomePage() {
   const router = useRouter();
   const { events, createEvent, deleteEvent, setActiveEvent } = useEventStore();
-  
+
   const [open, setOpen] = useState(false);
-  
-  const [formData, setFormData] = useState({ 
-    name: "", 
-    description: "", 
+
+  const [formData, setFormData] = useState({
+    name: "",
+    description: "",
     date: new Date().toISOString().split('T')[0] // Default today
   });
+
+  useEffect(() => {
+    // 🚨 CRITICAL: Load tracking metadata on app mount BEFORE any navigation
+    console.log('🔄 Initializing tracking metadata...');
+    const loadTrackingMetadata = useEventStore.getState().loadTrackingMetadataIntoStore;
+
+    if (loadTrackingMetadata) {
+      loadTrackingMetadata();
+      console.log('✅ Tracking metadata loaded');
+    } else {
+      console.error('❌ loadTrackingMetadataIntoStore not found in eventStore');
+    }
+  }, []);
 
   const handleCreate = () => {
     // 2️⃣ FIX: Pass the 4th argument (startDate) to match the updated Store
     createEvent(
-        formData.name, 
-        formData.description, 
-        "Executive meeting", // Default type
-        formData.date        // 🆕 The missing start date
-    ); 
+      formData.name,
+      formData.description,
+      "Executive meeting", // Default type
+      formData.date        // 🆕 The missing start date
+    );
     setOpen(false);
-    setFormData({ 
-        name: "", 
-        description: "", 
-        date: new Date().toISOString().split('T')[0] 
+    setFormData({
+      name: "",
+      description: "",
+      date: new Date().toISOString().split('T')[0]
     });
   };
 
@@ -53,9 +66,9 @@ export default function HomePage() {
         <Typography variant="h3" fontWeight="bold" color="primary">
           Event Dashboard
         </Typography>
-        <Button 
-          variant="contained" 
-          startIcon={<AddIcon />} 
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
           size="large"
           onClick={() => setOpen(true)}
         >
@@ -82,10 +95,10 @@ export default function HomePage() {
                 </CardContent>
               </CardActionArea>
               <CardActions sx={{ justifyContent: "flex-end" }}>
-                <Button 
-                  size="small" 
-                  color="error" 
-                  startIcon={<DeleteIcon />} 
+                <Button
+                  size="small"
+                  color="error"
+                  startIcon={<DeleteIcon />}
                   onClick={() => deleteEvent(event.id)}
                 >
                   Delete
@@ -103,18 +116,18 @@ export default function HomePage() {
           <TextField
             autoFocus margin="dense" label="Event Name" fullWidth
             value={formData.name}
-            onChange={(e) => setFormData({...formData, name: e.target.value})}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           />
           <TextField
             margin="dense" label="Start Date" type="date" fullWidth
             InputLabelProps={{ shrink: true }}
             value={formData.date}
-            onChange={(e) => setFormData({...formData, date: e.target.value})}
+            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
           />
           <TextField
             margin="dense" label="Description" fullWidth multiline rows={3}
             value={formData.description}
-            onChange={(e) => setFormData({...formData, description: e.target.value})}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           />
         </DialogContent>
         <DialogActions>

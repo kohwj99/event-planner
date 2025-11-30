@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useEventStore } from "@/store/eventStore";
+import { useTrackingStore } from "@/store/trackingStore";
 import { EventType } from "@/types/Event";
 import {
   Typography, Button, Paper, IconButton, Box
@@ -25,13 +26,17 @@ export default function EventDetailPage() {
   const addSession = useEventStore(state => state.addSession);
   const deleteSession = useEventStore(state => state.deleteSession);
 
+  // Tracking Store
+  const setSessionTracking = useTrackingStore(state => state.setSessionTracking);
+
   // Local State
   const [sessionModal, setSessionModal] = useState({ open: false, dayId: "" });
   const [sessionForm, setSessionForm] = useState({
     name: "",
     description: "",
     type: "Executive meeting" as EventType,
-    time: "09:00"
+    time: "09:00",
+    tracked: false,
   });
 
   // Delete Modals State
@@ -58,20 +63,17 @@ export default function EventDetailPage() {
     let nextDate = new Date();
     if (event.days.length > 0) {
       const lastDay = event.days[event.days.length - 1];
-      // Use local date fields to avoid timezone shifts
       const d = new Date(lastDay.date);
       d.setDate(d.getDate() + 1);
       nextDate = d;
     }
 
-    // Normalize nextDate to local midnight (so stored ISO unambiguously maps to that calendar day)
     const y = nextDate.getFullYear();
-    const m = nextDate.getMonth(); // monthIndex
+    const m = nextDate.getMonth();
     const dayNum = nextDate.getDate();
     const localMidnight = new Date(y, m, dayNum, 0, 0, 0, 0);
     addDay(event.id, localMidnight.toISOString());
   };
-
 
   /* --- 🧠 Logic: Delete Day --- */
   const handleDeleteDayClick = (dayId: string, dayIndex: number, sessionCount: number) => {
@@ -95,7 +97,6 @@ export default function EventDetailPage() {
 
   /* --- 🧠 Logic: Manage Session Guests --- */
   const handleManageSessionGuests = (sessionId: string, sessionName: string) => {
-    // Find the day that contains this session
     const day = event.days.find(d => d.sessions.some(s => s.id === sessionId));
     if (day) {
       setGuestModal({ open: true, sessionId, sessionName, dayId: day.id });
@@ -108,23 +109,19 @@ export default function EventDetailPage() {
     const dayObj = event.days.find(d => d.id === sessionModal.dayId);
     if (!dayObj) return;
 
-    // Parse the stored day ISO into a Date and read local year/month/day
     const dayDate = new Date(dayObj.date);
     const year = dayDate.getFullYear();
-    const monthIndex = dayDate.getMonth(); // 0-based
+    const monthIndex = dayDate.getMonth();
     const dayNum = dayDate.getDate();
 
-    // Parse hour/minute from the time input (e.g. "09:00")
     const [hourStr, minuteStr] = sessionForm.time.split(":");
     const hour = Number(hourStr || "0");
     const minute = Number(minuteStr || "0");
 
-    // Build a local Date using year, monthIndex, dayNum, hour, minute
     const localDate = new Date(year, monthIndex, dayNum, hour, minute, 0, 0);
-
-    // Store canonical ISO (UTC instant representing that local time)
     const isoStart = localDate.toISOString();
 
+    // Create the session
     addSession(event.id, sessionModal.dayId, {
       name: sessionForm.name,
       description: sessionForm.description,
@@ -132,10 +129,25 @@ export default function EventDetailPage() {
       startTime: isoStart,
     });
 
-    setSessionModal({ open: false, dayId: "" });
-    setSessionForm({ name: "", description: "", type: "Executive meeting", time: "09:00" });
-  };
+    // Get the newly created session ID (it will be the last one added)
+    const updatedEvent = useEventStore.getState().events.find(e => e.id === event.id);
+    const updatedDay = updatedEvent?.days.find(d => d.id === sessionModal.dayId);
+    const newSession = updatedDay?.sessions[updatedDay.sessions.length - 1];
 
+    // Set tracking status if enabled
+    if (newSession && sessionForm.tracked) {
+      setSessionTracking(event.id, newSession.id, true);
+    }
+
+    setSessionModal({ open: false, dayId: "" });
+    setSessionForm({ 
+      name: "", 
+      description: "", 
+      type: "Executive meeting", 
+      time: "09:00",
+      tracked: false,
+    });
+  };
 
   return (
     <Box sx={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -156,6 +168,7 @@ export default function EventDetailPage() {
               key={day.id}
               day={day}
               dayIndex={index}
+              eventId={event.id}
               onAddSession={(dayId) => setSessionModal({ open: true, dayId })}
               onDeleteDay={handleDeleteDayClick}
               onDeleteSession={handleDeleteSessionClick}

@@ -8,8 +8,14 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Box,
+  Typography,
+  Switch,
+  FormControlLabel,
+  Alert,
 } from "@mui/material";
+import { Visibility } from "@mui/icons-material";
 import { EventType } from "@/types/Event";
 
 interface SessionFormData {
@@ -17,6 +23,7 @@ interface SessionFormData {
   description: string;
   type: EventType;
   time: string;
+  tracked: boolean;
 }
 
 interface CreateSessionModalProps {
@@ -82,6 +89,44 @@ export default function CreateSessionModal({
           onChange={(e) => onChange({...sessionForm, description: e.target.value})}
           sx={{ mt: 2 }}
         />
+
+        {/* Boss Adjacency Tracking Toggle */}
+        <Box 
+          sx={{ 
+            mt: 3, 
+            p: 2, 
+            bgcolor: sessionForm.tracked ? '#f0f7ff' : '#f5f5f5', 
+            borderRadius: 1,
+            border: sessionForm.tracked ? '1px solid #1976d2' : '1px solid #e0e0e0',
+          }}
+        >
+          <FormControlLabel
+            control={
+              <Switch
+                checked={sessionForm.tracked}
+                onChange={(e) => onChange({ ...sessionForm, tracked: e.target.checked })}
+                color="primary"
+              />
+            }
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Visibility fontSize="small" />
+                <Typography variant="body2" fontWeight={500}>
+                  Track Boss Adjacency
+                </Typography>
+              </Box>
+            }
+          />
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1, ml: 4 }}>
+            Enable to monitor and analyze seating adjacency patterns with tracked guests
+          </Typography>
+        </Box>
+
+        {sessionForm.tracked && (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            This session will be included in Boss Adjacency analysis. Make sure to mark relevant guests as tracked in the Master Guest List.
+          </Alert>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>

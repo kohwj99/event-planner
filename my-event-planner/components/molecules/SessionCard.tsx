@@ -1,17 +1,23 @@
-import { Paper, Typography, Chip, IconButton, Box } from "@mui/material";
+import { Paper, Typography, Chip, IconButton, Box, Tooltip } from "@mui/material";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import DeleteIcon from "@mui/icons-material/Delete";
 import GroupsIcon from "@mui/icons-material/Groups";
+import Visibility from "@mui/icons-material/Visibility";
 import { Session } from "@/types/Event";
+import { useTrackingStore } from "@/store/trackingStore";
 
 interface SessionCardProps {
   session: Session;
+  eventId: string;
   onClick: () => void;
   onDelete: () => void;
   onManageGuests?: () => void;
 }
 
-export default function SessionCard({ session, onClick, onDelete, onManageGuests }: SessionCardProps) {
+export default function SessionCard({ session, eventId, onClick, onDelete, onManageGuests }: SessionCardProps) {
+  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
+  const isTracked = isSessionTracked(eventId, session.id);
+
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
     onDelete();
@@ -25,7 +31,7 @@ export default function SessionCard({ session, onClick, onDelete, onManageGuests
   };
 
   const totalAttendees = (session.inheritedHostGuestIds?.length || 0) + 
-                         (session.inheritedExternalGuestIds?.length || 0);;
+                         (session.inheritedExternalGuestIds?.length || 0);
 
   return (
     <Paper 
@@ -33,10 +39,11 @@ export default function SessionCard({ session, onClick, onDelete, onManageGuests
       sx={{ 
         p: 2, 
         cursor: "pointer", 
-        borderLeft: "4px solid #1976d2",
+        borderLeft: isTracked ? "4px solid #ff9800" : "4px solid #1976d2",
         position: "relative",
+        bgcolor: isTracked ? "#fff8e1" : "white",
         "&:hover": { 
-          backgroundColor: "#f0f7ff",
+          backgroundColor: isTracked ? "#fff3e0" : "#f0f7ff",
           "& .delete-button": {
             opacity: 1
           }
@@ -66,13 +73,32 @@ export default function SessionCard({ session, onClick, onDelete, onManageGuests
       </IconButton>
 
       <Box display="flex" justifyContent="space-between" alignItems="start" mb={1}>
-        <Chip 
-          label={session.sessionType} 
-          size="small" 
-          color="primary" 
-          variant="outlined" 
-          sx={{ fontSize: '0.7rem', height: 20 }}
-        />
+        <Box display="flex" gap={0.5}>
+          <Chip 
+            label={session.sessionType} 
+            size="small" 
+            color="primary" 
+            variant="outlined" 
+            sx={{ fontSize: '0.7rem', height: 20 }}
+          />
+          
+          {/* Boss Adjacency Tracking Indicator */}
+          {isTracked && (
+            <Tooltip title="Boss Adjacency Tracking Enabled">
+              <Chip
+                icon={<Visibility sx={{ fontSize: 14 }} />}
+                label="Tracked"
+                size="small"
+                color="warning"
+                sx={{ 
+                  fontSize: '0.7rem', 
+                  height: 20,
+                  fontWeight: 600,
+                }}
+              />
+            </Tooltip>
+          )}
+        </Box>
         
         {/* Attendee Count Badge */}
         <Chip

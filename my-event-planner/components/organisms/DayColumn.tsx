@@ -20,11 +20,14 @@ import {
   EventSeat,
   Groups,
   Schedule,
+  Visibility,
 } from '@mui/icons-material';
+import { useTrackingStore } from '@/store/trackingStore';
 
 interface DayColumnProps {
   day: EventDay;
   dayIndex: number;
+  eventId: string;
   onAddSession: (dayId: string) => void;
   onDeleteDay: (dayId: string, dayIndex: number, sessionCount: number) => void;
   onDeleteSession: (sessionId: string, sessionName: string, dayId: string) => void;
@@ -35,6 +38,7 @@ interface DayColumnProps {
 export default function DayColumn({
   day,
   dayIndex,
+  eventId,
   onAddSession,
   onDeleteDay,
   onDeleteSession,
@@ -42,6 +46,7 @@ export default function DayColumn({
   onManageSessionGuests,
 }: DayColumnProps) {
   const [isMounted, setIsMounted] = useState(false);
+  const isSessionTracked = useTrackingStore((s) => s.isSessionTracked);
 
   useEffect(() => {
     setIsMounted(true);
@@ -114,6 +119,7 @@ export default function DayColumn({
               (session.inheritedHostGuestIds?.length || 0) +
               (session.inheritedExternalGuestIds?.length || 0);
             const hasSeatPlan = session.seatPlan.tables.length > 0;
+            const isTracked = isSessionTracked(eventId, session.id);
 
             return (
               <Card
@@ -122,6 +128,8 @@ export default function DayColumn({
                 sx={{
                   cursor: 'pointer',
                   transition: 'all 0.2s',
+                  bgcolor: isTracked ? '#fff8e1' : 'white',
+                  borderLeft: isTracked ? '4px solid #ff9800' : '4px solid transparent',
                   '&:hover': {
                     boxShadow: 3,
                     transform: 'translateY(-2px)',
@@ -133,7 +141,7 @@ export default function DayColumn({
                     {session.name}
                   </Typography>
 
-                  <Stack direction="row" spacing={1} mb={1}>
+                  <Stack direction="row" spacing={1} mb={1} flexWrap="wrap">
                     <Chip
                       label={session.sessionType}
                       size="small"
@@ -146,6 +154,15 @@ export default function DayColumn({
                         label={formatTime(session.startTime)}
                         size="small"
                         variant="outlined"
+                      />
+                    )}
+                    {isTracked && (
+                      <Chip
+                        icon={<Visibility />}
+                        label="Tracked"
+                        size="small"
+                        color="warning"
+                        sx={{ fontWeight: 600 }}
                       />
                     )}
                   </Stack>
