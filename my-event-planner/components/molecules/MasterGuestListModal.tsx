@@ -22,7 +22,7 @@ import {
   Switch,
   Tooltip,
 } from '@mui/material';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
 import { useTrackingStore } from '@/store/trackingStore';
@@ -59,10 +59,12 @@ export default function MasterGuestListModal({
   const event = useEventStore((s) => s.events.find(e => e.id === eventId));
   const addMasterGuest = useEventStore((s) => s.addMasterGuest);
   const updateEventDetails = useEventStore((s) => s.updateEventDetails);
+  const updateEventTrackedGuests = useEventStore((s) => s.updateEventTrackedGuests);
 
   // Tracking Store
   const toggleGuestTracking = useTrackingStore((s) => s.toggleGuestTracking);
   const isGuestTracked = useTrackingStore((s) => s.isGuestTracked);
+  const getTrackedGuests = useTrackingStore((s) => s.getTrackedGuests);
 
   const [tab, setTab] = useState<'host' | 'external'>('host');
   const [filter, setFilter] = useState('');
@@ -277,10 +279,19 @@ export default function MasterGuestListModal({
     updateEventDetails(eventId, { [listKey]: updatedList });
   };
 
-  /* -------------------- 👁️ TRACKING TOGGLE -------------------- */
-  const handleTrackingToggle = (guestId: string) => {
+  /* -------------------- 👁️ TRACKING TOGGLE WITH PERSISTENCE -------------------- */
+  const handleTrackingToggle = useCallback((guestId: string) => {
+    // Toggle in tracking store (primary source of truth)
     toggleGuestTracking(eventId, guestId);
-  };
+    
+    // CRITICAL: Sync to event store for backup persistence
+    // Use setTimeout to ensure tracking store has updated first
+    setTimeout(() => {
+      const updatedTrackedGuests = getTrackedGuests(eventId);
+      updateEventTrackedGuests(eventId, updatedTrackedGuests);
+      console.log(`🔄 Synced ${updatedTrackedGuests.length} tracked guests to event store`);
+    }, 0);
+  }, [eventId, toggleGuestTracking, getTrackedGuests, updateEventTrackedGuests]);
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">

@@ -63,6 +63,11 @@ const customStorage: StateStorage = {
                 planningOrderByEvent: parsed.planningOrderByEvent || {},
             }
 
+            console.log('📦 TrackingStore: Loaded from localStorage', {
+                eventsWithTrackedGuests: Object.keys(converted.trackedGuestsByEvent).length,
+                eventsWithTrackedSessions: Object.keys(converted.trackedSessionsByEvent).length,
+            });
+
             return JSON.stringify({
                 state: converted,
                 version: 0,
@@ -104,9 +109,13 @@ const customStorage: StateStorage = {
     },
 }
 
-/* -------------------- 🏪 STORE INTERFACE -------------------- */
+/* -------------------- 🪝 STORE INTERFACE -------------------- */
 
 interface TrackingStoreState {
+    // Hydration state
+    _hasHydrated: boolean;
+    setHasHydrated: (state: boolean) => void;
+
     trackedGuestsByEvent: Record<string, Set<string>>;
     trackedSessionsByEvent: Record<string, Set<string>>;
     adjacencyRecordsByEvent: EventAdjacencyMap;
@@ -117,6 +126,7 @@ interface TrackingStoreState {
     isGuestTracked: (eventId: string, guestId: string) => boolean;
     getTrackedGuests: (eventId: string) => string[];
     clearEventGuestTracking: (eventId: string) => void;
+    setTrackedGuests: (eventId: string, guestIds: string[]) => void;
 
     /* -------------------- SESSION TRACKING -------------------- */
     toggleSessionTracking: (eventId: string, sessionId: string) => void;
@@ -124,6 +134,7 @@ interface TrackingStoreState {
     isSessionTracked: (eventId: string, sessionId: string) => boolean;
     getTrackedSessions: (eventId: string) => string[];
     clearEventSessionTracking: (eventId: string) => void;
+    setTrackedSessions: (eventId: string, sessionIds: string[]) => void;
 
     /* -------------------- PLANNING ORDER MANAGEMENT -------------------- */
     getSessionPlanningOrder: (eventId: string, sessionId: string) => number;
@@ -166,6 +177,12 @@ export const useTrackingStore = create<TrackingStoreState>()(
     devtools(
         persist(
             (set, get) => ({
+                // Hydration state
+                _hasHydrated: false,
+                setHasHydrated: (state) => {
+                    set({ _hasHydrated: state });
+                },
+
                 trackedGuestsByEvent: {},
                 trackedSessionsByEvent: {},
                 adjacencyRecordsByEvent: {},
@@ -221,6 +238,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
                         delete updated[eventId];
                         return { trackedGuestsByEvent: updated };
                     }),
+
+                setTrackedGuests: (eventId, guestIds) =>
+                    set((state) => ({
+                        trackedGuestsByEvent: {
+                            ...state.trackedGuestsByEvent,
+                            [eventId]: new Set(guestIds),
+                        },
+                    })),
 
                 /* -------------------- SESSION TRACKING -------------------- */
                 toggleSessionTracking: (eventId, sessionId) =>
@@ -291,6 +316,14 @@ export const useTrackingStore = create<TrackingStoreState>()(
                         delete updated[eventId];
                         return { trackedSessionsByEvent: updated };
                     }),
+
+                setTrackedSessions: (eventId, sessionIds) =>
+                    set((state) => ({
+                        trackedSessionsByEvent: {
+                            ...state.trackedSessionsByEvent,
+                            [eventId]: new Set(sessionIds),
+                        },
+                    })),
 
                 /* -------------------- PLANNING ORDER MANAGEMENT -------------------- */
                 getSessionPlanningOrder: (eventId, sessionId) => {
@@ -574,8 +607,23 @@ export const useTrackingStore = create<TrackingStoreState>()(
             {
                 name: "boss-adjacency-tracking-store",
                 storage: createJSONStorage(() => customStorage),
+                onRehydrateStorage: () => (state) => {
+                    console.log('🔄 TrackingStore: Hydration complete');
+                    state?.setHasHydrated(true);
+                },
+                partialize: (state) => ({
+                    trackedGuestsByEvent: state.trackedGuestsByEvent,
+                    trackedSessionsByEvent: state.trackedSessionsByEvent,
+                    adjacencyRecordsByEvent: state.adjacencyRecordsByEvent,
+                    planningOrderByEvent: state.planningOrderByEvent,
+                }),
             }
         ),
         { name: "TrackingStore" }
     )
 );
+
+// Helper hook to wait for hydration
+export const useTrackingStoreHydration = () => {
+    return useTrackingStore((state) => state._hasHydrated);
+};

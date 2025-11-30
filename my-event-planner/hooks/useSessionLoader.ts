@@ -1,12 +1,26 @@
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useTrackingStore } from '@/store/trackingStore';
+import { useHydrationContext } from '@/components/providers/StoreHydrationProvider';
 
 export const useSessionLoader = (sessionId: string | null) => {
   const lastSessionIdRef = useRef<string | null>(null);
   const hasLoadedRef = useRef<boolean>(false);
+  
+  // Track if component has mounted to prevent SSR issues
+  const [isMounted, setIsMounted] = useState(false);
+  
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Hydration check - CRITICAL for preventing data loss on refresh
+  const { isHydrated } = useHydrationContext();
+  
+  // Combined check: mounted AND hydrated
+  const isReady = isMounted && isHydrated;
 
   // Event Store
   const getSessionById = useEventStore((state) => state.getSessionById);
@@ -58,7 +72,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       activeGuestIds: Array.from(activeGuestIds),
     });
 
-    // 🆕 Check if this session is tracked
+    // 🆕 Check if this session is tracked (using tracking store as source of truth)
     const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
     
     if (tracked) {
@@ -135,8 +149,14 @@ export const useSessionLoader = (sessionId: string | null) => {
     hasLoadedRef.current = true;
   }, [getSessionById, loadSessionSeatPlan, getSessionGuests, setSeatStoreState, resetGuests, addGuest, setActiveSession, resetTables]);
 
-  // Handle session changes
+  // Handle session changes - ONLY after hydration is complete
   useEffect(() => {
+    // 🆕 CRITICAL: Don't do anything until mounted and stores are hydrated
+    if (!isReady) {
+      console.log('⏳ Waiting for store hydration before loading session...');
+      return;
+    }
+
     if (!sessionId) {
       // Cleanup when navigating away
       if (lastSessionIdRef.current) {
@@ -157,7 +177,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     if (lastSessionIdRef.current !== sessionId || !hasLoadedRef.current) {
       loadSession(sessionId);
     }
-  }, [sessionId, saveCurrentSession, loadSession, setActiveSession]);
+  }, [sessionId, isReady, saveCurrentSession, loadSession, setActiveSession]);
 
   // Save on unmount
   useEffect(() => {
@@ -170,5 +190,6 @@ export const useSessionLoader = (sessionId: string | null) => {
 
   return {
     saveCurrentSession,
+    isHydrated: isReady,
   };
 };

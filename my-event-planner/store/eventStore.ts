@@ -13,8 +13,12 @@ interface EventStoreState {
   events: Event[];
   activeEventId: string | null;
   activeSessionId: string | null;
+  _hasHydrated: boolean;
 
-  /* -------------------- 🔍 Event CRUD -------------------- */
+  /* -------------------- 🔄 Hydration -------------------- */
+  setHasHydrated: (state: boolean) => void;
+
+  /* -------------------- 📝 Event CRUD -------------------- */
   createEvent: (
     name: string,
     description: string,
@@ -106,7 +110,7 @@ interface EventStoreState {
 
   markSessionForReview: (eventId: string, sessionId: string, needsReview: boolean) => void;
 
-  loadTrackingMetadataIntoStore: () => void;
+  syncTrackingFromStore: (eventId: string) => void;
 }
 
 export const useEventStore = create<EventStoreState>()(
@@ -116,6 +120,12 @@ export const useEventStore = create<EventStoreState>()(
         events: [],
         activeEventId: null,
         activeSessionId: null,
+        _hasHydrated: false,
+
+        /* ---------- Hydration ---------- */
+        setHasHydrated: (state) => {
+          set({ _hasHydrated: state });
+        },
 
         /* ---------- Event CRUD ---------- */
         createEvent: (name, description, eventType, startDate) =>
@@ -363,6 +373,7 @@ export const useEventStore = create<EventStoreState>()(
         saveSessionSeatPlan: (eventId, dayId, sessionId, seatPlan) =>
           set((state) => {
             const now = new Date().toISOString();
+
             return {
               events: state.events.map((e) => {
                 if (e.id !== eventId) return e;
@@ -553,47 +564,78 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        loadTrackingMetadataIntoStore: () => {
-          const state = get();
+        /**
+         * Sync tracking data FROM the trackingStore TO the eventStore
+         * This should be called after both stores have hydrated
+         */
+        syncTrackingFromStore: (eventId) => {
           const trackingStore = useTrackingStore.getState();
+          const eventStore = get();
+          
+          const event = eventStore.events.find(e => e.id === eventId);
+          if (!event) {
+            console.warn(`syncTrackingFromStore: Event ${eventId} not found`);
+            return;
+          }
 
-          console.log('🔄 Loading tracking metadata from event store...');
+          // Get tracked data from tracking store
+          const trackedGuestIds = trackingStore.getTrackedGuests(eventId);
+          const trackedSessionIds = trackingStore.getTrackedSessions(eventId);
 
-          state.events.forEach((event) => {
-            // Load tracked guests
-            if (event.trackedGuestIds && event.trackedGuestIds.length > 0) {
-              event.trackedGuestIds.forEach((guestId) => {
-                if (!trackingStore.isGuestTracked(event.id, guestId)) {
-                  trackingStore.toggleGuestTracking(event.id, guestId);
-                }
-              });
-              console.log(`✅ Loaded ${event.trackedGuestIds.length} tracked guests for event ${event.name}`);
-            }
-
-            // Load tracked sessions
-            let trackedSessionCount = 0;
-            event.days.forEach((day) => {
-              day.sessions.forEach((session) => {
-                if (session.isTrackedForAdjacency) {
-                  if (!trackingStore.isSessionTracked(event.id, session.id)) {
-                    trackingStore.setSessionTracking(event.id, session.id, true);
-                  }
-                  trackedSessionCount++;
-                }
-              });
-            });
-
-            if (trackedSessionCount > 0) {
-              console.log(`✅ Loaded ${trackedSessionCount} tracked sessions for event ${event.name}`);
-            }
+          console.log(`🔄 Syncing tracking data for event ${event.name}:`, {
+            trackedGuests: trackedGuestIds.length,
+            trackedSessions: trackedSessionIds.length,
           });
 
-          console.log('✅ Tracking metadata sync complete');
+          // Update event's tracked guests
+          if (trackedGuestIds.length > 0) {
+            set((state) => ({
+              events: state.events.map((e) =>
+                e.id !== eventId
+                  ? e
+                  : {
+                    ...e,
+                    trackedGuestIds,
+                    trackingEnabled: true,
+                  }
+              ),
+            }));
+          }
+
+          // Update each session's tracking status
+          const trackedSessionSet = new Set(trackedSessionIds);
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => ({
+                  ...d,
+                  sessions: d.sessions.map((s) => ({
+                    ...s,
+                    isTrackedForAdjacency: trackedSessionSet.has(s.id),
+                  })),
+                })),
+              };
+            }),
+          }));
+
+          console.log(`✅ Tracking sync complete for event ${event.name}`);
         },
       }),
 
-
-      { name: "event-master-store" }
+      { 
+        name: "event-master-store",
+        onRehydrateStorage: () => (state) => {
+          console.log('🔄 EventStore: Hydration complete');
+          state?.setHasHydrated(true);
+        },
+      }
     )
   )
 );
+
+// Helper hook to wait for hydration
+export const useEventStoreHydration = () => {
+  return useEventStore((state) => state._hasHydrated);
+};

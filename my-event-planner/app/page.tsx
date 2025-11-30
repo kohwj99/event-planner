@@ -1,22 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useEventStore } from "@/store/eventStore"; // Ensure this path matches your folder structure
+import { useState, useEffect } from "react";
+import { useEventStore } from "@/store/eventStore";
 import {
   Container, Typography, Button, Card, CardContent, CardActionArea,
-  CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions
+  CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
+  CircularProgress, Box
 } from "@mui/material";
-
-// 1️⃣ FIX: Import the modern Grid2 component
 import Grid from "@mui/material/Grid";
-
 import { useRouter } from "next/navigation";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
+import { useHydrationContext } from "@/components/providers/StoreHydrationProvider";
 
 export default function HomePage() {
   const router = useRouter();
   const { events, createEvent, deleteEvent, setActiveEvent } = useEventStore();
+  const { isHydrated } = useHydrationContext();
+  
+  // Track if component has mounted to prevent hydration mismatch
+  const [isMounted, setIsMounted] = useState(false);
+  
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const [open, setOpen] = useState(false);
 
@@ -26,26 +33,12 @@ export default function HomePage() {
     date: new Date().toISOString().split('T')[0] // Default today
   });
 
-  useEffect(() => {
-    // 🚨 CRITICAL: Load tracking metadata on app mount BEFORE any navigation
-    console.log('🔄 Initializing tracking metadata...');
-    const loadTrackingMetadata = useEventStore.getState().loadTrackingMetadataIntoStore;
-
-    if (loadTrackingMetadata) {
-      loadTrackingMetadata();
-      console.log('✅ Tracking metadata loaded');
-    } else {
-      console.error('❌ loadTrackingMetadataIntoStore not found in eventStore');
-    }
-  }, []);
-
   const handleCreate = () => {
-    // 2️⃣ FIX: Pass the 4th argument (startDate) to match the updated Store
     createEvent(
       formData.name,
       formData.description,
       "Executive meeting", // Default type
-      formData.date        // 🆕 The missing start date
+      formData.date
     );
     setOpen(false);
     setFormData({
@@ -60,54 +53,73 @@ export default function HomePage() {
     router.push(`/events/${id}`);
   };
 
+  // Show loading state while mounting or hydrating
+  // Use isMounted to ensure consistent server/client render
+  const showLoading = !isMounted || !isHydrated;
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4 }}>
-      <div className="flex justify-between items-center mb-8">
-        <Typography variant="h3" fontWeight="bold" color="primary">
-          Event Dashboard
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          size="large"
-          onClick={() => setOpen(true)}
+      {showLoading ? (
+        <Box 
+          display="flex" 
+          justifyContent="center" 
+          alignItems="center" 
+          minHeight="50vh"
+          flexDirection="column"
+          gap={2}
         >
-          New Event
-        </Button>
-      </div>
+          <CircularProgress />
+          <Typography color="text.secondary">Loading events...</Typography>
+        </Box>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-8">
+            <Typography variant="h3" fontWeight="bold" color="primary">
+              Event Dashboard
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              size="large"
+              onClick={() => setOpen(true)}
+            >
+              New Event
+            </Button>
+          </div>
 
-      <Grid container spacing={3}>
-        {events.map((event) => (
-          <Grid size={{ xs: 12, md: 4, lg: 3 }} key={event.id}>
-            <Card elevation={4} sx={{ height: "100%", display: 'flex', flexDirection: 'column' }}>
-              <CardActionArea onClick={() => handleNavigate(event.id)} sx={{ flexGrow: 1 }}>
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    {event.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {/* Use startDate if available, fallback to createdAt */}
-                    Date: {(event.startDate || event.createdAt).split('T')[0]}
-                  </Typography>
-                  <Typography variant="body2" noWrap>
-                    {event.description}
-                  </Typography>
-                </CardContent>
-              </CardActionArea>
-              <CardActions sx={{ justifyContent: "flex-end" }}>
-                <Button
-                  size="small"
-                  color="error"
-                  startIcon={<DeleteIcon />}
-                  onClick={() => deleteEvent(event.id)}
-                >
-                  Delete
-                </Button>
-              </CardActions>
-            </Card>
+          <Grid container spacing={3}>
+            {events.map((event) => (
+              <Grid size={{ xs: 12, md: 4, lg: 3 }} key={event.id}>
+                <Card elevation={4} sx={{ height: "100%", display: 'flex', flexDirection: 'column' }}>
+                  <CardActionArea onClick={() => handleNavigate(event.id)} sx={{ flexGrow: 1 }}>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        {event.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Date: {(event.startDate || event.createdAt).split('T')[0]}
+                      </Typography>
+                      <Typography variant="body2" noWrap>
+                        {event.description}
+                      </Typography>
+                    </CardContent>
+                  </CardActionArea>
+                  <CardActions sx={{ justifyContent: "flex-end" }}>
+                    <Button
+                      size="small"
+                      color="error"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => deleteEvent(event.id)}
+                    >
+                      Delete
+                    </Button>
+                  </CardActions>
+                </Card>
+              </Grid>
+            ))}
           </Grid>
-        ))}
-      </Grid>
+        </>
+      )}
 
       {/* Create Event Dialog */}
       <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
