@@ -202,7 +202,11 @@ function wouldViolateSitAwayWithLocked(
 
 /**
  * Build prioritized guest pools that ensure guests with proximity rules are included
- * even if they're lower-ranked
+ * even if they're lower-ranked.
+ * 
+ * IMPORTANT: This function does NOT limit the pool sizes. It returns ALL guests,
+ * with proximity-rule guests prioritized first, then remaining guests by sort order.
+ * The spacing/ratio rules will determine how many of each type to actually seat.
  */
 function buildPrioritizedGuestPools(
   hostCandidates: any[],
@@ -247,29 +251,17 @@ function buildPrioritizedGuestPools(
   const hostGroups = prioritizeGuests(hostCandidates);
   const externalGroups = prioritizeGuests(externalCandidates);
   
-  // Calculate how many seats each group gets
-  const totalGuests = hostCandidates.length + externalCandidates.length;
-  const seatsToFill = Math.min(totalAvailableSeats, totalGuests);
+  // Build prioritized lists: proximity-rule guests first, then all remaining guests
+  // DO NOT limit the pool sizes - include ALL guests
+  const prioritizedHost: any[] = [
+    ...hostGroups.mustInclude,
+    ...hostGroups.regular
+  ];
   
-  // Prioritize guests with rules, then fill remaining seats by sort order
-  const prioritizedHost: any[] = [];
-  const prioritizedExternal: any[] = [];
-  
-  // First, add all must-include guests
-  prioritizedHost.push(...hostGroups.mustInclude);
-  prioritizedExternal.push(...externalGroups.mustInclude);
-  
-  const remainingSeats = seatsToFill - (prioritizedHost.length + prioritizedExternal.length);
-  
-  if (remainingSeats > 0) {
-    // Add regular guests to fill remaining seats
-    const hostRatio = hostCandidates.length / totalGuests;
-    const hostSeatsRemaining = Math.ceil(remainingSeats * hostRatio);
-    const externalSeatsRemaining = remainingSeats - hostSeatsRemaining;
-    
-    prioritizedHost.push(...hostGroups.regular.slice(0, hostSeatsRemaining));
-    prioritizedExternal.push(...externalGroups.regular.slice(0, externalSeatsRemaining));
-  }
+  const prioritizedExternal: any[] = [
+    ...externalGroups.mustInclude,
+    ...externalGroups.regular
+  ];
   
   return {
     prioritizedHost,
@@ -365,72 +357,121 @@ function performInitialPlacement(
 
     if (tableRules?.spacingRule.enabled) {
       const spacing = tableRules.spacingRule.spacing;
-      let seatIdx = 0;
-
-      while (seatIdx < unlockedSeats.length) {
+      const startWithExternal = tableRules.spacingRule.startWithExternal ?? false;
+      
+      // Helper functions to check remaining guests globally
+      const hasHostsRemaining = () => allCandidates.some(g => !assignedGuests.has(g.id) && g.fromHost === true);
+      const hasExternalsRemaining = () => allCandidates.some(g => !assignedGuests.has(g.id) && g.fromHost === false);
+      
+      // Pattern can only continue if BOTH hosts and externals are available
+      let patternActive = hasHostsRemaining() && hasExternalsRemaining();
+      
+      // Track position in the spacing pattern
+      // Pattern cycle length = spacing + 1 (1 host + N externals)
+      // If startWithExternal=false: position 0 = host, positions 1-spacing = external
+      // If startWithExternal=true: positions 0-(spacing-1) = external, position spacing = host
+      let patternPosition = 0;
+      
+      // Helper to determine if current position is a host turn
+      const isHostTurn = (pos: number) => {
+        if (startWithExternal) {
+          return pos === spacing; // Host comes after all externals
+        } else {
+          return pos === 0; // Host comes first
+        }
+      };
+      
+      for (let seatIdx = 0; seatIdx < unlockedSeats.length; seatIdx++) {
         const seat = unlockedSeats[seatIdx];
-        let nextHost = getNextGuestOfType(allCandidates, assignedGuests, true);
-
-        if (nextHost && proximityRules) {
-          if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
-            const availableHosts = allCandidates.filter(g =>
-              !assignedGuests.has(g.id) && g.fromHost === true
-            );
-            nextHost = availableHosts.find(h =>
-              !wouldViolateSitAwayWithLocked(h.id, seat, seats, lockedGuestMap, proximityRules)
-            ) || nextHost;
+        
+        if (patternActive) {
+          // Check if we still have both types available
+          if (!hasHostsRemaining() || !hasExternalsRemaining()) {
+            patternActive = false;
+            console.log(`Spacing pattern broken: hosts=${hasHostsRemaining()}, externals=${hasExternalsRemaining()}`);
           }
         }
-
-        if (nextHost) {
-          seatToGuest.set(seat.id, nextHost.id);
-          assignedGuests.add(nextHost.id);
-          seatIdx++;
-        } else {
-          break;
-        }
-
-        for (let s = 0; s < spacing && seatIdx < unlockedSeats.length; s++) {
-          const spacingSeat = unlockedSeats[seatIdx];
-          let nextExternal = getNextGuestOfType(allCandidates, assignedGuests, false);
-
-          if (nextExternal && proximityRules) {
-            if (wouldViolateSitAwayWithLocked(nextExternal.id, spacingSeat, seats, lockedGuestMap, proximityRules)) {
-              const availableExternals = allCandidates.filter(g =>
-                !assignedGuests.has(g.id) && g.fromHost === false
-              );
-              nextExternal = availableExternals.find(e =>
-                !wouldViolateSitAwayWithLocked(e.id, spacingSeat, seats, lockedGuestMap, proximityRules)
-              ) || nextExternal;
+        
+        if (patternActive) {
+          // We're in pattern mode: alternate based on startWithExternal setting
+          if (isHostTurn(patternPosition)) {
+            // Host turn
+            let nextHost = getNextGuestOfType(allCandidates, assignedGuests, true);
+            
+            if (nextHost && proximityRules) {
+              if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
+                const availableHosts = allCandidates.filter(g =>
+                  !assignedGuests.has(g.id) && g.fromHost === true
+                );
+                nextHost = availableHosts.find(h =>
+                  !wouldViolateSitAwayWithLocked(h.id, seat, seats, lockedGuestMap, proximityRules)
+                ) || nextHost;
+              }
+            }
+            
+            if (nextHost) {
+              seatToGuest.set(seat.id, nextHost.id);
+              assignedGuests.add(nextHost.id);
+              patternPosition++;
+              if (patternPosition > spacing) {
+                patternPosition = 0; // Reset to start of pattern
+              }
+            } else {
+              // No host available, break pattern
+              patternActive = false;
+              console.log(`Spacing pattern broken: no host available`);
+              // Re-process this seat in fallback mode
+              seatIdx--;
+            }
+          } else {
+            // External turn
+            let nextExternal = getNextGuestOfType(allCandidates, assignedGuests, false);
+            
+            if (nextExternal && proximityRules) {
+              if (wouldViolateSitAwayWithLocked(nextExternal.id, seat, seats, lockedGuestMap, proximityRules)) {
+                const availableExternals = allCandidates.filter(g =>
+                  !assignedGuests.has(g.id) && g.fromHost === false
+                );
+                nextExternal = availableExternals.find(e =>
+                  !wouldViolateSitAwayWithLocked(e.id, seat, seats, lockedGuestMap, proximityRules)
+                ) || nextExternal;
+              }
+            }
+            
+            if (nextExternal) {
+              seatToGuest.set(seat.id, nextExternal.id);
+              assignedGuests.add(nextExternal.id);
+              patternPosition++;
+              if (patternPosition > spacing) {
+                patternPosition = 0; // Reset to start of pattern
+              }
+            } else {
+              // No external available, break pattern
+              patternActive = false;
+              console.log(`Spacing pattern broken: no external available`);
+              // Re-process this seat in fallback mode
+              seatIdx--;
             }
           }
-
-          if (nextExternal) {
-            seatToGuest.set(spacingSeat.id, nextExternal.id);
-            assignedGuests.add(nextExternal.id);
+        } else {
+          // Fallback mode: fill with any available guest by sort order
+          let nextGuest = getNextGuestFromUnifiedList(allCandidates, assignedGuests, comparatorWithTieBreak);
+          
+          if (nextGuest && proximityRules) {
+            if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
+              const availableGuests = allCandidates.filter(g => !assignedGuests.has(g.id));
+              nextGuest = availableGuests.find(g =>
+                !wouldViolateSitAwayWithLocked(g.id, seat, seats, lockedGuestMap, proximityRules)
+              ) || nextGuest;
+            }
           }
-          seatIdx++;
-        }
-      }
-
-      while (seatIdx < unlockedSeats.length) {
-        const seat = unlockedSeats[seatIdx];
-        let nextGuest = getNextGuestFromUnifiedList(allCandidates, assignedGuests, comparatorWithTieBreak);
-
-        if (nextGuest && proximityRules) {
-          if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
-            const availableGuests = allCandidates.filter(g => !assignedGuests.has(g.id));
-            nextGuest = availableGuests.find(g =>
-              !wouldViolateSitAwayWithLocked(g.id, seat, seats, lockedGuestMap, proximityRules)
-            ) || nextGuest;
+          
+          if (nextGuest) {
+            seatToGuest.set(seat.id, nextGuest.id);
+            assignedGuests.add(nextGuest.id);
           }
+          // If no guest available at all, seat remains empty
         }
-
-        if (nextGuest) {
-          seatToGuest.set(seat.id, nextGuest.id);
-          assignedGuests.add(nextGuest.id);
-        }
-        seatIdx++;
       }
 
     } else if (tableRules?.ratioRule.enabled) {

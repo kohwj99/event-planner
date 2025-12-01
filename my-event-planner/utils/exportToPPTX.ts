@@ -1,146 +1,275 @@
-// src/utils/exportToPPTX.ts
-import PptxGenJS from "pptxgenjs";
+import pptxgen from "pptxgenjs";
 import { useSeatStore } from "@/store/seatStore";
-import { Table } from "@/types/Table";
-import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
+import { CHUNK_WIDTH, CHUNK_HEIGHT } from "@/types/Chunk";
 
-/**
- * Exports each chunk as one editable PowerPoint slide.
- * Each chunk fits content into a single slide; final slide is an overview.
- */
-export async function exportToPPTX(allTables: Table[], filename = "SeatPlan.pptx") {
-  const store = useSeatStore.getState();
-  const chunks = store.getAllChunksSorted();
-  const pptx = new PptxGenJS();
+// Helper to convert RGB string to Hex
+const rgbToHex = (color: string) => {
+  if (!color || color === "none" || color === "transparent") return null;
+  const values = color.match(/\d+(\.\d+)?/g);
+  if (!values || values.length < 3) return "000000";
+  const r = parseInt(values[0]);
+  const g = parseInt(values[1]);
+  const b = parseInt(values[2]);
+  return (
+    r.toString(16).padStart(2, "0") +
+    g.toString(16).padStart(2, "0") +
+    b.toString(16).padStart(2, "0")
+  ).toUpperCase();
+};
 
-  // slide dims & DPI
-  const SLIDE_W_IN = 10;
-  const SLIDE_H_IN = 5.625;
-  const DPI = 96;
-  const SLIDE_W_PX = SLIDE_W_IN * DPI;
-  const SLIDE_H_PX = SLIDE_H_IN * DPI;
-  const pxToIn = (px: number) => px / DPI;
+// Updated signature to match the call in page.tsx
+export const exportToPPTX = async (tables: any[]) => {
+  const pptx = new pptxgen();
+  
+  // Configure Slide Layout (16:9 is default, approx 10 x 5.625 inches)
+  pptx.layout = "LAYOUT_16x9";
+  const SLIDE_WIDTH_IN = 10;
+  const SLIDE_HEIGHT_IN = 5.625;
 
-  if (!chunks || chunks.length === 0) {
-    // fallback: render everything onto one slide
-    addSlideWithTables(pptx.addSlide(), allTables);
-    await pptx.writeFile({ fileName: filename });
+  // Calculate global scale to fit one Chunk (2000x1200) into the slide
+  // We use the smaller scale factor to ensure it fits completely
+  const scaleX = SLIDE_WIDTH_IN / CHUNK_WIDTH;
+  const scaleY = SLIDE_HEIGHT_IN / CHUNK_HEIGHT;
+  const scale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
+
+  // Center content on slide
+  const contentW = CHUNK_WIDTH * scale;
+  const contentH = CHUNK_HEIGHT * scale;
+  const marginX = (SLIDE_WIDTH_IN - contentW) / 2;
+  const marginY = (SLIDE_HEIGHT_IN - contentH) / 2;
+
+  // Access the DOM SVG directly to read computed styles and transforms
+  // We target the svg inside the #playground-canvas container
+  const svg = document.querySelector("#playground-canvas svg") as SVGSVGElement;
+  if (!svg) {
+    console.error("SVG element not found in #playground-canvas");
+    alert("Could not find the seating plan SVG. Please ensure the plan is visible.");
     return;
   }
 
-  // for each chunk -> one slide
-  for (const c of chunks) {
-    const slide = pptx.addSlide();
-    slide.background = { color: "FFFFFF" };
-    slide.addText(`Chunk R${c.row}C${c.col}`, { x: 0.2, y: 0.15, fontSize: 12, bold: true });
+  // We get the chunks from the store because the requirement is "Each chunk should be a slide"
+  const store = useSeatStore.getState();
+  const allChunks = store.chunks;
+  const allTables = store.tables; // We use the store's full table list for data lookup
 
-    // tables whose center lies inside this chunk rectangle
-    const tablesInChunk = allTables.filter((t) => {
-      return (
-        t.x >= c.col * CHUNK_WIDTH &&
-        t.x < (c.col + 1) * CHUNK_WIDTH &&
-        t.y >= c.row * CHUNK_HEIGHT &&
-        t.y < (c.row + 1) * CHUNK_HEIGHT
-      );
+  // Identify which chunks actually have tables
+  const chunkIdsToExport = Object.values(allChunks)
+    .filter(c => c.tables && c.tables.length > 0)
+    .map(c => c.id);
+
+  if (chunkIdsToExport.length === 0) {
+    alert("No chunks with tables found to export.");
+    return;
+  }
+
+  // Map Table IDs to their DOM elements for style extraction
+  // The PlaygroundCanvas renders tables with class .table-group
+  const tableGroups = Array.from(svg.querySelectorAll(".table-group"));
+  const tableDomMap = new Map<string, Element>();
+  tableGroups.forEach((group) => {
+    // D3 stores data on the DOM element in __data__
+    const data = (group as any).__data__;
+    if (data && data.id) {
+      tableDomMap.set(data.id, group);
+    }
+  });
+
+  for (const cid of chunkIdsToExport) {
+    const chunk = Object.values(allChunks).find((c) => c.id === cid);
+    if (!chunk) continue;
+
+    const slide = pptx.addSlide();
+    
+    // Add a discreet label for the chunk
+    slide.addText(`Chunk R${chunk.row}C${chunk.col}`, {
+      x: 0.2,
+      y: 0.1,
+      w: 3,
+      h: 0.3,
+      fontSize: 10,
+      color: "808080",
     });
 
-    addSlideWithTables(slide, tablesInChunk, c);
+    // Chunk World Origin
+    const chunkX = chunk.col * CHUNK_WIDTH;
+    const chunkY = chunk.row * CHUNK_HEIGHT;
+
+    // Iterate tables assigned to this chunk
+    const tableIds = chunk.tables || [];
+
+    for (const tid of tableIds) {
+      const tableGroup = tableDomMap.get(tid);
+      const tableData = allTables.find((t) => t.id === tid);
+
+      if (!tableGroup || !tableData) continue;
+
+      // Table position relative to the Chunk
+      const groupTx = tableData.x;
+      const groupTy = tableData.y;
+
+      const relTx = groupTx - chunkX;
+      const relTy = groupTy - chunkY;
+
+      // Traverse all visual elements within the table group
+      const children = tableGroup.querySelectorAll("*");
+
+      children.forEach((child) => {
+        const tag = child.tagName.toLowerCase();
+        const style = window.getComputedStyle(child);
+        if (style.display === "none") return;
+
+        const fillHex = rgbToHex(style.fill);
+        const strokeHex = rgbToHex(style.stroke);
+        const strokeWidthPx = parseFloat(style.strokeWidth) || 0;
+        
+        // Convert styles for PPT
+        // We scale the stroke width by our global scale to keep it proportional
+        const strokePt = Math.max(0.5, strokeWidthPx * scale * 72); 
+
+        // Prepare Fill object
+        let pptFill: pptxgen.ShapeFillProps | undefined = undefined;
+        if (fillHex) {
+          pptFill = { color: fillHex };
+        } else {
+          pptFill = { type: "none" };
+        }
+        
+        // Prepare Line object
+        let pptLine: pptxgen.ShapeLineProps | undefined = undefined;
+        if (strokeHex && style.stroke !== "none") {
+            pptLine = { color: strokeHex, width: strokePt };
+        } else {
+            pptLine = { type: "none" };
+        }
+
+        // Skip non-visual or structural elements
+        if (["g", "defs", "clippath", "style", "script"].includes(tag)) return;
+
+        // Get Bounding Box
+        let bbox: DOMRect;
+        try {
+          bbox = (child as SVGGraphicsElement).getBBox();
+        } catch (e) {
+          return;
+        }
+
+        // Map Coordinates: Local -> Relative to Chunk -> Scaled to Slide
+        const finalX = (relTx + bbox.x) * scale + marginX;
+        const finalY = (relTy + bbox.y) * scale + marginY;
+        const finalW = bbox.width * scale;
+        const finalH = bbox.height * scale;
+
+        // --- SHAPE GENERATION ---
+
+        if (tag === "circle" || tag === "ellipse") {
+          slide.addShape(pptx.ShapeType.ellipse, {
+            x: finalX,
+            y: finalY,
+            w: finalW,
+            h: finalH,
+            fill: pptFill,
+            line: pptLine,
+          });
+        } 
+        
+        else if (tag === "rect") {
+          const rx = parseFloat(child.getAttribute("rx") || "0");
+          slide.addShape(rx > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
+            x: finalX,
+            y: finalY,
+            w: finalW,
+            h: finalH,
+            fill: pptFill,
+            line: pptLine,
+            rectRadius: rx > 0 ? 0.15 : 0, 
+          });
+        } 
+        
+        else if (tag === "line") {
+            // Line needs special handling for direction
+            const x1 = parseFloat(child.getAttribute("x1") || "0");
+            const y1 = parseFloat(child.getAttribute("y1") || "0");
+            const x2 = parseFloat(child.getAttribute("x2") || "0");
+            const y2 = parseFloat(child.getAttribute("y2") || "0");
+
+            let sx = (relTx + x1) * scale + marginX;
+            let sy = (relTy + y1) * scale + marginY;
+            let ex = (relTx + x2) * scale + marginX;
+            let ey = (relTy + y2) * scale + marginY;
+
+            // Normalize
+            if (sx > ex) {
+                [sx, ex] = [ex, sx];
+                [sy, ey] = [ey, sy];
+            }
+
+            const lx = sx;
+            const ly = Math.min(sy, ey); 
+            const lw = Math.abs(ex - sx);
+            const lh = Math.abs(ey - sy);
+            const flipV = sy > ey;
+
+            slide.addShape(pptx.ShapeType.line, {
+                x: lx,
+                y: ly,
+                w: lw,
+                h: lh,
+                line: pptLine,
+                flipV: flipV
+            });
+        } 
+        
+        else if (tag === "text") {
+          const textContent = child.textContent || "";
+          if (!textContent.trim()) return;
+
+          const fontSizePx = parseFloat(style.fontSize) || 12;
+          const pptFontSize = Math.max(1, fontSizePx * scale * 72);
+          
+          const anchor = child.getAttribute("text-anchor") || "start";
+          let align: pptxgen.HAlign = "left";
+          if (anchor === "middle") align = "center";
+          if (anchor === "end") align = "right";
+
+          // Use style.fill for text color
+          const textColor = fillHex || "000000";
+
+          // --- FIX FOR SQUISHED TEXT ---
+          // 1. Add a width buffer because PPT text rendering differs from SVG.
+          // 2. Adjust X position based on alignment so the text visually stays in place.
+          // 3. Remove default margins (margin: 0) which destroy layout on small text boxes.
+          // 4. Disable wrapping (wrap: false) to match SVG single-line behavior.
+
+          const widthBuffer = finalW * 0.35; // 35% wider to be safe
+          let adjX = finalX;
+          let adjW = finalW + widthBuffer;
+
+          // Shift x to preserve visual center/start point
+          if (align === "center") {
+            adjX = finalX - (widthBuffer / 2);
+          } else if (align === "right") {
+            adjX = finalX - widthBuffer;
+          }
+          // if left align, expanding width to the right is correct, no x adjustment needed.
+
+          slide.addText(textContent, {
+            x: adjX,
+            y: finalY,
+            w: adjW,
+            h: finalH,
+            fontSize: pptFontSize,
+            color: textColor,
+            align: align,
+            valign: "middle", 
+            fill: { type: "none" },
+            line: { type: "none" },
+            margin: 0,   // KEY FIX: No internal padding
+            wrap: false, // KEY FIX: No auto-wrapping
+          });
+        }
+      });
+    }
   }
 
-  // overview slide with all tables
-  const overview = pptx.addSlide();
-  overview.background = { color: "FFFFFF" };
-  overview.addText("Full Map Overview", { x: 0.2, y: 0.15, fontSize: 12, bold: true });
-  addSlideWithTables(overview, allTables);
-
-  await pptx.writeFile({ fileName: filename });
-
-  function addSlideWithTables(slide: any, list: Table[], chunk?: { row: number; col: number }) {
-    if (!list || list.length === 0) {
-      slide.addText("No tables in this chunk", { x: 1, y: 2, fontSize: 12, color: "888888" });
-      return;
-    }
-
-    // Determine bounds from list (or if chunk given, use chunk area)
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-
-    if (chunk) {
-      minX = chunk.col * CHUNK_WIDTH;
-      minY = chunk.row * CHUNK_HEIGHT;
-      maxX = minX + CHUNK_WIDTH;
-      maxY = minY + CHUNK_HEIGHT;
-    } else {
-      list.forEach((t) => {
-        minX = Math.min(minX, t.x - t.radius);
-        minY = Math.min(minY, t.y - t.radius);
-        maxX = Math.max(maxX, t.x + t.radius);
-        maxY = Math.max(maxY, t.y + t.radius);
-      });
-      if (!isFinite(minX)) {
-        minX = 0; minY = 0; maxX = 1000; maxY = 800;
-      }
-    }
-
-    const contentW = Math.max(1, maxX - minX);
-    const contentH = Math.max(1, maxY - minY);
-    const scale = Math.min((SLIDE_W_PX - 80) / contentW, (SLIDE_H_PX - 80) / contentH, 1);
-    const offsetX = (SLIDE_W_PX - contentW * scale) / 2 - minX * scale;
-    const offsetY = (SLIDE_H_PX - contentH * scale) / 2 - minY * scale;
-
-    for (const t of list) {
-      const cx = t.x * scale + offsetX;
-      const cy = t.y * scale + offsetY;
-      const diameter = t.radius * 2 * scale;
-
-      const shapeType = t.shape === "round" ? "ellipse" : "rect";
-      slide.addShape(shapeType, {
-        x: pxToIn(cx - t.radius * scale),
-        y: pxToIn(cy - t.radius * scale),
-        w: pxToIn(diameter),
-        h: pxToIn(diameter),
-        fill: { color: "1976D2" },
-        line: { color: "0D47A1", width: 1 },
-      });
-
-      slide.addText(t.label || "", {
-        x: pxToIn(cx - t.radius * scale),
-        y: pxToIn(cy - 0.15 * DPI * scale),
-        w: pxToIn(diameter),
-        h: 0.3,
-        fontSize: 12,
-        color: "FFFFFF",
-        align: "center",
-      });
-
-      for (const s of t.seats) {
-        const sx = s.x * scale + offsetX;
-        const sy = s.y * scale + offsetY;
-        const sr = s.radius * scale;
-        const seatColor = s.locked ? "B0BEC5" : "90CAF9";
-
-        slide.addShape("ellipse", {
-          x: pxToIn(sx - sr),
-          y: pxToIn(sy - sr),
-          w: pxToIn(sr * 2),
-          h: pxToIn(sr * 2),
-          fill: { color: seatColor },
-          line: { color: "1565C0", width: 0.5 },
-        });
-
-        slide.addText(String(s.label || s.seatNumber || ""), {
-          x: pxToIn(sx - sr),
-          y: pxToIn(sy - sr),
-          w: pxToIn(sr * 2),
-          h: pxToIn(sr * 2),
-          fontSize: 8,
-          color: "0D47A1",
-          align: "center",
-          valign: "middle",
-        });
-      }
-    }
-  }
-}
+  await pptx.writeFile({ fileName: "SeatPlanner.pptx" });
+};
