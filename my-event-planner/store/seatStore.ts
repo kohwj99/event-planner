@@ -10,13 +10,19 @@ import {
   moveTableBetweenChunks,
   ensureChunkExists as ensureChunkExistsHelper,
 } from "@/utils/chunkHelper";
+import { detectProximityViolations, ProximityViolation, ProximityRules } from "@/utils/violationDetector";
 
-/* -------------------- 🧠 Store Interface -------------------- */
+/* -------------------- ðŸ§  Store Interface -------------------- */
 interface SeatStoreState {
   tables: Table[];
   chunks: Record<string, Chunk>;
   selectedTableId: string | null;
   selectedSeatId: string | null;
+  
+  // Violation detection state
+  proximityRules: ProximityRules | null;
+  violations: ProximityViolation[];
+  guestLookup: Record<string, any>;
 
   // Table & Seat operations
   addTable: (table: Table) => void;
@@ -25,13 +31,20 @@ interface SeatStoreState {
   updateTableState: (tables: Table[]) => void;
   setSelectedTable: (id: string | null) => void;
   selectSeat: (tableId: string, seatId: string | null) => void;
-  assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => void; // 🆕
+  assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => void;
   lockSeat: (tableId: string, seatId: string, locked: boolean) => void;
   clearSeat: (tableId: string, seatId: string) => void;
   updateSeatOrder: (tableId: string, newOrder: number[]) => void;
   resetTables: () => void;
   swapSeats: (table1Id: string, seat1Id: string, table2Id: string, seat2Id: string) => boolean;
   findGuestSeat: (guestId: string) => { tableId: string; seatId: string } | null;
+  
+  // Violation detection operations
+  setProximityRules: (rules: ProximityRules | null) => void;
+  setGuestLookup: (lookup: Record<string, any>) => void;
+  detectViolations: () => void;
+  clearViolations: () => void;
+  
   // Chunk management
   ensureChunkExists: (row: number, col: number) => void;
   assignTableToChunk: (tableId: string, row: number, col: number) => void;
@@ -47,7 +60,7 @@ interface SeatStoreState {
   } | null;
 }
 
-/* -------------------- 🧩 Zustand Store -------------------- */
+/* -------------------- ðŸ§© Zustand Store -------------------- */
 export const useSeatStore = create<SeatStoreState>()(
   devtools(
     persist(
@@ -63,6 +76,11 @@ export const useSeatStore = create<SeatStoreState>()(
         },
         selectedTableId: null,
         selectedSeatId: null,
+        
+        // Violation detection state
+        proximityRules: null,
+        violations: [],
+        guestLookup: {},
 
         /* ---------- TABLE MANAGEMENT ---------- */
         addTable: (table) => {
@@ -117,8 +135,8 @@ export const useSeatStore = create<SeatStoreState>()(
             })),
           })),
 
-        /* ---------- 🧍 Guest Seat Assignment ---------- */
-        assignGuestToSeat: (tableId, seatId, guestId) =>
+        /* ---------- ðŸ§ Guest Seat Assignment ---------- */
+        assignGuestToSeat: (tableId, seatId, guestId) => {
           set((state) => ({
             tables: state.tables.map((t) =>
               t.id !== tableId
@@ -132,7 +150,10 @@ export const useSeatStore = create<SeatStoreState>()(
                   ),
                 }
             ),
-          })),
+          }));
+          // Trigger violation detection after seat assignment
+          get().detectViolations();
+        },
 
         lockSeat: (tableId, seatId, locked) =>
           set((state) => ({
@@ -148,7 +169,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        clearSeat: (tableId, seatId) =>
+        clearSeat: (tableId, seatId) => {
           set((state) => ({
             tables: state.tables.map((t) =>
               t.id !== tableId
@@ -162,7 +183,10 @@ export const useSeatStore = create<SeatStoreState>()(
                   ),
                 }
             ),
-          })),
+          }));
+          // Trigger violation detection after clearing seat
+          get().detectViolations();
+        },
 
         updateSeatOrder: (tableId, newOrder) =>
           set((state) => ({
@@ -192,6 +216,9 @@ export const useSeatStore = create<SeatStoreState>()(
             },
             selectedTableId: null,
             selectedSeatId: null,
+            violations: [],
+            proximityRules: null,
+            guestLookup: {},
           }),
 
         findGuestSeat: (guestId) => {
@@ -305,12 +332,52 @@ export const useSeatStore = create<SeatStoreState>()(
               seat1Now: verifySeat1?.assignedGuestId,
               seat2Now: verifySeat2?.assignedGuestId,
             });
+            // Trigger violation detection after successful swap
+            get().detectViolations();
           } else {
             console.error('Swap verification failed!');
           }
 
           return swapSuccessful;
         },
+
+        /* ---------- VIOLATION DETECTION ---------- */
+        setProximityRules: (rules) => set({ proximityRules: rules }),
+        
+        setGuestLookup: (lookup) => set({ guestLookup: lookup }),
+        
+        detectViolations: () => {
+          const state = get();
+          const { tables, proximityRules, guestLookup } = state;
+          
+          // Skip if no proximity rules are set
+          if (!proximityRules || (proximityRules.sitTogether.length === 0 && proximityRules.sitAway.length === 0)) {
+            // Clear violations if no rules
+            if (state.violations.length > 0) {
+              set({ violations: [] });
+            }
+            return;
+          }
+          
+          // Skip if no guest lookup is available
+          if (Object.keys(guestLookup).length === 0) {
+            return;
+          }
+          
+          // Detect violations using the centralized function
+          const newViolations = detectProximityViolations(tables, proximityRules, guestLookup);
+          
+          // Only update state if violations changed (optimization)
+          const currentViolationIds = state.violations.map(v => `${v.type}-${v.guest1Id}-${v.guest2Id}`).sort().join(',');
+          const newViolationIds = newViolations.map(v => `${v.type}-${v.guest1Id}-${v.guest2Id}`).sort().join(',');
+          
+          if (currentViolationIds !== newViolationIds) {
+            set({ violations: newViolations });
+            console.log(`Violations updated: ${newViolations.length} found`);
+          }
+        },
+        
+        clearViolations: () => set({ violations: [], proximityRules: null }),
 
         /* ---------- CHUNK MANAGEMENT ---------- */
         ensureChunkExists: (row, col) =>
@@ -436,7 +503,18 @@ export const useSeatStore = create<SeatStoreState>()(
           );
         },
       }),
-      { name: "seat-tables" }
+      { 
+        name: "seat-tables",
+        // Exclude violations and guestLookup from persistence (computed state)
+        partialize: (state) => ({
+          tables: state.tables,
+          chunks: state.chunks,
+          selectedTableId: state.selectedTableId,
+          selectedSeatId: state.selectedSeatId,
+          proximityRules: state.proximityRules, // Keep rules for re-detection on load
+          // Exclude: violations, guestLookup (will be recomputed)
+        }),
+      }
     )
   )
 );

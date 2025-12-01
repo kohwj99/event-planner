@@ -39,8 +39,7 @@ import {
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
-import { detectProximityViolations } from '@/utils/violationDetector';
-import { getProximityViolations } from '@/utils/seatAutoFillHelper';
+// Note: violations are now read directly from seatStore
 
 interface SeatingStats {
   totalSeats: number;
@@ -80,6 +79,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
   const [detailView, setDetailView] = useState<DetailView>('overview');
 
   const tables = useSeatStore((s) => s.tables);
+  const violations = useSeatStore((s) => s.violations); // Read violations from store
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
   
@@ -179,13 +179,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
     const totalVIPsUnseated = hostVIPsUnseated.length + externalVIPsUnseated.length;
     const totalUnseated = hostUnseatedGuests.length + externalUnseatedGuests.length;
 
-    // Get proximity violations from last autofill run
-    let proximityViolations = getProximityViolations();
-    
-    if (proximityViolations.length === 0) {
-      proximityViolations = [];
-    }
-
+    // Violations are now read directly from seatStore (reactive)
     return {
       totalSeats,
       seatedCount: seatedGuestIds.size,
@@ -205,9 +199,9 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
       hasUnseatedVIPs: totalVIPsUnseated > 0,
       hasUnseatedGuests: totalUnseated > 0,
 
-      proximityViolations,
+      proximityViolations: violations, // Use violations from store
     };
-  }, [tables, hostGuests, externalGuests]);
+  }, [tables, hostGuests, externalGuests, violations]); // Added violations to dependencies
 
   // Determine status color
   const getStatusColor = (): 'error' | 'warning' | 'success' => {
@@ -406,9 +400,9 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                   >
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
                       <Typography variant="body2" fontWeight="bold">
-                        ⚠️ {stats.totalVIPsUnseated} VIPs Unseated
+                       {stats.totalVIPsUnseated} VIP/s Unseated
                       </Typography>
-                      <Typography variant="caption">View →</Typography>
+                      <Typography variant="caption">View’</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -426,9 +420,9 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                   >
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
                       <Typography variant="body2" fontWeight="bold">
-                        🚨 {stats.proximityViolations.length} Proximity Rule Violations
+                        {stats.proximityViolations.length} Proximity Rule Violations
                       </Typography>
-                      <Typography variant="caption">View →</Typography>
+                      <Typography variant="caption">View’</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -452,7 +446,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                           Boss Adjacency Tracked
                         </Typography>
                       </Stack>
-                      <Typography variant="caption">View →</Typography>
+                      <Typography variant="caption">View â†’</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -565,7 +559,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                               }
                               secondary={
                                 <Typography variant="caption" color="text.secondary">
-                                  {guest.title} • {guest.company} • {guest.country}
+                                  {guest.title} - {guest.company} - {guest.country}
                                 </Typography>
                               }
                             />
@@ -610,7 +604,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                               }
                               secondary={
                                 <Typography variant="caption" color="text.secondary">
-                                  {guest.title} • {guest.company} • {guest.country}
+                                  {guest.title} â€¢ {guest.company} â€¢ {guest.country}
                                 </Typography>
                               }
                             />
@@ -650,7 +644,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                     {stats.proximityViolations.filter((v: any) => v.type === 'sit-together').length > 0 && (
                       <Box>
                         <Typography variant="subtitle2" color="error" gutterBottom>
-                          🤝 Sit Together Violations
+                          Sit Together Violations
                         </Typography>
                         <List dense disablePadding>
                           {stats.proximityViolations
@@ -691,7 +685,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                     {stats.proximityViolations.filter((v: any) => v.type === 'sit-away').length > 0 && (
                       <Box>
                         <Typography variant="subtitle2" color="error" gutterBottom>
-                          🚫 Sit Away Violations
+                          Sit Away Violations
                         </Typography>
                         <List dense disablePadding>
                           {stats.proximityViolations

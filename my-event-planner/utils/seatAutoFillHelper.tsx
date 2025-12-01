@@ -1207,7 +1207,13 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     lockedGuestMap
   );
 
-  // Apply assignments to store
+  // Apply assignments to store (note: assignGuestToSeat now triggers detectViolations,
+  // but we temporarily disable it by setting rules after all assignments)
+  const seatStoreForAssign = useSeatStore.getState();
+  
+  // Temporarily clear rules to prevent redundant detection during bulk assignment
+  seatStoreForAssign.setProximityRules(null);
+  
   for (const [seatId, guestId] of seatToGuest.entries()) {
     for (const table of tablesAfterClear) {
       const seat = table.seats.find((s: any) => s.id === seatId);
@@ -1218,7 +1224,14 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     }
   }
 
-  // Get final tables and detect violations using centralized function
+  // Now set up the store for violation detection
+  seatStoreForAssign.setProximityRules(proximityRules);
+  seatStoreForAssign.setGuestLookup(guestLookup);
+  
+  // Trigger violation detection
+  seatStoreForAssign.detectViolations();
+  
+  // Get final tables and update legacy module-level variable for backwards compatibility
   const finalTables = useSeatStore.getState().tables;
   proximityViolations = detectProximityViolations(
     finalTables,
@@ -1226,5 +1239,5 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     guestLookup
   );
 
-  console.log(`Autofill completed. Violations: ${proximityViolations.length}`);
+  console.log(`Autofill completed. Violations: ${useSeatStore.getState().violations.length}`);
 }

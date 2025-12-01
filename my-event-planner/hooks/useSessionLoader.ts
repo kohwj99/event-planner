@@ -72,7 +72,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       });
     });
 
-    console.log(`💾 Saving session: ${sessionData.session.name}`);
+    console.log(`Saving session: ${sessionData.session.name}`);
     
     // Save seat plan to event store
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
@@ -85,7 +85,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
     
     if (tracked) {
-      console.log(`👁️ Recording adjacency data for tracked session`);
+      console.log(`Recording adjacency data for tracked session`);
       
       // Record adjacency data (this also updates planning order)
       recordSessionAdjacency(
@@ -97,7 +97,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       
       // Log the planning order for debugging
       const planningOrder = getSessionPlanningOrder(sessionData.eventId, currentSessionId);
-      console.log(`📊 Session planning order: ${planningOrder}`);
+      console.log(`Session planning order: ${planningOrder}`);
     }
   }, [
     getSessionById, 
@@ -109,7 +109,7 @@ export const useSessionLoader = (sessionId: string | null) => {
 
   // Load session data
   const loadSession = useCallback((newSessionId: string) => {
-    console.log(`📂 Loading session: ${newSessionId}`);
+    console.log(`Loading session: ${newSessionId}`);
 
     const sessionData = getSessionById(newSessionId);
     if (!sessionData) {
@@ -137,11 +137,27 @@ export const useSessionLoader = (sessionId: string | null) => {
     // Load guests
     resetGuests();
     const sessionGuests = getSessionGuests(newSessionId);
+    let allLoadedGuests: any[] = [];
     if (sessionGuests) {
-      [...sessionGuests.hostGuests, ...sessionGuests.externalGuests].forEach(guest => {
+      allLoadedGuests = [...sessionGuests.hostGuests, ...sessionGuests.externalGuests];
+      allLoadedGuests.forEach(guest => {
         addGuest(guest);
       });
     }
+
+    // Build guest lookup and trigger violation detection
+    const guestLookup: Record<string, any> = {};
+    allLoadedGuests.forEach(g => {
+      guestLookup[g.id] = g;
+    });
+    
+    // Update the seatStore with guest lookup for violation detection
+    const seatStoreState = useSeatStore.getState();
+    seatStoreState.setGuestLookup(guestLookup);
+    
+    // Trigger violation detection (will use existing proximityRules if any)
+    seatStoreState.detectViolations();
+    console.log('Session loaded, violation detection triggered');
 
     setActiveSession(newSessionId);
     lastSessionIdRef.current = newSessionId;
@@ -152,7 +168,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   useEffect(() => {
     // CRITICAL: Don't do anything until mounted and stores are hydrated
     if (!isReady) {
-      console.log('⏳ Waiting for store hydration before loading session...');
+      console.log('â³ Waiting for store hydration before loading session...');
       return;
     }
 

@@ -7,6 +7,7 @@ import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 /**
  * Export each chunk as one A4 landscape page (no visual scaling of Playground).
  * Fixes: resets any zoom transform on the cloned svg before setting viewBox.
+ * Improvement: Increased html2canvas scale for higher resolution output.
  */
 export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") {
   const container = document.getElementById(elementId);
@@ -25,8 +26,11 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const A4_IN_W = 11.6929133858;
   const A4_IN_H = 8.2677165354;
 
-  // Choose export DPI (150 recommended for balanced quality/size; use 300 for print)
+  // Choose base export DPI (150 recommended for balanced quality/size; use 300 for print)
   const exportDPI = 150;
+  // Canvas scale factor for high-resolution rasterization (4x 150 DPI = 600 DPI)
+  const RASTER_SCALE = 4;
+  
   const pagePxW = Math.round(A4_IN_W * exportDPI);
   const pagePxH = Math.round(A4_IN_H * exportDPI);
 
@@ -35,16 +39,21 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const pdfH_pt = pdf.internal.pageSize.getHeight();
 
   // px -> points conversion for given DPI
+  // This calculates how many PDF points (1/72 of an inch) are in one rendered pixel (at exportDPI)
   const pxToPt = (px: number) => (px * 72) / exportDPI;
 
   const chunks = useSeatStore.getState().getAllChunksSorted();
   if (!chunks || chunks.length === 0) {
     // fallback: capture whole container
-    const canvas = await html2canvas(container, { backgroundColor: "#fff", scale: 1.5, useCORS: true });
+    const canvas = await html2canvas(container, { 
+      backgroundColor: "#fff", 
+      scale: RASTER_SCALE, // Use high scale for fallback too
+      useCORS: true 
+    });
     const img = canvas.toDataURL("image/png");
-    const ratio = Math.min(pdfW_pt / canvas.width, pdfH_pt / canvas.height);
-    const drawW = canvas.width * ratio;
-    const drawH = canvas.height * ratio;
+    const ratio = Math.min(pdfW_pt / (canvas.width / RASTER_SCALE), pdfH_pt / (canvas.height / RASTER_SCALE));
+    const drawW = (canvas.width / RASTER_SCALE) * ratio; // Divide canvas size by scale factor before scaling to page
+    const drawH = (canvas.height / RASTER_SCALE) * ratio;
     const x = (pdfW_pt - drawW) / 2;
     const y = (pdfH_pt - drawH) / 2;
     pdf.addImage(img, "PNG", x, y, drawW, drawH);
@@ -69,6 +78,9 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     clone.setAttribute("preserveAspectRatio", "none");
 
     // size the clone to page pixel dimensions
+    // NOTE: HTML elements are sized based on CSS pixels (approx 96 DPI).
+    // We size it to the target DPI in CSS pixels (pagePxW/H) and use RASTER_SCALE
+    // in html2canvas to achieve the final high resolution.
     clone.setAttribute("width", `${pagePxW}px`);
     clone.setAttribute("height", `${pagePxH}px`);
     clone.style.width = `${pagePxW}px`;
@@ -86,10 +98,10 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
 
-    // rasterize (scale 1 because we've sized clone to the exact px dimensions we want)
+    // rasterize at a high scale (e.g., scale: 4 for 4x resolution)
     const canvas = await html2canvas(wrapper, {
       backgroundColor: "#ffffff",
-      scale: 1,
+      scale: RASTER_SCALE, // KEY FIX: High resolution rendering
       useCORS: true,
       logging: false,
       allowTaint: true,
@@ -105,8 +117,10 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     const canvas = await captureChunkCanvas(c.row, c.col);
     const imgData = canvas.toDataURL("image/png");
 
-    const drawW_pt = pxToPt(canvas.width);
-    const drawH_pt = pxToPt(canvas.height);
+    // The canvas is RASTER_SCALE times the intended size (pagePxW x pagePxH)
+    // We use the original pagePxW/H for drawing, which aligns with pxToPt.
+    const drawW_pt = pxToPt(pagePxW);
+    const drawH_pt = pxToPt(pagePxH);
     const offX_pt = (pdfW_pt - drawW_pt) / 2;
     const offY_pt = (pdfH_pt - drawH_pt) / 2;
 
@@ -155,19 +169,19 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
 
   const overviewCanvas = await html2canvas(wrapperOv, {
     backgroundColor: "#ffffff",
-    scale: 1,
+    scale: RASTER_SCALE, // KEY FIX: High resolution rendering
     useCORS: true,
     logging: false,
     allowTaint: true,
   });
   document.body.removeChild(wrapperOv);
 
-  const overviewData = overviewCanvas.toDataURL("image/png");
-  const ovW_pt = pxToPt(overviewCanvas.width);
-  const ovH_pt = pxToPt(overviewCanvas.height);
+  const ovW_pt = pxToPt(overviewPxW);
+  const ovH_pt = pxToPt(overviewPxH);
   const ovOffsetX = (pdfW_pt - ovW_pt) / 2;
   const ovOffsetY = (pdfH_pt - ovH_pt) / 2;
 
+  const overviewData = overviewCanvas.toDataURL("image/png");
   pdf.addPage("a4", "landscape");
   pdf.addImage(overviewData, "PNG", ovOffsetX, ovOffsetY, ovW_pt, ovH_pt);
   pdf.setFontSize(12);
