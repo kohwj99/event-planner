@@ -1,4 +1,4 @@
-// components/molecules/AddTableModal.tsx - ENHANCED IMPLEMENTATION
+// components/molecules/AddTableModal.tsx - ENHANCED WITH SEAT MODE TAB
 import { useState, useMemo, useEffect } from 'react';
 import {
   Dialog,
@@ -23,8 +23,12 @@ import {
   ToggleButton,
   Switch,
   FormControlLabel,
+  Menu,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
-import { Refresh, RadioButtonUnchecked } from '@mui/icons-material';
+import { Refresh, Person, Public, RadioButtonUnchecked } from '@mui/icons-material';
+import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 
 export interface TableConfig {
   type: 'round' | 'rectangle';
@@ -38,6 +42,7 @@ export interface TableConfig {
   quantity: number;
   label: string;
   seatOrdering?: number[];
+  seatModes?: SeatMode[]; // NEW: Seat modes array
 }
 
 interface AddTableModalProps {
@@ -47,6 +52,7 @@ interface AddTableModalProps {
 }
 
 type Direction = 'clockwise' | 'counter-clockwise';
+type TabValue = 'config' | 'ordering' | 'modes';
 
 /**
  * Generate seat ordering based on direction, alternating mode, and start position
@@ -58,29 +64,25 @@ const generateOrdering = (
   startPosition: number
 ): number[] => {
   const result: number[] = new Array(count);
-  
+
   if (!useAlternating) {
-    // Simple directional ordering
     if (direction === 'clockwise') {
       for (let i = 0; i < count; i++) {
         const position = (startPosition + i) % count;
         result[position] = i + 1;
       }
     } else {
-      // counter-clockwise
       for (let i = 0; i < count; i++) {
         const position = (startPosition - i + count) % count;
         result[position] = i + 1;
       }
     }
   } else {
-    // Alternating pattern in specified direction
-    result[startPosition] = 1; // Seat 1 at start position
-    
-    // Calculate how many odds and evens we have (excluding 1)
-    const odds: number[] = []; // Will be 3, 5, 7, 9, 11
-    const evens: number[] = []; // Will be 2, 4, 6, 8, 10, 12
-    
+    result[startPosition] = 1;
+
+    const odds: number[] = [];
+    const evens: number[] = [];
+
     for (let i = 2; i <= count; i++) {
       if (i % 2 === 0) {
         evens.push(i);
@@ -88,35 +90,28 @@ const generateOrdering = (
         odds.push(i);
       }
     }
-    
+
     if (direction === 'clockwise') {
-      // Evens go clockwise (forward)
       for (let i = 0; i < evens.length; i++) {
         const position = (startPosition + 1 + i) % count;
         result[position] = evens[i];
       }
-      
-      // Odds go counter-clockwise (backward)
       for (let i = 0; i < odds.length; i++) {
         const position = (startPosition - 1 - i + count) % count;
         result[position] = odds[i];
       }
     } else {
-      // Counter-clockwise direction
-      // Evens go counter-clockwise (backward)
       for (let i = 0; i < evens.length; i++) {
         const position = (startPosition - 1 - i + count) % count;
         result[position] = evens[i];
       }
-      
-      // Odds go clockwise (forward)
       for (let i = 0; i < odds.length; i++) {
         const position = (startPosition + 1 + i) % count;
         result[position] = odds[i];
       }
     }
   }
-  
+
   return result;
 };
 
@@ -135,8 +130,8 @@ function generatePatternPreview(
 }
 
 export default function AddTableModal({ open, onClose, onConfirm }: AddTableModalProps) {
-  const [activeTab, setActiveTab] = useState<'config' | 'ordering'>('config');
-  
+  const [activeTab, setActiveTab] = useState<TabValue>('config');
+
   const [tableConfig, setTableConfig] = useState<TableConfig>({
     type: 'round',
     roundSeats: 8,
@@ -160,15 +155,23 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
     }
   }, [tableConfig]);
 
-  // Ordering configuration - ENHANCED
-  const [direction, setDirection] = useState<Direction>('clockwise');
+  // Ordering configuration
+  const [direction, setDirection] = useState<Direction>('counter-clockwise');
   const [useAlternating, setUseAlternating] = useState<boolean>(false);
   const [startPosition, setStartPosition] = useState<number>(0);
+
+  // NEW: Seat modes state
+  const [seatModes, setSeatModes] = useState<SeatMode[]>([]);
 
   // Seat ordering (calculated based on direction, alternating, and start position)
   const seatOrdering = useMemo(() => {
     return generateOrdering(totalSeats, direction, useAlternating, startPosition);
   }, [totalSeats, direction, useAlternating, startPosition]);
+
+  // Initialize seat modes when seat count changes
+  useEffect(() => {
+    setSeatModes(Array.from({ length: totalSeats }, () => 'default' as SeatMode));
+  }, [totalSeats]);
 
   // Reset when seats count changes
   useEffect(() => {
@@ -182,20 +185,78 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
     setStartPosition(0);
   };
 
+  const handleResetModes = () => {
+    setSeatModes(Array.from({ length: totalSeats }, () => 'default' as SeatMode));
+  };
+
+  // Handle seat mode change
+  const handleSeatModeChange = (index: number, mode: SeatMode) => {
+    setSeatModes(prev => {
+      const newModes = [...prev];
+      newModes[index] = mode;
+      return newModes;
+    });
+  };
+
+  // Set all seats to a specific mode
+  const handleSetAllModes = (mode: SeatMode) => {
+    setSeatModes(Array.from({ length: totalSeats }, () => mode));
+  };
+
   // Handle confirm
   const handleConfirm = () => {
     onConfirm({
       ...tableConfig,
       seatOrdering,
+      seatModes,
     });
     onClose();
-    
+
     // Reset for next use
     setActiveTab('config');
     setDirection('clockwise');
     setUseAlternating(false);
     setStartPosition(0);
+    setSeatModes(Array.from({ length: totalSeats }, () => 'default' as SeatMode));
   };
+
+  // Menu state for seat mode selection
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedSeatIndex, setSelectedSeatIndex] = useState<number | null>(null);
+
+  const handleSeatClick = (event: React.MouseEvent<SVGGElement>, index: number) => {
+    if (activeTab === 'modes') {
+      setMenuAnchor(event.currentTarget as unknown as HTMLElement);
+      setSelectedSeatIndex(index);
+    } else if (activeTab === 'ordering') {
+      setStartPosition(index);
+    }
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchor(null);
+    setSelectedSeatIndex(null);
+  };
+
+  const handleMenuSelect = (mode: SeatMode) => {
+    if (selectedSeatIndex !== null) {
+      handleSeatModeChange(selectedSeatIndex, mode);
+    }
+    handleMenuClose();
+  };
+
+  // Count modes for summary
+  const modeCounts = useMemo(() => {
+    const counts: Record<SeatMode, number> = {
+      'default': 0,
+      'host-only': 0,
+      'external-only': 0,
+    };
+    seatModes.forEach(mode => {
+      counts[mode]++;
+    });
+    return counts;
+  }, [seatModes]);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -212,6 +273,16 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               Reset
             </Button>
           )}
+          {activeTab === 'modes' && (
+            <Button
+              size="small"
+              startIcon={<Refresh />}
+              onClick={handleResetModes}
+              variant="outlined"
+            >
+              Reset All
+            </Button>
+          )}
         </Stack>
       </DialogTitle>
 
@@ -222,6 +293,22 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
       >
         <Tab label="Table Configuration" value="config" />
         <Tab label="Seat Ordering" value="ordering" />
+        <Tab
+          label={
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <span>Seat Modes</span>
+              {(modeCounts['host-only'] > 0 || modeCounts['external-only'] > 0) && (
+                <Chip
+                  size="small"
+                  label={`${modeCounts['host-only']}H / ${modeCounts['external-only']}E`}
+                  color="primary"
+                  sx={{ height: 20, fontSize: 10 }}
+                />
+              )}
+            </Stack>
+          }
+          value="modes"
+        />
       </Tabs>
 
       <DialogContent sx={{ minHeight: 500 }}>
@@ -363,84 +450,48 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               <Typography variant="caption" color="text.secondary">
                 📌 Customize seat numbering in the "Seat Ordering" tab
               </Typography>
+              <br />
+              <Typography variant="caption" color="text.secondary">
+                🎯 Set guest type restrictions in the "Seat Modes" tab
+              </Typography>
             </Paper>
           </Stack>
-        ) : (
-          // Seat Ordering Tab - ENHANCED
+        ) : activeTab === 'ordering' ? (
+          // Seat Ordering Tab
           <Stack spacing={3} sx={{ height: '100%' }}>
             {/* Ordering Controls */}
             <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd' }}>
-              <Stack spacing={2.5}>
-                {/* Direction Selection */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom fontWeight={600}>
-                    Direction
-                  </Typography>
+              <Stack spacing={2}>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Typography variant="subtitle2">Direction:</Typography>
                   <ToggleButtonGroup
                     value={direction}
                     exclusive
-                    onChange={(_, value) => value && setDirection(value)}
-                    fullWidth
+                    onChange={(_, val) => val && setDirection(val)}
+                    size="small"
                   >
-                    <ToggleButton value="clockwise">
-                      Clockwise ↻
-                    </ToggleButton>
-                    <ToggleButton value="counter-clockwise">
-                      Counter-Clockwise ↺
-                    </ToggleButton>
+                    <ToggleButton value="clockwise">Clockwise ↻</ToggleButton>
+                    <ToggleButton value="counter-clockwise">Counter ↺</ToggleButton>
                   </ToggleButtonGroup>
-                </Box>
+                </Stack>
 
-                <Divider />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={useAlternating}
+                      onChange={(e) => setUseAlternating(e.target.checked)}
+                    />
+                  }
+                  label="Alternating Pattern (odds/evens)"
+                />
 
-                {/* Alternating Toggle */}
-                <Box>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={useAlternating}
-                        onChange={(e) => setUseAlternating(e.target.checked)}
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="subtitle2" fontWeight={600}>
-                          Use Alternating Pattern
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Seat #1 at start, then evens in {direction === 'clockwise' ? 'forward' : 'backward'} direction, odds in opposite
-                        </Typography>
-                      </Box>
-                    }
-                  />
-                </Box>
-
-                <Divider />
-
-                {/* Start Position */}
-                <Box>
-                  <Typography variant="subtitle2" gutterBottom fontWeight={600}>
-                    Seat #1 Position
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                    Click on any seat below to set it as Seat #1
-                  </Typography>
-                </Box>
-              </Stack>
-            </Paper>
-
-            {/* Pattern Preview Info */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#fff9c4' }}>
-              <Stack spacing={0.5}>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">
-                  📊 Current Pattern:
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
-                  {generatePatternPreview(totalSeats, direction, useAlternating)}
-                </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {useAlternating 
+                  📌 Click on a seat to set Seat #1 position
+                </Typography>
+
+                <Typography variant="body2">
+                  <strong>Pattern: </strong>
+                  {useAlternating
                     ? `Alternating ${direction} (Seat 1 → Evens ${direction === 'clockwise' ? '→' : '←'} / Odds ${direction === 'clockwise' ? '←' : '→'})`
                     : `Simple ${direction} (1, 2, 3, ...)`
                   }
@@ -463,8 +514,10 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               {tableConfig.type === 'round' ? (
                 <RoundTablePreview
                   seats={seatOrdering}
+                  seatModes={seatModes}
                   startPosition={startPosition}
-                  onSelectStart={setStartPosition}
+                  onSeatClick={handleSeatClick}
+                  activeTab={activeTab}
                 />
               ) : (
                 <RectangleTablePreview
@@ -473,8 +526,10 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
                   left={tableConfig.rectangleSeats?.left || 0}
                   right={tableConfig.rectangleSeats?.right || 0}
                   seats={seatOrdering}
+                  seatModes={seatModes}
                   startPosition={startPosition}
-                  onSelectStart={setStartPosition}
+                  onSeatClick={handleSeatClick}
+                  activeTab={activeTab}
                 />
               )}
             </Box>
@@ -486,6 +541,124 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
               </Typography>
             </Paper>
           </Stack>
+        ) : (
+          // Seat Modes Tab - NEW
+          <Stack spacing={3} sx={{ height: '100%' }}>
+            {/* Mode Controls */}
+            <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
+              <Stack spacing={2}>
+                <Typography variant="subtitle2">Quick Actions:</Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="success"
+                    onClick={() => handleSetAllModes('default')}
+                    startIcon={<RadioButtonUnchecked />}
+                  >
+                    All Default
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="primary"
+                    onClick={() => handleSetAllModes('host-only')}
+                    startIcon={<Person />}
+                  >
+                    All Host Only
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="error"
+                    onClick={() => handleSetAllModes('external-only')}
+                    startIcon={<Public />}
+                  >
+                    All External Only
+                  </Button>
+                </Stack>
+
+                <Divider />
+
+                <Typography variant="caption" color="text.secondary">
+                  🎯 Click on a seat to set its mode. Modes restrict which guest types can be assigned.
+                </Typography>
+
+                <Stack direction="row" spacing={2}>
+                  <Chip
+                    size="small"
+                    label={`Default: ${modeCounts['default']}`}
+                    sx={{ bgcolor: SEAT_MODE_CONFIGS['default'].color }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`Host Only: ${modeCounts['host-only']}`}
+                    sx={{ bgcolor: SEAT_MODE_CONFIGS['host-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}` }}
+                  />
+                  <Chip
+                    size="small"
+                    label={`External Only: ${modeCounts['external-only']}`}
+                    sx={{ bgcolor: SEAT_MODE_CONFIGS['external-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['external-only'].strokeColor}` }}
+                  />
+                </Stack>
+              </Stack>
+            </Paper>
+
+            {/* Visual Preview */}
+            <Box
+              sx={{
+                flexGrow: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: '#fafafa',
+                minHeight: 300,
+                p: 2,
+              }}
+            >
+              {tableConfig.type === 'round' ? (
+                <RoundTablePreview
+                  seats={seatOrdering}
+                  seatModes={seatModes}
+                  startPosition={startPosition}
+                  onSeatClick={handleSeatClick}
+                  activeTab={activeTab}
+                />
+              ) : (
+                <RectangleTablePreview
+                  top={tableConfig.rectangleSeats?.top || 0}
+                  bottom={tableConfig.rectangleSeats?.bottom || 0}
+                  left={tableConfig.rectangleSeats?.left || 0}
+                  right={tableConfig.rectangleSeats?.right || 0}
+                  seats={seatOrdering}
+                  seatModes={seatModes}
+                  startPosition={startPosition}
+                  onSeatClick={handleSeatClick}
+                  activeTab={activeTab}
+                />
+              )}
+            </Box>
+
+            {/* Legend */}
+            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
+              <Stack direction="row" spacing={3}>
+                {Object.values(SEAT_MODE_CONFIGS).map((config) => (
+                  <Stack key={config.mode} direction="row" alignItems="center" spacing={1}>
+                    <Box
+                      sx={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: '50%',
+                        bgcolor: config.color,
+                        border: `2px ${config.mode === 'external-only' ? 'dashed' : 'solid'} ${config.strokeColor}`,
+                      }}
+                    />
+                    <Typography variant="caption">{config.label}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+          </Stack>
         )}
       </DialogContent>
 
@@ -495,6 +668,32 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
           Add Table(s)
         </Button>
       </DialogActions>
+
+      {/* Seat Mode Selection Menu */}
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={handleMenuClose}
+      >
+        <MenuItem onClick={() => handleMenuSelect('default')}>
+          <ListItemIcon>
+            <RadioButtonUnchecked fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Default (Any Guest)</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleMenuSelect('host-only')}>
+          <ListItemIcon>
+            <Person fontSize="small" color="primary" />
+          </ListItemIcon>
+          <ListItemText>Host Only</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleMenuSelect('external-only')}>
+          <ListItemIcon>
+            <Public fontSize="small" color="success" />
+          </ListItemIcon>
+          <ListItemText>External Only</ListItemText>
+        </MenuItem>
+      </Menu>
     </Dialog>
   );
 }
@@ -502,11 +701,13 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
 // --- Round Table Preview ---
 interface RoundTablePreviewProps {
   seats: number[];
+  seatModes: SeatMode[];
   startPosition: number;
-  onSelectStart: (position: number) => void;
+  onSeatClick: (event: React.MouseEvent<SVGGElement>, index: number) => void;
+  activeTab: TabValue;
 }
 
-function RoundTablePreview({ seats, startPosition, onSelectStart }: RoundTablePreviewProps) {
+function RoundTablePreview({ seats, seatModes, startPosition, onSeatClick, activeTab }: RoundTablePreviewProps) {
   const size = Math.min(500, typeof window !== 'undefined' ? window.innerWidth * 0.6 : 500);
   const radius = size * 0.3;
   const seatRadius = size * 0.06;
@@ -531,11 +732,17 @@ function RoundTablePreview({ seats, startPosition, onSelectStart }: RoundTablePr
           const x = center + Math.cos(angle) * (radius + seatRadius * 2.5);
           const y = center + Math.sin(angle) * (radius + seatRadius * 2.5);
           const isSeatOne = seatNumber === 1;
+          const mode = seatModes[index] || 'default';
+          const modeConfig = SEAT_MODE_CONFIGS[mode];
 
           return (
-            <g key={index} onClick={() => onSelectStart(index)} style={{ cursor: 'pointer' }}>
-              {/* Highlight ring for seat #1 */}
-              {isSeatOne && (
+            <g
+              key={index}
+              onClick={(e) => onSeatClick(e as any, index)}
+              style={{ cursor: 'pointer' }}
+            >
+              {/* Highlight ring for seat #1 (only in ordering tab) */}
+              {isSeatOne && activeTab === 'ordering' && (
                 <circle
                   cx={x}
                   cy={y}
@@ -545,45 +752,76 @@ function RoundTablePreview({ seats, startPosition, onSelectStart }: RoundTablePr
                   strokeWidth="3"
                 />
               )}
-              
+
+              {/* Seat circle */}
               <circle
                 cx={x}
                 cy={y}
                 r={seatRadius}
-                fill={isSeatOne ? '#4caf50' : '#90caf9'}
-                stroke={isSeatOne ? '#2e7d32' : '#1565c0'}
-                strokeWidth="2"
+                fill={activeTab === 'modes' ? modeConfig.color : (isSeatOne ? '#4caf50' : '#90caf9')}
+                stroke={activeTab === 'modes' ? modeConfig.strokeColor : (isSeatOne ? '#2e7d32' : '#1565c0')}
+                strokeWidth={activeTab === 'modes' && mode !== 'default' ? 3 : 2}
+                strokeDasharray={mode === 'external-only' ? '6,3' : 'none'}
               />
+
+              {/* Seat number */}
               <text
                 x={x}
                 y={y + 5}
                 textAnchor="middle"
                 fontSize={seatRadius * 0.7}
                 fontWeight="bold"
-                fill={isSeatOne ? 'white' : '#0d47a1'}
+                fill={activeTab === 'modes' ? '#333' : (isSeatOne ? 'white' : '#0d47a1')}
               >
                 {seatNumber}
               </text>
-              {/* Position indicator */}
-              <text
-                x={x}
-                y={y + seatRadius * 2}
-                textAnchor="middle"
-                fontSize={seatRadius * 0.45}
-                fill="#666"
-              >
-                P{index + 1}
-              </text>
+
+              {/* Mode indicator badge (modes tab only) */}
+              {activeTab === 'modes' && mode !== 'default' && (
+                <>
+                  <circle
+                    cx={x + seatRadius - 5}
+                    cy={y - seatRadius + 5}
+                    r={8}
+                    fill={modeConfig.strokeColor}
+                  />
+                  <text
+                    x={x + seatRadius - 5}
+                    y={y - seatRadius + 8}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fontWeight="bold"
+                    fill="white"
+                  >
+                    {modeConfig.shortLabel}
+                  </text>
+                </>
+              )}
+
+              {/* Position indicator (ordering tab only) */}
+              {activeTab === 'ordering' && (
+                <text
+                  x={x}
+                  y={y + seatRadius * 2}
+                  textAnchor="middle"
+                  fontSize={seatRadius * 0.45}
+                  fill="#666"
+                >
+                  P{index + 1}
+                </text>
+              )}
             </g>
           );
         })}
       </svg>
-      <Chip
-        label={`Seat #1 at Position ${startPosition + 1}`}
-        color="success"
-        size="small"
-        sx={{ position: 'absolute', top: 8, left: 8 }}
-      />
+      {activeTab === 'ordering' && (
+        <Chip
+          label={`Seat #1 at Position ${startPosition + 1}`}
+          color="success"
+          size="small"
+          sx={{ position: 'absolute', top: 8, left: 8 }}
+        />
+      )}
     </Box>
   );
 }
@@ -595,8 +833,10 @@ interface RectangleTablePreviewProps {
   left: number;
   right: number;
   seats: number[];
+  seatModes: SeatMode[];
   startPosition: number;
-  onSelectStart: (position: number) => void;
+  onSeatClick: (event: React.MouseEvent<SVGGElement>, index: number) => void;
+  activeTab: TabValue;
 }
 
 function RectangleTablePreview({
@@ -605,12 +845,14 @@ function RectangleTablePreview({
   left,
   right,
   seats,
+  seatModes,
   startPosition,
-  onSelectStart,
+  onSeatClick,
+  activeTab,
 }: RectangleTablePreviewProps) {
   const containerWidth = Math.min(600, typeof window !== 'undefined' ? window.innerWidth * 0.7 : 600);
   const containerHeight = Math.min(400, typeof window !== 'undefined' ? window.innerHeight * 0.5 : 400);
-  
+
   const tableWidth = containerWidth * 0.5;
   const tableHeight = containerHeight * 0.5;
   const centerX = containerWidth / 2;
@@ -677,10 +919,17 @@ function RectangleTablePreview({
           const pos = seatPositions[index];
           if (!pos) return null;
           const isSeatOne = seatNumber === 1;
+          const mode = seatModes[index] || 'default';
+          const modeConfig = SEAT_MODE_CONFIGS[mode];
 
           return (
-            <g key={index} onClick={() => onSelectStart(index)} style={{ cursor: 'pointer' }}>
-              {isSeatOne && (
+            <g
+              key={index}
+              onClick={(e) => onSeatClick(e as any, index)}
+              style={{ cursor: 'pointer' }}
+            >
+              {/* Highlight ring for seat #1 (ordering tab only) */}
+              {isSeatOne && activeTab === 'ordering' && (
                 <circle
                   cx={pos.x}
                   cy={pos.y}
@@ -690,44 +939,76 @@ function RectangleTablePreview({
                   strokeWidth="3"
                 />
               )}
-              
+
+              {/* Seat circle */}
               <circle
                 cx={pos.x}
                 cy={pos.y}
                 r={seatRadius}
-                fill={isSeatOne ? '#4caf50' : '#90caf9'}
-                stroke={isSeatOne ? '#2e7d32' : '#1565c0'}
-                strokeWidth="2"
+                fill={activeTab === 'modes' ? modeConfig.color : (isSeatOne ? '#4caf50' : '#90caf9')}
+                stroke={activeTab === 'modes' ? modeConfig.strokeColor : (isSeatOne ? '#2e7d32' : '#1565c0')}
+                strokeWidth={activeTab === 'modes' && mode !== 'default' ? 3 : 2}
+                strokeDasharray={mode === 'external-only' ? '6,3' : 'none'}
               />
+
+              {/* Seat number */}
               <text
                 x={pos.x}
                 y={pos.y + 5}
                 textAnchor="middle"
                 fontSize={seatRadius * 0.65}
                 fontWeight="bold"
-                fill={isSeatOne ? 'white' : '#0d47a1'}
+                fill={activeTab === 'modes' ? '#333' : (isSeatOne ? 'white' : '#0d47a1')}
               >
                 {seatNumber}
               </text>
-              <text
-                x={pos.x}
-                y={pos.y + seatRadius * 1.8}
-                textAnchor="middle"
-                fontSize={seatRadius * 0.4}
-                fill="#666"
-              >
-                P{index + 1}
-              </text>
+
+              {/* Mode indicator badge (modes tab only) */}
+              {activeTab === 'modes' && mode !== 'default' && (
+                <>
+                  <circle
+                    cx={pos.x + seatRadius - 5}
+                    cy={pos.y - seatRadius + 5}
+                    r={8}
+                    fill={modeConfig.strokeColor}
+                  />
+                  <text
+                    x={pos.x + seatRadius - 5}
+                    y={pos.y - seatRadius + 8}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fontWeight="bold"
+                    fill="white"
+                  >
+                    {modeConfig.shortLabel}
+                  </text>
+                </>
+              )}
+
+              {/* Position indicator (ordering tab only) */}
+              {activeTab === 'ordering' && (
+                <text
+                  x={pos.x}
+                  y={pos.y + seatRadius * 1.8}
+                  textAnchor="middle"
+                  fontSize={seatRadius * 0.4}
+                  fill="#666"
+                >
+                  P{index + 1}
+                </text>
+              )}
             </g>
           );
         })}
       </svg>
-      <Chip
-        label={`Seat #1 at Position ${startPosition + 1}`}
-        color="success"
-        size="small"
-        sx={{ position: 'absolute', top: 8, left: 8 }}
-      />
+      {activeTab === 'ordering' && (
+        <Chip
+          label={`Seat #1 at Position ${startPosition + 1}`}
+          color="success"
+          size="small"
+          sx={{ position: 'absolute', top: 8, left: 8 }}
+        />
+      )}
     </Box>
   );
 }

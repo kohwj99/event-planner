@@ -1,9 +1,9 @@
-// utils/generateTable.ts - UPDATED
+// utils/generateTable.ts - UPDATED WITH SEAT MODE SUPPORT
 import { Table } from "@/types/Table";
-import { Seat } from "@/types/Seat";
+import { Seat, SeatMode } from "@/types/Seat";
 
 /**
- * Create a round table with custom seat ordering and adjacency tracking
+ * Create a round table with custom seat ordering, adjacency tracking, and seat modes
  */
 export function createRoundTable(
   id: string,
@@ -12,7 +12,8 @@ export function createRoundTable(
   radius: number,
   seatCount: number,
   label: string,
-  seatOrdering?: number[] // NEW: Custom seat numbering
+  seatOrdering?: number[], // Custom seat numbering
+  seatModes?: SeatMode[] // NEW: Custom seat modes
 ): Table {
   const seats: Seat[] = [];
   const seatRadius = 12;
@@ -24,6 +25,9 @@ export function createRoundTable(
   
   // Use custom ordering or default (1, 2, 3, ...)
   const ordering = seatOrdering || Array.from({ length: seatCount }, (_, i) => i + 1);
+  
+  // Use custom modes or default ('default' for all)
+  const modes = seatModes || Array.from({ length: seatCount }, () => 'default' as SeatMode);
   
   for (let i = 0; i < seatCount; i++) {
     const angle = (i / seatCount) * 2 * Math.PI - Math.PI / 2; // start top, clockwise
@@ -43,13 +47,14 @@ export function createRoundTable(
       x,
       y,
       radius: seatRadius,
-      label: `${ordering[i]}`, // Use custom ordering
-      seatNumber: ordering[i], // Use custom ordering
+      label: `${ordering[i]}`,
+      seatNumber: ordering[i],
       assignedGuestId: null,
       locked: false,
       selected: false,
-      position: i, // Physical position (0-based)
-      adjacentSeats, // Adjacent seat IDs
+      position: i,
+      adjacentSeats,
+      mode: modes[i] || 'default', // NEW: Apply seat mode
     });
   }
 
@@ -65,7 +70,7 @@ export function createRoundTable(
 }
 
 /**
- * Create a rectangular table with custom seat ordering and adjacency tracking
+ * Create a rectangular table with custom seat ordering, adjacency tracking, and seat modes
  */
 export function createRectangleTable(
   id: string,
@@ -76,7 +81,8 @@ export function createRectangleTable(
   left: number,
   right: number,
   label: string,
-  seatOrdering?: number[] // NEW: Custom seat numbering
+  seatOrdering?: number[], // Custom seat numbering
+  seatModes?: SeatMode[] // NEW: Custom seat modes
 ): Table {
   const seats: Seat[] = [];
   const seatRadius = 12;
@@ -92,107 +98,100 @@ export function createRectangleTable(
   
   const verticalSeats = Math.max(left, right);
   const height = verticalSeats > 0 
-    ? Math.max(100, verticalSeats * minSeatSpacing + 2 * padding)
+    ? Math.max(100, verticalSeats * minSeatSpacing + 2 * padding) 
     : 100;
   
-  const totalSeats = top + right + bottom + left;
+  const totalSeats = top + bottom + left + right;
+  
+  // Use custom ordering or default
   const ordering = seatOrdering || Array.from({ length: totalSeats }, (_, i) => i + 1);
   
-  let seatCount = 0; // Overall seat counter
-  let positionIndex = 0; // Physical position index
-
-  // Helper to calculate positions
-  const calculateSeatPositions = (count: number, totalLength: number): number[] => {
-    if (count === 0) return [];
-    const spacing = totalLength / (count + 1);
-    return Array.from({ length: count }, (_, i) => spacing * (i + 1));
-  };
-
-  // Helper to add seats with adjacency
-  const addSeats = (
-    positions: { x: number; y: number }[],
-    startCount: number
-  ) => {
-    positions.forEach((pos, idx) => {
-      const currentPosition = positionIndex;
-      
-      // Calculate adjacent seats
-      const adjacentSeats: string[] = [];
-      
-      // Previous seat in sequence (if not first seat overall)
-      if (positionIndex > 0) {
-        adjacentSeats.push(`${id}-seat-${positionIndex}`);
-      }
-      
-      // Next seat in sequence (if not last seat overall)
-      if (positionIndex < totalSeats - 1) {
-        adjacentSeats.push(`${id}-seat-${positionIndex + 2}`);
-      }
-      
-      // For rectangular tables, first and last seats are adjacent (closing the loop)
-      if (positionIndex === 0) {
-        adjacentSeats.push(`${id}-seat-${totalSeats}`);
-      }
-      if (positionIndex === totalSeats - 1) {
-        adjacentSeats.push(`${id}-seat-1`);
-      }
-      
-      seats.push({
-        id: `${id}-seat-${seatCount + 1}`,
-        x: pos.x,
-        y: pos.y,
-        radius: seatRadius,
-        label: `${ordering[positionIndex]}`,
-        seatNumber: ordering[positionIndex],
-        assignedGuestId: null,
-        locked: false,
-        selected: false,
-        position: positionIndex,
-        adjacentSeats,
-      });
-      
-      seatCount++;
-      positionIndex++;
+  // Use custom modes or default
+  const modes = seatModes || Array.from({ length: totalSeats }, () => 'default' as SeatMode);
+  
+  const seatOffset = seatRadius * 2.5;
+  let seatIndex = 0;
+  
+  // Helper to push seats with position tracking
+  const pushSeat = (x: number, y: number) => {
+    if (seatIndex >= totalSeats) return;
+    
+    seats.push({
+      id: `${id}-seat-${seatIndex + 1}`,
+      x,
+      y,
+      radius: seatRadius,
+      label: `${ordering[seatIndex]}`,
+      seatNumber: ordering[seatIndex],
+      assignedGuestId: null,
+      locked: false,
+      selected: false,
+      position: seatIndex,
+      adjacentSeats: [], // Will be computed below
+      mode: modes[seatIndex] || 'default', // NEW: Apply seat mode
     });
+    seatIndex++;
   };
-
-  // Top edge (left to right)
-  const topPositions = calculateSeatPositions(top, width).map((offset) => ({
-    x: centerX - width / 2 + offset,
-    y: centerY - height / 2 - padding,
-  }));
-  addSeats(topPositions, seatCount);
-
-  // Right edge (top to bottom)
-  const rightPositions = calculateSeatPositions(right, height).map((offset) => ({
-    x: centerX + width / 2 + padding,
-    y: centerY - height / 2 + offset,
-  }));
-  addSeats(rightPositions, seatCount);
-
-  // Bottom edge (right to left)
-  const bottomPositions = calculateSeatPositions(bottom, width).map((offset) => ({
-    x: centerX + width / 2 - offset,
-    y: centerY + height / 2 + padding,
-  }));
-  addSeats(bottomPositions, seatCount);
-
-  // Left edge (bottom to top)
-  const leftPositions = calculateSeatPositions(left, height).map((offset) => ({
-    x: centerX - width / 2 - padding,
-    y: centerY + height / 2 - offset,
-  }));
-  addSeats(leftPositions, seatCount);
+  
+  // Top seats (left to right)
+  if (top > 0) {
+    const spacing = width / (top + 1);
+    for (let i = 0; i < top; i++) {
+      const x = centerX - width / 2 + spacing * (i + 1);
+      const y = centerY - height / 2 - seatOffset;
+      pushSeat(x, y);
+    }
+  }
+  
+  // Right seats (top to bottom)
+  if (right > 0) {
+    const spacing = height / (right + 1);
+    for (let i = 0; i < right; i++) {
+      const x = centerX + width / 2 + seatOffset;
+      const y = centerY - height / 2 + spacing * (i + 1);
+      pushSeat(x, y);
+    }
+  }
+  
+  // Bottom seats (right to left)
+  if (bottom > 0) {
+    const spacing = width / (bottom + 1);
+    for (let i = 0; i < bottom; i++) {
+      const x = centerX + width / 2 - spacing * (i + 1);
+      const y = centerY + height / 2 + seatOffset;
+      pushSeat(x, y);
+    }
+  }
+  
+  // Left seats (bottom to top)
+  if (left > 0) {
+    const spacing = height / (left + 1);
+    for (let i = 0; i < left; i++) {
+      const x = centerX - width / 2 - seatOffset;
+      const y = centerY + height / 2 - spacing * (i + 1);
+      pushSeat(x, y);
+    }
+  }
+  
+  // Compute adjacency for rectangle tables
+  for (let i = 0; i < seats.length; i++) {
+    const prevIndex = (i - 1 + seats.length) % seats.length;
+    const nextIndex = (i + 1) % seats.length;
+    seats[i].adjacentSeats = [
+      seats[prevIndex].id,
+      seats[nextIndex].id,
+    ];
+  }
 
   return {
     id,
     x: centerX,
     y: centerY,
-    radius: Math.sqrt((width / 2 + padding) ** 2 + (height / 2 + padding) ** 2),
+    radius: 0,
     label,
     shape: "rectangle",
-    seats,
     width,
     height,
+    seats,
   };
 }

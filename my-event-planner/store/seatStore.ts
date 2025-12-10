@@ -11,6 +11,7 @@ import {
   ensureChunkExists as ensureChunkExistsHelper,
 } from "@/utils/chunkHelper";
 import { detectProximityViolations, ProximityViolation, ProximityRules } from "@/utils/violationDetector";
+import { SeatMode } from "@/types/Seat";
 
 /* -------------------- ðŸ§  Store Interface -------------------- */
 interface SeatStoreState {
@@ -18,7 +19,7 @@ interface SeatStoreState {
   chunks: Record<string, Chunk>;
   selectedTableId: string | null;
   selectedSeatId: string | null;
-  
+
   // Violation detection state
   proximityRules: ProximityRules | null;
   violations: ProximityViolation[];
@@ -38,13 +39,13 @@ interface SeatStoreState {
   resetTables: () => void;
   swapSeats: (table1Id: string, seat1Id: string, table2Id: string, seat2Id: string) => boolean;
   findGuestSeat: (guestId: string) => { tableId: string; seatId: string } | null;
-  
+
   // Violation detection operations
   setProximityRules: (rules: ProximityRules | null) => void;
   setGuestLookup: (lookup: Record<string, any>) => void;
   detectViolations: () => void;
   clearViolations: () => void;
-  
+
   // Chunk management
   ensureChunkExists: (row: number, col: number) => void;
   assignTableToChunk: (tableId: string, row: number, col: number) => void;
@@ -58,6 +59,10 @@ interface SeatStoreState {
     minCol: number;
     maxCol: number;
   } | null;
+
+  // Seat mode operations
+  updateSeatMode: (tableId: string, seatId: string, mode: SeatMode) => void;
+  updateMultipleSeatModes: (tableId: string, seatModes: Record<string, SeatMode>) => void;
 }
 
 /* -------------------- ðŸ§© Zustand Store -------------------- */
@@ -76,7 +81,7 @@ export const useSeatStore = create<SeatStoreState>()(
         },
         selectedTableId: null,
         selectedSeatId: null,
-        
+
         // Violation detection state
         proximityRules: null,
         violations: [],
@@ -343,13 +348,13 @@ export const useSeatStore = create<SeatStoreState>()(
 
         /* ---------- VIOLATION DETECTION ---------- */
         setProximityRules: (rules) => set({ proximityRules: rules }),
-        
+
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
-        
+
         detectViolations: () => {
           const state = get();
           const { tables, proximityRules, guestLookup } = state;
-          
+
           // Skip if no proximity rules are set
           if (!proximityRules || (proximityRules.sitTogether.length === 0 && proximityRules.sitAway.length === 0)) {
             // Clear violations if no rules
@@ -358,25 +363,25 @@ export const useSeatStore = create<SeatStoreState>()(
             }
             return;
           }
-          
+
           // Skip if no guest lookup is available
           if (Object.keys(guestLookup).length === 0) {
             return;
           }
-          
+
           // Detect violations using the centralized function
           const newViolations = detectProximityViolations(tables, proximityRules, guestLookup);
-          
+
           // Only update state if violations changed (optimization)
           const currentViolationIds = state.violations.map(v => `${v.type}-${v.guest1Id}-${v.guest2Id}`).sort().join(',');
           const newViolationIds = newViolations.map(v => `${v.type}-${v.guest1Id}-${v.guest2Id}`).sort().join(',');
-          
+
           if (currentViolationIds !== newViolationIds) {
             set({ violations: newViolations });
             console.log(`Violations updated: ${newViolations.length} found`);
           }
         },
-        
+
         clearViolations: () => set({ violations: [], proximityRules: null }),
 
         /* ---------- CHUNK MANAGEMENT ---------- */
@@ -502,8 +507,38 @@ export const useSeatStore = create<SeatStoreState>()(
             a.row === b.row ? a.col - b.col : a.row - b.row
           );
         },
+
+        // ---------- SEAT MODE MANAGEMENT ----------
+        updateSeatMode: (tableId, seatId, mode) =>
+          set((state) => ({
+            tables: state.tables.map((t) =>
+              t.id !== tableId
+                ? t
+                : {
+                  ...t,
+                  seats: t.seats.map((s) =>
+                    s.id === seatId ? { ...s, mode } : s
+                  ),
+                }
+            ),
+          })),
+
+        updateMultipleSeatModes: (tableId, seatModes) =>
+          set((state) => ({
+            tables: state.tables.map((t) =>
+              t.id !== tableId
+                ? t
+                : {
+                  ...t,
+                  seats: t.seats.map((s) => ({
+                    ...s,
+                    mode: seatModes[s.id] ?? s.mode ?? 'default',
+                  })),
+                }
+            ),
+          })),
       }),
-      { 
+      {
         name: "seat-tables",
         // Exclude violations and guestLookup from persistence (computed state)
         partialize: (state) => ({

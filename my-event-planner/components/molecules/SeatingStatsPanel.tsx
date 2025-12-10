@@ -402,7 +402,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                       <Typography variant="body2" fontWeight="bold">
                        {stats.totalVIPsUnseated} VIP/s Unseated
                       </Typography>
-                      <Typography variant="caption">View’</Typography>
+                      <Typography variant="caption">View</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -422,7 +422,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                       <Typography variant="body2" fontWeight="bold">
                         {stats.proximityViolations.length} Proximity Rule Violations
                       </Typography>
-                      <Typography variant="caption">View’</Typography>
+                      <Typography variant="caption">View</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -446,7 +446,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                           Boss Adjacency Tracked
                         </Typography>
                       </Stack>
-                      <Typography variant="caption">View â†’</Typography>
+                      <Typography variant="caption">View</Typography>
                     </Stack>
                   </Box>
                 )}
@@ -604,7 +604,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                               }
                               secondary={
                                 <Typography variant="caption" color="text.secondary">
-                                  {guest.title} â€¢ {guest.company} â€¢ {guest.country}
+                                  {guest.title} - {guest.company} - {guest.country}
                                 </Typography>
                               }
                             />
@@ -671,7 +671,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                   Should sit together but are not adjacent
                                 </Typography>
                                 <Chip
-                                  label={`Table: ${violation.tableLabel}`}
+                                  label={`${violation.tableLabel}`}
                                   size="small"
                                   sx={{ mt: 0.5 }}
                                 />

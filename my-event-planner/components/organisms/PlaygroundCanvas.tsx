@@ -1,3 +1,4 @@
+// components/organisms/PlaygroundCanvas.tsx - UPDATED WITH SEAT MODE VISUALS
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -21,9 +22,17 @@ import { useGuestStore } from '@/store/guestStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
-import { Seat } from '@/types/Seat';
+import { Seat, SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
-import { useEventStore } from '@/store/eventStore';
+
+// Helper function to get rank stars
+function getRankStars(ranking: number): string {
+  if (ranking <= 1) return ' ⭐⭐⭐⭐';
+  if (ranking <= 2) return ' ⭐⭐⭐';
+  if (ranking <= 3) return ' ⭐⭐';
+  if (ranking <= 4) return ' ⭐';
+  return '';
+}
 
 export default function PlaygroundCanvas() {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -31,6 +40,7 @@ export default function PlaygroundCanvas() {
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
+
   const {
     tables,
     chunks,
@@ -69,22 +79,57 @@ export default function PlaygroundCanvas() {
 
   function rectsOverlap(a: any, b: any, padding = 6) {
     return !(
-      a.x2 + padding < b.x1 ||
-      a.x1 - padding > b.x2 ||
-      a.y2 + padding < b.y1 ||
-      a.y1 - padding > b.y2
+      a.x2 + padding < b.x1 - padding ||
+      b.x2 + padding < a.x1 - padding ||
+      a.y2 + padding < b.y1 - padding ||
+      b.y2 + padding < a.y1 - padding
     );
   }
 
-  function getRankStars(ranking: number | string | undefined) {
-    if (ranking === undefined || ranking === null) return '';
-    const r = Number(ranking) || Infinity;
-    if (r <= 1) return ' ⭐⭐⭐⭐';
-    if (r <= 2) return ' ⭐⭐⭐';
-    if (r <= 3) return ' ⭐⭐';
-    if (r <= 4) return ' ⭐';
-    return '';
+  /** ---------- Get seat fill color based on state and mode ---------- */
+  function getSeatFillColor(seat: Seat): string {
+    const mode = seat.mode || 'default';
+    const modeConfig = SEAT_MODE_CONFIGS[mode];
+    
+    // Locked seats are always grey
+    if (seat.locked) return '#b0bec5';
+    
+    // Assigned seats are green (takes priority over mode)
+    if (seat.assignedGuestId) return '#66bb6a';
+    
+    // Selected seats are yellow
+    if (seat.selected) return '#ffb300';
+    
+    // Return mode-specific color
+    return modeConfig.color;
   }
+
+  /** ---------- Get seat stroke color based on mode ---------- */
+  function getSeatStrokeColor(seat: Seat): string {
+    const mode = seat.mode || 'default';
+    return SEAT_MODE_CONFIGS[mode].strokeColor;
+  }
+
+  /** ---------- Modal State ---------- */
+  const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
+  const handleAddTableClick = () => setIsAddTableModalOpen(true);
+  const handleCloseAddModal = () => setIsAddTableModalOpen(false);
+
+  const zoomByFactor = (factor: number) => {
+    if (!svgRef.current || !zoomBehavior.current) return;
+    d3.select(svgRef.current)
+      .transition()
+      .duration(200)
+      .call(zoomBehavior.current.scaleBy as any, factor);
+  };
+
+  const resetZoom = () => {
+    if (!svgRef.current || !zoomBehavior.current) return;
+    d3.select(svgRef.current)
+      .transition()
+      .duration(300)
+      .call((zoomBehavior.current as any).transform, d3.zoomIdentity);
+  };
 
   /** ---------- SVG + Zoom ---------- */
   useEffect(() => {
@@ -220,18 +265,13 @@ export default function PlaygroundCanvas() {
       const connectors = connectorsLayer.selectAll<SVGLineElement, Seat>('line.connector-line').data(seatsWithGuest, (s: any) => s.id);
       connectors.exit().remove();
       const connectorsEnter = connectors.enter().append('line').attr('class', 'connector-line').attr('stroke', '#90a4ae').attr('stroke-width', 1).attr('pointer-events', 'none');
-
       connectorsEnter.merge(connectors as any).each(function (s: Seat) {
         const relX = s.x - tableDatum.x;
         const relY = s.y - tableDatum.y;
         let nx = 0, ny = 0;
-
-        // --- UPDATED LOGIC: Use radial vectors for BOTH round and rectangle tables ---
-        // This ensures rectangular tables get an "oval" formation of guests instead of a grid
-        const len = Math.sqrt(relX * relX + relY * relY) || 1;
-        nx = relX / len;
-        ny = relY / len;
-
+        if (tableDatum.shape === 'round') {
+          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
+        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
         const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
         if (!guest) return;
         const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
@@ -254,14 +294,24 @@ export default function PlaygroundCanvas() {
         .attr('cx', (s) => s.x - tableDatum.x)
         .attr('cy', (s) => s.y - tableDatum.y)
         .attr('r', (s) => s.radius)
-        .attr('fill', (s) => (s.locked ? '#b0bec5' : s.assignedGuestId ? '#66bb6a' : s.selected ? '#ffb300' : '#90caf9'))
-        .attr('stroke', '#1565c0')
-        .attr('stroke-width', 1)
+        .attr('fill', (s) => getSeatFillColor(s))
+        .attr('stroke', (s) => getSeatStrokeColor(s))
+        .attr('stroke-width', (s) => {
+          const mode = s.mode || 'default';
+          // Thicker stroke for non-default modes to make them more visible
+          return mode !== 'default' ? 2.5 : 1;
+        })
+        .attr('stroke-dasharray', (s) => {
+          // Add dashed stroke for external-only seats
+          if (s.mode === 'external-only') return '4,2';
+          return 'none';
+        })
         .style('cursor', 'pointer')
         .on('click', (event, s) => { event.stopPropagation(); selectSeat(tableDatum.id, s.id); })
         .on('contextmenu', (event, s) => { event.preventDefault(); lockSeat(tableDatum.id, s.id, !s.locked); })
         .on('dblclick', (event, s) => { clearSeat(tableDatum.id, s.id); });
 
+      // SEAT NUMBERS
       const seatLabels = group.selectAll<SVGTextElement, Seat>('text.seat-number').data(tableDatum.seats || [], (s) => s.id);
       seatLabels.exit().remove();
       const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
@@ -271,11 +321,50 @@ export default function PlaygroundCanvas() {
         .attr('text-anchor', 'middle')
         .attr('fill', '#0d47a1')
         .attr('font-size', '10px')
+        .attr('pointer-events', 'none')
         .text((s) => s.seatNumber);
+
+      // SEAT MODE INDICATORS (small badge for non-default modes)
+      const seatsWithModes = (tableDatum.seats || []).filter((s) => s.mode && s.mode !== 'default');
+      const modeIndicators = group.selectAll<SVGGElement, Seat>('g.seat-mode-badge').data(seatsWithModes, (s) => s.id);
+      modeIndicators.exit().remove();
+      
+      const modeIndicatorsEnter = modeIndicators.enter().append('g').attr('class', 'seat-mode-badge');
+      
+      // Background circle for the badge
+      modeIndicatorsEnter.append('circle')
+        .attr('class', 'mode-badge-bg')
+        .attr('r', 7)
+        .attr('pointer-events', 'none');
+      
+      // Text label
+      modeIndicatorsEnter.append('text')
+        .attr('class', 'mode-badge-text')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('font-size', '8px')
+        .attr('font-weight', 'bold')
+        .attr('pointer-events', 'none');
+      
+      const mergedBadges = modeIndicatorsEnter.merge(modeIndicators as any);
+      
+      mergedBadges
+        .attr('transform', (s) => {
+          const relX = s.x - tableDatum.x;
+          const relY = s.y - tableDatum.y;
+          // Position badge at top-right of seat
+          return `translate(${relX + s.radius - 2}, ${relY - s.radius + 2})`;
+        });
+      
+      mergedBadges.select('circle.mode-badge-bg')
+        .attr('fill', (s) => SEAT_MODE_CONFIGS[s.mode || 'default'].strokeColor);
+      
+      mergedBadges.select('text.mode-badge-text')
+        .attr('fill', 'white')
+        .text((s) => SEAT_MODE_CONFIGS[s.mode || 'default'].shortLabel);
 
       // GUEST BOXES
       const guestBoxes = group.selectAll<SVGGElement, Seat>('g.guest-box').data(seatsWithGuest, (s) => s.id);
-
       guestBoxes.exit().remove();
       const guestBoxesEnter = guestBoxes.enter().append('g').attr('class', 'guest-box').style('pointer-events', 'none');
       guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');
@@ -284,92 +373,42 @@ export default function PlaygroundCanvas() {
 
       // --- Compute relaxed guest box positions ---
       const boxData: any[] = [];
-
       (tableDatum.seats || []).forEach((s) => {
         const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
         if (!guest) return;
-
         const relX = s.x - tableDatum.x;
         const relY = s.y - tableDatum.y;
-
-        // Radial direction vector
-        const len = Math.sqrt(relX * relX + relY * relY) || 1;
-        const nx = relX / len;
-        const ny = relY / len;
-
+        let nx = 0, ny = 0;
+        if (tableDatum.shape === 'round') {
+          const len = Math.sqrt(relX * relX + relY * relY) || 1; nx = relX / len; ny = relY / len;
+        } else { if (Math.abs(relX) >= Math.abs(relY)) { nx = relX >= 0 ? 1 : -1; ny = 0; } else { nx = 0; ny = relY >= 0 ? 1 : -1; } }
         const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
         const stars = getRankStars(guest.ranking);
         const line1 = `${name}${stars}`;
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-
         const estTextWidth = Math.max(line1.length, line2.length) * 7;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
         const height = 14 * 2 + 12;
-
         const seatR = s.radius ?? 8;
-
-        // NEW: Orientation-aware radial sizing (fixes top/bottom spacing)
-        const verticalBias = Math.abs(ny);
-        const horizontalBias = Math.abs(nx);
-
-        const radialSize =
-          (verticalBias * height) +
-          (horizontalBias * width);
-
-        let dist = seatR + connectorGap + radialSize / 2;
-
-        // NEW: Pull top/bottom boxes slightly closer
-        if (Math.abs(ny) > 0.85) {
-          dist *= 0.75;
-        }
-
-        boxData.push({
-          s,
-          guest,
-          nx,
-          ny,
-          width,
-          height,
-          relX,
-          relY,
-          minRadialDist: dist,
-
-          // Initial center
-          x: relX + nx * dist,
-          y: relY + ny * dist,
-        });
+        const dist = seatR + connectorGap + width / 2;
+        boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist });
       });
 
       /** Radial outward relaxation to prevent overlap */
-      const maxIterations = 150;
-      const step = 2;
-      const padding = 6;
-
+      const maxIterations = 100; const step = 10; const padding = 6;
       for (let iter = 0; iter < maxIterations; iter++) {
         let moved = false;
-
         for (let i = 0; i < boxData.length; i++) {
-          const a = boxData[i];
-          const aRect = boxRectFromCenter(a);
-
+          const a = boxData[i], aRect = boxRectFromCenter(a);
           for (let j = i + 1; j < boxData.length; j++) {
-            const b = boxData[j];
-            const bRect = boxRectFromCenter(b);
-
+            const b = boxData[j], bRect = boxRectFromCenter(b);
             if (rectsOverlap(aRect, bRect, padding)) {
-              // Push outward radially (preserves oval)
-              a.x += a.nx * step;
-              a.y += a.ny * step;
-              b.x += b.nx * step;
-              b.y += b.ny * step;
-              moved = true;
+              a.x += a.nx * step; a.y += a.ny * step; b.x += b.nx * step; b.y += b.ny * step; moved = true;
             }
           }
         }
-
         if (!moved) break;
       }
-
 
       // Render relaxed guest boxes
       boxData.forEach((b) => {
@@ -377,7 +416,7 @@ export default function PlaygroundCanvas() {
         const rectX = b.x - width / 2; const rectY = b.y - height / 2;
         const isHost = !!guest.fromHost;
         const hostFill = '#e3f2fd', hostStroke = '#1976d2';
-        const externalFill = '#e8f5e9', externalStroke = '#2e7d32';
+        const externalFill = '#e8f5e9', externalStroke = '#E53935';
         const gbox = group.selectAll<SVGGElement, any>('g.guest-box').filter((d) => d.id === s.id);
         gbox.select('rect.guest-rect')
           .attr('x', rectX)
@@ -386,17 +425,30 @@ export default function PlaygroundCanvas() {
           .attr('height', height)
           .attr('fill', isHost ? hostFill : externalFill)
           .attr('stroke', isHost ? hostStroke : externalStroke);
-        const line1 = `${getRankStars(guest.ranking)} ${guest.salutation || ''} ${guest.name || ''}`.trim();
-        const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-        gbox.select('text.guest-name').attr('x', b.x).attr('y', rectY + 6 + 14 / 2).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').text(line1);
-        gbox.select('text.guest-meta').attr('x', b.x).attr('y', rectY + 6 + 14 + 14 / 2).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').text(line2);
 
-        group.selectAll<SVGLineElement, any>('line.connector-line').filter((d) => d.id === s.id).attr('x2', b.x).attr('y2', b.y);
+        const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+        const stars = getRankStars(guest.ranking);
+        gbox.select('text.guest-name')
+          .attr('x', b.x)
+          .attr('y', rectY + 14)
+          .attr('text-anchor', 'middle')
+          .text(`${name}${stars}`);
+        gbox.select('text.guest-meta')
+          .attr('x', b.x)
+          .attr('y', rectY + 14 + 14)
+          .attr('text-anchor', 'middle')
+          .text(`${guest.country || ''} | ${guest.company || ''}`);
       });
 
+      // Update connectors to relaxed positions
+      connectorsEnter.merge(connectors as any).each(function (s: Seat) {
+        const b = boxData.find((box) => box.s.id === s.id);
+        if (!b) return;
+        d3.select(this).attr('x2', b.x).attr('y2', b.y);
+      });
     });
 
-    /** ---------- Drag ---------- */
+    // Drag
     const svgSelection = d3.select(svgEl);
     const drag = d3.drag<SVGGElement, Table>()
       .on('start', function () { svgSelection.on('.zoom', null); d3.select(this).style('cursor', 'grabbing'); })
@@ -415,27 +467,16 @@ export default function PlaygroundCanvas() {
 
   }, [tables, moveTable, selectSeat, lockSeat, clearSeat, selectedTableId, selectedSeatId, ensureChunkExists, assignTableToChunk, expandWorldIfNeeded, cleanupEmptyChunks, hostGuests, externalGuests, connectorGap]);
 
-  /** ---------- Zoom Controls ---------- */
-  const zoomByFactor = (factor: number) => { const svgEl = svgRef.current; if (!svgEl || !zoomBehavior.current) return; d3.select(svgEl).transition().duration(300).call((sel: any) => sel.call((zoomBehavior.current as any).scaleBy, factor)); };
-  const resetZoom = () => { const svgEl = svgRef.current; if (!svgEl || !zoomBehavior.current) return; d3.select(svgEl).transition().duration(300).call((sel: any) => sel.call((zoomBehavior.current as any).transform, d3.zoomIdentity)); setZoomLevel(1); };
-
-  /** ---------- Add Table ---------- */
-  const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
-  const handleAddTableClick = () => setIsAddTableModalOpen(true);
-
+  /** ---------- Handle Add Table ---------- */
   const handleAddTable = (config: TableConfig) => {
-    const svgEl = svgRef.current;
-    if (!svgEl) return;
-
-    const rect = svgEl.getBoundingClientRect();
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const t = d3.zoomTransform(svgEl);
-    const worldX = Math.max(0, (centerX - t.x) / t.k);
-    const worldY = Math.max(0, (centerY - t.y) / t.k);
+    const existingCount = tables.length;
+    const chunkArr = Object.values(chunks).filter((c) => c.row >= 0 && c.col >= 0);
+    const startChunk = chunkArr.find((c) => c.tables.length === 0) || chunkArr[0] || { row: 0, col: 0 };
+    const worldX = startChunk.col * CHUNK_WIDTH + CHUNK_WIDTH / 2;
+    const worldY = startChunk.row * CHUNK_HEIGHT + CHUNK_HEIGHT / 2;
 
     for (let i = 0; i < config.quantity; i++) {
-      const id = `t${Date.now()}-${i}`;
+      const id = `table-${Date.now()}-${existingCount + i}`;
       const label = config.label
         ? `${config.label} ${tables.length + i + 1}`
         : `Table ${tables.length + i + 1}`;
@@ -446,7 +487,6 @@ export default function PlaygroundCanvas() {
 
       let table;
       if (config.type === 'round') {
-        // Pass custom seat ordering to round table
         table = createRoundTable(
           id,
           x,
@@ -454,10 +494,10 @@ export default function PlaygroundCanvas() {
           60,
           config.roundSeats || 8,
           label,
-          config.seatOrdering // NEW: Pass custom ordering
+          config.seatOrdering,
+          config.seatModes // NEW: Pass seat modes
         );
       } else {
-        // Pass custom seat ordering to rectangle table
         const { top, bottom, left, right } = config.rectangleSeats || {
           top: 2, bottom: 2, left: 1, right: 1
         };
@@ -470,7 +510,8 @@ export default function PlaygroundCanvas() {
           left,
           right,
           label,
-          config.seatOrdering // NEW: Pass custom ordering
+          config.seatOrdering,
+          config.seatModes // NEW: Pass seat modes
         );
       }
 
@@ -488,8 +529,107 @@ export default function PlaygroundCanvas() {
       <Paper elevation={0} sx={{ position: 'absolute', inset: 0, bgcolor: '#fafafa' }}>
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
-      {/* NEW: Add Statistics Panel - TOP RIGHT */}
-      <SeatingStatsPanel/>
+      
+      {/* Statistics Panel */}
+      <SeatingStatsPanel />
+      
+      {/* Seat Mode Legend */}
+      <Paper
+        elevation={2}
+        sx={{
+          position: 'absolute',
+          bottom: 24,
+          left: 24,
+          p: 1.5,
+          bgcolor: 'rgba(255,255,255,0.95)',
+          borderRadius: 2,
+        }}
+      >
+        <Typography variant="caption" fontWeight="bold" sx={{ mb: 1, display: 'block' }}>
+          Seat Modes
+        </Typography>
+        <Stack spacing={0.5}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box
+              sx={{
+                width: 16,
+                height: 16,
+                borderRadius: '50%',
+                bgcolor: SEAT_MODE_CONFIGS['default'].color,
+                border: `2px solid ${SEAT_MODE_CONFIGS['default'].strokeColor}`,
+              }}
+            />
+            <Typography variant="caption">Default (Any Guest)</Typography>
+          </Stack>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ position: 'relative' }}>
+              <Box
+                sx={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  bgcolor: SEAT_MODE_CONFIGS['host-only'].color,
+                  border: `2.5px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}`,
+                }}
+              />
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  bgcolor: SEAT_MODE_CONFIGS['host-only'].strokeColor,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '6px',
+                  fontWeight: 'bold',
+                  color: 'white',
+                }}
+              >
+                H
+              </Box>
+            </Box>
+            <Typography variant="caption">Host Only</Typography>
+          </Stack>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ position: 'relative' }}>
+              <Box
+                sx={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  bgcolor: SEAT_MODE_CONFIGS['external-only'].color,
+                  border: `2.5px dashed ${SEAT_MODE_CONFIGS['external-only'].strokeColor}`,
+                }}
+              />
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  bgcolor: SEAT_MODE_CONFIGS['external-only'].strokeColor,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '6px',
+                  fontWeight: 'bold',
+                  color: 'white',
+                }}
+              >
+                E
+              </Box>
+            </Box>
+            <Typography variant="caption">External Only</Typography>
+          </Stack>
+        </Stack>
+      </Paper>
+      
       <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
         <Tooltip title="Add Table">
           <Fab color="primary" size="medium" onClick={handleAddTableClick}><AddIcon /></Fab>
@@ -500,7 +640,6 @@ export default function PlaygroundCanvas() {
             <Fab size="small" onClick={() => zoomByFactor(0.8)}><ZoomOutIcon fontSize="small" /></Fab>
           </Tooltip>
           <Tooltip title="Reset View">
-
             <Fab size="small" onClick={resetZoom}><CenterFocusStrongIcon fontSize="small" /></Fab>
           </Tooltip>
           <Tooltip title="Zoom In">

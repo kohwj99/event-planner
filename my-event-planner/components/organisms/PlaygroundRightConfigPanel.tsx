@@ -25,6 +25,7 @@ export default function PlaygroundRightConfigPanel() {
     lockSeat,
     clearSeat,
     findGuestSeat,
+    proximityRules
   } = useSeatStore();
 
   const { hostGuests, externalGuests } = useGuestStore();
@@ -229,6 +230,7 @@ export default function PlaygroundRightConfigPanel() {
               onClose={() => setOpenSwapModal(false)}
               sourceTableId={selectedTableId!}
               sourceSeatId={selectedSeatId!}
+              proximityRules={proximityRules!}
             />
           )}
 
