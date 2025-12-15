@@ -90,16 +90,16 @@ export default function PlaygroundCanvas() {
   function getSeatFillColor(seat: Seat): string {
     const mode = seat.mode || 'default';
     const modeConfig = SEAT_MODE_CONFIGS[mode];
-    
+
     // Locked seats are always grey
     if (seat.locked) return '#b0bec5';
-    
+
     // Assigned seats are green (takes priority over mode)
     if (seat.assignedGuestId) return '#66bb6a';
-    
+
     // Selected seats are yellow
     if (seat.selected) return '#ffb300';
-    
+
     // Return mode-specific color
     return modeConfig.color;
   }
@@ -251,8 +251,11 @@ export default function PlaygroundCanvas() {
       }
     });
 
-    enter.append('text').attr('y', 5).attr('text-anchor', 'middle').attr('fill', 'white').attr('font-size', '14px').text((d) => d.label);
+    enter.append('text').attr('class', 'table-label').attr('y', 5).attr('text-anchor', 'middle').attr('fill', 'white').attr('font-size', '14px');
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
+
+    // Update the label text on ALL tables (including existing ones) - fixes stale label after delete
+    merged.select('text.table-label').text((d) => d.label);
 
     merged.each(function (tableDatum) {
       const group = d3.select(this);
@@ -328,15 +331,15 @@ export default function PlaygroundCanvas() {
       const seatsWithModes = (tableDatum.seats || []).filter((s) => s.mode && s.mode !== 'default');
       const modeIndicators = group.selectAll<SVGGElement, Seat>('g.seat-mode-badge').data(seatsWithModes, (s) => s.id);
       modeIndicators.exit().remove();
-      
+
       const modeIndicatorsEnter = modeIndicators.enter().append('g').attr('class', 'seat-mode-badge');
-      
+
       // Background circle for the badge
       modeIndicatorsEnter.append('circle')
         .attr('class', 'mode-badge-bg')
         .attr('r', 7)
         .attr('pointer-events', 'none');
-      
+
       // Text label
       modeIndicatorsEnter.append('text')
         .attr('class', 'mode-badge-text')
@@ -345,9 +348,9 @@ export default function PlaygroundCanvas() {
         .attr('font-size', '8px')
         .attr('font-weight', 'bold')
         .attr('pointer-events', 'none');
-      
+
       const mergedBadges = modeIndicatorsEnter.merge(modeIndicators as any);
-      
+
       mergedBadges
         .attr('transform', (s) => {
           const relX = s.x - tableDatum.x;
@@ -355,10 +358,10 @@ export default function PlaygroundCanvas() {
           // Position badge at top-right of seat
           return `translate(${relX + s.radius - 2}, ${relY - s.radius + 2})`;
         });
-      
+
       mergedBadges.select('circle.mode-badge-bg')
         .attr('fill', (s) => SEAT_MODE_CONFIGS[s.mode || 'default'].strokeColor);
-      
+
       mergedBadges.select('text.mode-badge-text')
         .attr('fill', 'white')
         .text((s) => SEAT_MODE_CONFIGS[s.mode || 'default'].shortLabel);
@@ -529,10 +532,10 @@ export default function PlaygroundCanvas() {
       <Paper elevation={0} sx={{ position: 'absolute', inset: 0, bgcolor: '#fafafa' }}>
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
-      
+
       {/* Statistics Panel */}
       <SeatingStatsPanel />
-      
+
       {/* Seat Mode Legend */}
       <Paper
         elevation={2}
@@ -629,7 +632,7 @@ export default function PlaygroundCanvas() {
           </Stack>
         </Stack>
       </Paper>
-      
+
       <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
         <Tooltip title="Add Table">
           <Fab color="primary" size="medium" onClick={handleAddTableClick}><AddIcon /></Fab>
