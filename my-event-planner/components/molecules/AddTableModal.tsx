@@ -53,6 +53,7 @@ interface AddTableModalProps {
 
 type Direction = 'clockwise' | 'counter-clockwise';
 type TabValue = 'config' | 'ordering' | 'modes';
+type TopLevelTab = 'suggested' | 'custom';
 
 /**
  * Generate seat ordering based on direction, alternating mode, and start position
@@ -131,6 +132,7 @@ function generatePatternPreview(
 
 export default function AddTableModal({ open, onClose, onConfirm }: AddTableModalProps) {
   const [activeTab, setActiveTab] = useState<TabValue>('config');
+  const [topTab, setTopTab] = useState<TopLevelTab>('custom');
 
   const [tableConfig, setTableConfig] = useState<TableConfig>({
     type: 'round',
@@ -260,7 +262,9 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+
       <DialogTitle>
+
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           <Typography variant="h6">Add New Table(s)</Typography>
           {activeTab === 'ordering' && (
@@ -285,382 +289,411 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
           )}
         </Stack>
       </DialogTitle>
-
       <Tabs
-        value={activeTab}
-        onChange={(_, v) => setActiveTab(v)}
+        value={topTab}
+        onChange={(_, v) => setTopTab(v)}
         sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
       >
-        <Tab label="Table Configuration" value="config" />
-        <Tab label="Seat Ordering" value="ordering" />
-        <Tab
-          label={
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <span>Seat Modes</span>
-              {(modeCounts['host-only'] > 0 || modeCounts['external-only'] > 0) && (
-                <Chip
-                  size="small"
-                  label={`${modeCounts['host-only']}H / ${modeCounts['external-only']}E`}
-                  color="primary"
-                  sx={{ height: 20, fontSize: 10 }}
-                />
-              )}
-            </Stack>
-          }
-          value="modes"
-        />
+        <Tab label="Suggested" value="suggested" />
+        <Tab label="Custom" value="custom" />
       </Tabs>
-
-      <DialogContent sx={{ minHeight: 500 }}>
-        {activeTab === 'config' ? (
-          // Configuration Tab
-          <Stack spacing={3} sx={{ mt: 2 }}>
-            <FormControl fullWidth>
-              <InputLabel>Table Type</InputLabel>
-              <Select
-                value={tableConfig.type}
-                label="Table Type"
-                onChange={(e) =>
-                  setTableConfig((prev) => ({
-                    ...prev,
-                    type: e.target.value as 'round' | 'rectangle',
-                  }))
-                }
-              >
-                <MenuItem value="round">Round</MenuItem>
-                <MenuItem value="rectangle">Rectangle</MenuItem>
-              </Select>
-            </FormControl>
-
-            {tableConfig.type === 'round' ? (
-              <TextField
-                type="number"
-                label="Number of Seats"
-                value={tableConfig.roundSeats}
-                onChange={(e) =>
-                  setTableConfig((prev) => ({
-                    ...prev,
-                    roundSeats: Math.max(1, parseInt(e.target.value) || 1),
-                  }))
-                }
-                inputProps={{ min: 1 }}
-                helperText="Seats arranged starting from top"
-              />
-            ) : (
-              <Stack spacing={2}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Seats per side:
-                </Typography>
-                <Stack direction="row" spacing={2}>
-                  <TextField
-                    type="number"
-                    label="Top"
-                    value={tableConfig.rectangleSeats?.top}
-                    onChange={(e) =>
-                      setTableConfig((prev) => ({
-                        ...prev,
-                        rectangleSeats: {
-                          ...prev.rectangleSeats!,
-                          top: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
-                        },
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
-                  />
-                  <TextField
-                    type="number"
-                    label="Bottom"
-                    value={tableConfig.rectangleSeats?.bottom}
-                    onChange={(e) =>
-                      setTableConfig((prev) => ({
-                        ...prev,
-                        rectangleSeats: {
-                          ...prev.rectangleSeats!,
-                          bottom: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
-                        },
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
-                  />
-                </Stack>
-                <Stack direction="row" spacing={2}>
-                  <TextField
-                    type="number"
-                    label="Left"
-                    value={tableConfig.rectangleSeats?.left}
-                    onChange={(e) =>
-                      setTableConfig((prev) => ({
-                        ...prev,
-                        rectangleSeats: {
-                          ...prev.rectangleSeats!,
-                          left: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
-                        },
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
-                  />
-                  <TextField
-                    type="number"
-                    label="Right"
-                    value={tableConfig.rectangleSeats?.right}
-                    onChange={(e) =>
-                      setTableConfig((prev) => ({
-                        ...prev,
-                        rectangleSeats: {
-                          ...prev.rectangleSeats!,
-                          right: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
-                        },
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
-                  />
-                </Stack>
-              </Stack>
-            )}
-
-            <TextField
-              label="Table Label Prefix"
-              value={tableConfig.label}
-              onChange={(e) =>
-                setTableConfig((prev) => ({
-                  ...prev,
-                  label: e.target.value,
-                }))
-              }
-              helperText="A number will be appended to this prefix"
-            />
-
-            <TextField
-              type="number"
-              label="Quantity"
-              value={tableConfig.quantity}
-              onChange={(e) =>
-                setTableConfig((prev) => ({
-                  ...prev,
-                  quantity: Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
-                }))
-              }
-              inputProps={{ min: 1, max: 10 }}
-              helperText="Number of tables to add (max 10)"
-            />
-
-            <Divider />
-
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
-              <Typography variant="caption" color="text.secondary">
-                📌 Customize seat numbering in the "Seat Ordering" tab
-              </Typography>
-              <br />
-              <Typography variant="caption" color="text.secondary">
-                🎯 Set guest type restrictions in the "Seat Modes" tab
-              </Typography>
-            </Paper>
-          </Stack>
-        ) : activeTab === 'ordering' ? (
-          // Seat Ordering Tab
-          <Stack spacing={3} sx={{ height: '100%' }}>
-            {/* Ordering Controls */}
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd' }}>
-              <Stack spacing={2}>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <Typography variant="subtitle2">Direction:</Typography>
-                  <ToggleButtonGroup
-                    value={direction}
-                    exclusive
-                    onChange={(_, val) => val && setDirection(val)}
-                    size="small"
-                  >
-                    <ToggleButton value="clockwise">Clockwise ↻</ToggleButton>
-                    <ToggleButton value="counter-clockwise">Counter ↺</ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={useAlternating}
-                      onChange={(e) => setUseAlternating(e.target.checked)}
+      {topTab === 'custom' && (
+        <>
+          <Tabs
+            value={activeTab}
+            onChange={(_, v) => setActiveTab(v)}
+            sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
+          >
+            <Tab label="Table Configuration" value="config" />
+            <Tab label="Seat Ordering" value="ordering" />
+            <Tab
+              label={
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <span>Seat Modes</span>
+                  {(modeCounts['host-only'] > 0 || modeCounts['external-only'] > 0) && (
+                    <Chip
+                      size="small"
+                      label={`${modeCounts['host-only']}H / ${modeCounts['external-only']}E`}
+                      color="primary"
+                      sx={{ height: 20, fontSize: 10 }}
                     />
-                  }
-                  label="Alternating Pattern (odds/evens)"
-                />
-
-                <Typography variant="caption" color="text.secondary">
-                  📌 Click on a seat to set Seat #1 position
-                </Typography>
-
-                <Typography variant="body2">
-                  <strong>Pattern: </strong>
-                  {useAlternating
-                    ? `Alternating ${direction} (Seat 1 → Evens ${direction === 'clockwise' ? '→' : '←'} / Odds ${direction === 'clockwise' ? '←' : '→'})`
-                    : `Simple ${direction} (1, 2, 3, ...)`
-                  }
-                </Typography>
-              </Stack>
-            </Paper>
-
-            {/* Visual Preview */}
-            <Box
-              sx={{
-                flexGrow: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
-              }}
-            >
-              {tableConfig.type === 'round' ? (
-                <RoundTablePreview
-                  seats={seatOrdering}
-                  seatModes={seatModes}
-                  startPosition={startPosition}
-                  onSeatClick={handleSeatClick}
-                  activeTab={activeTab}
-                />
-              ) : (
-                <RectangleTablePreview
-                  top={tableConfig.rectangleSeats?.top || 0}
-                  bottom={tableConfig.rectangleSeats?.bottom || 0}
-                  left={tableConfig.rectangleSeats?.left || 0}
-                  right={tableConfig.rectangleSeats?.right || 0}
-                  seats={seatOrdering}
-                  seatModes={seatModes}
-                  startPosition={startPosition}
-                  onSeatClick={handleSeatClick}
-                  activeTab={activeTab}
-                />
-              )}
-            </Box>
-
-            {/* Full Sequence */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
-              <Typography variant="caption" color="text.secondary">
-                💡 <strong>Full Sequence:</strong> {seatOrdering.join(', ')}
-              </Typography>
-            </Paper>
-          </Stack>
-        ) : (
-          // Seat Modes Tab - NEW
-          <Stack spacing={3} sx={{ height: '100%' }}>
-            {/* Mode Controls */}
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
-              <Stack spacing={2}>
-                <Typography variant="subtitle2">Quick Actions:</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="success"
-                    onClick={() => handleSetAllModes('default')}
-                    startIcon={<RadioButtonUnchecked />}
-                  >
-                    All Default
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="primary"
-                    onClick={() => handleSetAllModes('host-only')}
-                    startIcon={<Person />}
-                  >
-                    All Host Only
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    color="error"
-                    onClick={() => handleSetAllModes('external-only')}
-                    startIcon={<Public />}
-                  >
-                    All External Only
-                  </Button>
+                  )}
                 </Stack>
+              }
+              value="modes"
+            />
+          </Tabs>
+
+          <DialogContent sx={{ minHeight: 500 }}>
+            {activeTab === 'config' ? (
+              // Configuration Tab
+              <Stack spacing={3} sx={{ mt: 2 }}>
+                <FormControl fullWidth>
+                  <InputLabel>Table Type</InputLabel>
+                  <Select
+                    value={tableConfig.type}
+                    label="Table Type"
+                    onChange={(e) =>
+                      setTableConfig((prev) => ({
+                        ...prev,
+                        type: e.target.value as 'round' | 'rectangle',
+                      }))
+                    }
+                  >
+                    <MenuItem value="round">Round</MenuItem>
+                    <MenuItem value="rectangle">Rectangle</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {tableConfig.type === 'round' ? (
+                  <TextField
+                    type="number"
+                    label="Number of Seats"
+                    value={tableConfig.roundSeats}
+                    onChange={(e) =>
+                      setTableConfig((prev) => ({
+                        ...prev,
+                        roundSeats: Math.max(1, parseInt(e.target.value) || 1),
+                      }))
+                    }
+                    inputProps={{ min: 1 }}
+                    helperText="Seats arranged starting from top"
+                  />
+                ) : (
+                  <Stack spacing={2}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Seats per side:
+                    </Typography>
+                    <Stack direction="row" spacing={2}>
+                      <TextField
+                        type="number"
+                        label="Top"
+                        value={tableConfig.rectangleSeats?.top}
+                        onChange={(e) =>
+                          setTableConfig((prev) => ({
+                            ...prev,
+                            rectangleSeats: {
+                              ...prev.rectangleSeats!,
+                              top: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
+                            },
+                          }))
+                        }
+                        inputProps={{ min: 0, max: 10 }}
+                      />
+                      <TextField
+                        type="number"
+                        label="Bottom"
+                        value={tableConfig.rectangleSeats?.bottom}
+                        onChange={(e) =>
+                          setTableConfig((prev) => ({
+                            ...prev,
+                            rectangleSeats: {
+                              ...prev.rectangleSeats!,
+                              bottom: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
+                            },
+                          }))
+                        }
+                        inputProps={{ min: 0, max: 10 }}
+                      />
+                    </Stack>
+                    <Stack direction="row" spacing={2}>
+                      <TextField
+                        type="number"
+                        label="Left"
+                        value={tableConfig.rectangleSeats?.left}
+                        onChange={(e) =>
+                          setTableConfig((prev) => ({
+                            ...prev,
+                            rectangleSeats: {
+                              ...prev.rectangleSeats!,
+                              left: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
+                            },
+                          }))
+                        }
+                        inputProps={{ min: 0, max: 10 }}
+                      />
+                      <TextField
+                        type="number"
+                        label="Right"
+                        value={tableConfig.rectangleSeats?.right}
+                        onChange={(e) =>
+                          setTableConfig((prev) => ({
+                            ...prev,
+                            rectangleSeats: {
+                              ...prev.rectangleSeats!,
+                              right: Math.max(0, Math.min(10, parseInt(e.target.value) || 0)),
+                            },
+                          }))
+                        }
+                        inputProps={{ min: 0, max: 10 }}
+                      />
+                    </Stack>
+                  </Stack>
+                )}
+
+                <TextField
+                  label="Table Label Prefix"
+                  value={tableConfig.label}
+                  onChange={(e) =>
+                    setTableConfig((prev) => ({
+                      ...prev,
+                      label: e.target.value,
+                    }))
+                  }
+                  helperText="A number will be appended to this prefix"
+                />
+
+                <TextField
+                  type="number"
+                  label="Quantity"
+                  value={tableConfig.quantity}
+                  onChange={(e) =>
+                    setTableConfig((prev) => ({
+                      ...prev,
+                      quantity: Math.max(1, Math.min(10, parseInt(e.target.value) || 1)),
+                    }))
+                  }
+                  inputProps={{ min: 1, max: 10 }}
+                  helperText="Number of tables to add (max 10)"
+                />
 
                 <Divider />
 
-                <Typography variant="caption" color="text.secondary">
-                  🎯 Click on a seat to set its mode. Modes restrict which guest types can be assigned.
-                </Typography>
-
-                <Stack direction="row" spacing={2}>
-                  <Chip
-                    size="small"
-                    label={`Default: ${modeCounts['default']}`}
-                    sx={{ bgcolor: SEAT_MODE_CONFIGS['default'].color }}
-                  />
-                  <Chip
-                    size="small"
-                    label={`Host Only: ${modeCounts['host-only']}`}
-                    sx={{ bgcolor: SEAT_MODE_CONFIGS['host-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}` }}
-                  />
-                  <Chip
-                    size="small"
-                    label={`External Only: ${modeCounts['external-only']}`}
-                    sx={{ bgcolor: SEAT_MODE_CONFIGS['external-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['external-only'].strokeColor}` }}
-                  />
-                </Stack>
+                <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    📌 Customize seat numbering in the "Seat Ordering" tab
+                  </Typography>
+                  <br />
+                  <Typography variant="caption" color="text.secondary">
+                    🎯 Set guest type restrictions in the "Seat Modes" tab
+                  </Typography>
+                </Paper>
               </Stack>
-            </Paper>
+            ) : activeTab === 'ordering' ? (
+              // Seat Ordering Tab
+              <Stack spacing={3} sx={{ height: '100%' }}>
+                {/* Ordering Controls */}
+                <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd' }}>
+                  <Stack spacing={2}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <Typography variant="subtitle2">Direction:</Typography>
+                      <ToggleButtonGroup
+                        value={direction}
+                        exclusive
+                        onChange={(_, val) => val && setDirection(val)}
+                        size="small"
+                      >
+                        <ToggleButton value="clockwise">Clockwise ↻</ToggleButton>
+                        <ToggleButton value="counter-clockwise">Counter ↺</ToggleButton>
+                      </ToggleButtonGroup>
+                    </Stack>
 
-            {/* Visual Preview */}
-            <Box
-              sx={{
-                flexGrow: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
-              }}
-            >
-              {tableConfig.type === 'round' ? (
-                <RoundTablePreview
-                  seats={seatOrdering}
-                  seatModes={seatModes}
-                  startPosition={startPosition}
-                  onSeatClick={handleSeatClick}
-                  activeTab={activeTab}
-                />
-              ) : (
-                <RectangleTablePreview
-                  top={tableConfig.rectangleSeats?.top || 0}
-                  bottom={tableConfig.rectangleSeats?.bottom || 0}
-                  left={tableConfig.rectangleSeats?.left || 0}
-                  right={tableConfig.rectangleSeats?.right || 0}
-                  seats={seatOrdering}
-                  seatModes={seatModes}
-                  startPosition={startPosition}
-                  onSeatClick={handleSeatClick}
-                  activeTab={activeTab}
-                />
-              )}
-            </Box>
-
-            {/* Legend */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
-              <Stack direction="row" spacing={3}>
-                {Object.values(SEAT_MODE_CONFIGS).map((config) => (
-                  <Stack key={config.mode} direction="row" alignItems="center" spacing={1}>
-                    <Box
-                      sx={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: '50%',
-                        bgcolor: config.color,
-                        border: `2px ${config.mode === 'external-only' ? 'dashed' : 'solid'} ${config.strokeColor}`,
-                      }}
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={useAlternating}
+                          onChange={(e) => setUseAlternating(e.target.checked)}
+                        />
+                      }
+                      label="Alternating Pattern (odds/evens)"
                     />
-                    <Typography variant="caption">{config.label}</Typography>
+
+                    <Typography variant="caption" color="text.secondary">
+                      📌 Click on a seat to set Seat #1 position
+                    </Typography>
+
+                    <Typography variant="body2">
+                      <strong>Pattern: </strong>
+                      {useAlternating
+                        ? `Alternating ${direction} (Seat 1 → Evens ${direction === 'clockwise' ? '→' : '←'} / Odds ${direction === 'clockwise' ? '←' : '→'})`
+                        : `Simple ${direction} (1, 2, 3, ...)`
+                      }
+                    </Typography>
                   </Stack>
-                ))}
+                </Paper>
+
+                {/* Visual Preview */}
+                <Box
+                  sx={{
+                    flexGrow: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: '#fafafa',
+                    minHeight: 300,
+                    p: 2,
+                  }}
+                >
+                  {tableConfig.type === 'round' ? (
+                    <RoundTablePreview
+                      seats={seatOrdering}
+                      seatModes={seatModes}
+                      startPosition={startPosition}
+                      onSeatClick={handleSeatClick}
+                      activeTab={activeTab}
+                    />
+                  ) : (
+                    <RectangleTablePreview
+                      top={tableConfig.rectangleSeats?.top || 0}
+                      bottom={tableConfig.rectangleSeats?.bottom || 0}
+                      left={tableConfig.rectangleSeats?.left || 0}
+                      right={tableConfig.rectangleSeats?.right || 0}
+                      seats={seatOrdering}
+                      seatModes={seatModes}
+                      startPosition={startPosition}
+                      onSeatClick={handleSeatClick}
+                      activeTab={activeTab}
+                    />
+                  )}
+                </Box>
+
+                {/* Full Sequence */}
+                <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    💡 <strong>Full Sequence:</strong> {seatOrdering.join(', ')}
+                  </Typography>
+                </Paper>
               </Stack>
-            </Paper>
-          </Stack>
-        )}
-      </DialogContent>
+            ) : (
+              // Seat Modes Tab - NEW
+              <Stack spacing={3} sx={{ height: '100%' }}>
+                {/* Mode Controls */}
+                <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
+                  <Stack spacing={2}>
+                    <Typography variant="subtitle2">Quick Actions:</Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="success"
+                        onClick={() => handleSetAllModes('default')}
+                        startIcon={<RadioButtonUnchecked />}
+                      >
+                        All Default
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                        onClick={() => handleSetAllModes('host-only')}
+                        startIcon={<Person />}
+                      >
+                        All Host Only
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        onClick={() => handleSetAllModes('external-only')}
+                        startIcon={<Public />}
+                      >
+                        All External Only
+                      </Button>
+                    </Stack>
+
+                    <Divider />
+
+                    <Typography variant="caption" color="text.secondary">
+                      🎯 Click on a seat to set its mode. Modes restrict which guest types can be assigned.
+                    </Typography>
+
+                    <Stack direction="row" spacing={2}>
+                      <Chip
+                        size="small"
+                        label={`Default: ${modeCounts['default']}`}
+                        sx={{ bgcolor: SEAT_MODE_CONFIGS['default'].color }}
+                      />
+                      <Chip
+                        size="small"
+                        label={`Host Only: ${modeCounts['host-only']}`}
+                        sx={{ bgcolor: SEAT_MODE_CONFIGS['host-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}` }}
+                      />
+                      <Chip
+                        size="small"
+                        label={`External Only: ${modeCounts['external-only']}`}
+                        sx={{ bgcolor: SEAT_MODE_CONFIGS['external-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['external-only'].strokeColor}` }}
+                      />
+                    </Stack>
+                  </Stack>
+                </Paper>
+
+                {/* Visual Preview */}
+                <Box
+                  sx={{
+                    flexGrow: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: '#fafafa',
+                    minHeight: 300,
+                    p: 2,
+                  }}
+                >
+                  {tableConfig.type === 'round' ? (
+                    <RoundTablePreview
+                      seats={seatOrdering}
+                      seatModes={seatModes}
+                      startPosition={startPosition}
+                      onSeatClick={handleSeatClick}
+                      activeTab={activeTab}
+                    />
+                  ) : (
+                    <RectangleTablePreview
+                      top={tableConfig.rectangleSeats?.top || 0}
+                      bottom={tableConfig.rectangleSeats?.bottom || 0}
+                      left={tableConfig.rectangleSeats?.left || 0}
+                      right={tableConfig.rectangleSeats?.right || 0}
+                      seats={seatOrdering}
+                      seatModes={seatModes}
+                      startPosition={startPosition}
+                      onSeatClick={handleSeatClick}
+                      activeTab={activeTab}
+                    />
+                  )}
+                </Box>
+
+                {/* Legend */}
+                <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
+                  <Stack direction="row" spacing={3}>
+                    {Object.values(SEAT_MODE_CONFIGS).map((config) => (
+                      <Stack key={config.mode} direction="row" alignItems="center" spacing={1}>
+                        <Box
+                          sx={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: '50%',
+                            bgcolor: config.color,
+                            border: `2px ${config.mode === 'external-only' ? 'dashed' : 'solid'} ${config.strokeColor}`,
+                          }}
+                        />
+                        <Typography variant="caption">{config.label}</Typography>
+                      </Stack>
+                    ))}
+                  </Stack>
+                </Paper>
+              </Stack>
+            )}
+          </DialogContent>
+
+        </>)}
+
+      {topTab === 'suggested' && (
+        <DialogContent sx={{ minHeight: 500 }}>
+          <Box
+            sx={{
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'text.secondary',
+            }}
+          >
+            <Typography variant="body2">
+              Suggested layouts coming soon.
+            </Typography>
+          </Box>
+        </DialogContent>
+      )}
 
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
