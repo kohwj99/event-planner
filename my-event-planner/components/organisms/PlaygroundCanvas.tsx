@@ -1,4 +1,4 @@
-// components/organisms/PlaygroundCanvas.tsx - UPDATED WITH SEAT MODE VISUALS
+// components/organisms/PlaygroundCanvas.tsx - UPDATED WITH MEAL PLAN DISPLAY
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -14,16 +14,20 @@ import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
+import Restaurant from '@mui/icons-material/Restaurant';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
 import { Seat, SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
-import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
 
 // Helper function to get rank stars
 function getRankStars(ranking: number): string {
@@ -60,12 +64,37 @@ export default function PlaygroundCanvas() {
 
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
+  const selectedMealPlanIndex = useGuestStore((s) => s.selectedMealPlanIndex);
+  const setSelectedMealPlanIndex = useGuestStore((s) => s.setSelectedMealPlanIndex);
+  
   const guests = useMemo(() => [...hostGuests, ...externalGuests], [hostGuests, externalGuests]);
   const guestLookup = useMemo(() => {
-    const m: Record<string, any> = {};
+    const m: Record<string, Guest> = {};
     guests.forEach((g) => (m[g.id] = g));
     return m;
   }, [guests]);
+
+  // Calculate max meal plans across all guests
+  const maxMealPlanCount = useMemo(() => {
+    let max = 0;
+    guests.forEach((g) => {
+      if (g.mealPlans && g.mealPlans.length > max) {
+        max = g.mealPlans.length;
+      }
+    });
+    return max;
+  }, [guests]);
+
+  // Generate meal plan options
+  const mealPlanOptions = useMemo(() => {
+    const options: { value: number | null; label: string }[] = [
+      { value: null, label: 'None' }
+    ];
+    for (let i = 0; i < maxMealPlanCount; i++) {
+      options.push({ value: i, label: `Meal Plan ${i + 1}` });
+    }
+    return options;
+  }, [maxMealPlanCount]);
 
   /** ---------- Helpers ---------- */
   function boxRectFromCenter(b: any) {
@@ -228,9 +257,9 @@ export default function PlaygroundCanvas() {
     const enter = tableGroups.enter().append('g').attr('class', 'table-group').attr('transform', (d) => `translate(${d.x},${d.y})`).style('cursor', 'grab');
 
     enter.each(function (this: SVGGElement, d: Table) {
-      const g = d3.select(this);
+      const grp = d3.select(this);
       if (d.shape === 'round') {
-        g.append('circle')
+        grp.append('circle')
           .attr('r', d.radius)
           .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
           .attr('stroke', '#0d47a1')
@@ -239,7 +268,7 @@ export default function PlaygroundCanvas() {
       } else {
         const width = d.width || 160;
         const height = d.height || 100;
-        g.append('rect')
+        grp.append('rect')
           .attr('x', -width / 2)
           .attr('y', -height / 2)
           .attr('width', width)
@@ -254,7 +283,7 @@ export default function PlaygroundCanvas() {
     enter.append('text').attr('class', 'table-label').attr('y', 5).attr('text-anchor', 'middle').attr('fill', 'white').attr('font-size', '14px');
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Update the label text on ALL tables (including existing ones) - fixes stale label after delete
+    // Update the label text on ALL tables (including existing ones)
     merged.select('text.table-label').text((d) => d.label);
 
     merged.each(function (tableDatum) {
@@ -279,6 +308,8 @@ export default function PlaygroundCanvas() {
         if (!guest) return;
         const line1 = `${guest.salutation || ''} ${guest.name || ''}`.trim();
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+        // Add extra height for meal plan display if needed
+        const hasMealPlan = selectedMealPlanIndex !== null;
         const charPx = 7;
         const estTextWidth = Math.max(line1.length, line2.length) * charPx;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
@@ -301,11 +332,9 @@ export default function PlaygroundCanvas() {
         .attr('stroke', (s) => getSeatStrokeColor(s))
         .attr('stroke-width', (s) => {
           const mode = s.mode || 'default';
-          // Thicker stroke for non-default modes to make them more visible
           return mode !== 'default' ? 2.5 : 1;
         })
         .attr('stroke-dasharray', (s) => {
-          // Add dashed stroke for external-only seats
           if (s.mode === 'external-only') return '4,2';
           return 'none';
         })
@@ -333,14 +362,10 @@ export default function PlaygroundCanvas() {
       modeIndicators.exit().remove();
 
       const modeIndicatorsEnter = modeIndicators.enter().append('g').attr('class', 'seat-mode-badge');
-
-      // Background circle for the badge
       modeIndicatorsEnter.append('circle')
         .attr('class', 'mode-badge-bg')
         .attr('r', 7)
         .attr('pointer-events', 'none');
-
-      // Text label
       modeIndicatorsEnter.append('text')
         .attr('class', 'mode-badge-text')
         .attr('text-anchor', 'middle')
@@ -350,18 +375,14 @@ export default function PlaygroundCanvas() {
         .attr('pointer-events', 'none');
 
       const mergedBadges = modeIndicatorsEnter.merge(modeIndicators as any);
-
       mergedBadges
         .attr('transform', (s) => {
           const relX = s.x - tableDatum.x;
           const relY = s.y - tableDatum.y;
-          // Position badge at top-right of seat
           return `translate(${relX + s.radius - 2}, ${relY - s.radius + 2})`;
         });
-
       mergedBadges.select('circle.mode-badge-bg')
         .attr('fill', (s) => SEAT_MODE_CONFIGS[s.mode || 'default'].strokeColor);
-
       mergedBadges.select('text.mode-badge-text')
         .attr('fill', 'white')
         .text((s) => SEAT_MODE_CONFIGS[s.mode || 'default'].shortLabel);
@@ -373,6 +394,8 @@ export default function PlaygroundCanvas() {
       guestBoxesEnter.append('rect').attr('class', 'guest-rect').attr('rx', 8).attr('ry', 8).attr('stroke-width', 1.2).attr('stroke', '#1565c0');
       guestBoxesEnter.append('text').attr('class', 'guest-name').attr('font-size', 11).attr('fill', '#0d47a1').style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
       guestBoxesEnter.append('text').attr('class', 'guest-meta').attr('font-size', 10).attr('fill', '#455a64');
+      // NEW: Add meal plan text element
+      guestBoxesEnter.append('text').attr('class', 'guest-meal-plan').attr('font-size', 9).attr('fill', '#2e7d32').attr('font-weight', 'bold');
 
       // --- Compute relaxed guest box positions ---
       const boxData: any[] = [];
@@ -389,12 +412,22 @@ export default function PlaygroundCanvas() {
         const stars = getRankStars(guest.ranking);
         const line1 = `${name}${stars}`;
         const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
-        const estTextWidth = Math.max(line1.length, line2.length) * 7;
+        
+        // Get meal plan for display
+        let mealPlanText = '';
+        if (selectedMealPlanIndex !== null) {
+          const mealPlan = guest.mealPlans?.[selectedMealPlanIndex];
+          mealPlanText = mealPlan && mealPlan.trim() ? mealPlan : 'None';
+        }
+        
+        const estTextWidth = Math.max(line1.length, line2.length, mealPlanText.length) * 7;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-        const height = 14 * 2 + 12;
+        // Add extra height if showing meal plan
+        const baseHeight = 14 * 2 + 12;
+        const height = selectedMealPlanIndex !== null ? baseHeight + 14 : baseHeight;
         const seatR = s.radius ?? 8;
         const dist = seatR + connectorGap + width / 2;
-        boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist });
+        boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist, mealPlanText });
       });
 
       /** Radial outward relaxation to prevent overlap */
@@ -415,7 +448,7 @@ export default function PlaygroundCanvas() {
 
       // Render relaxed guest boxes
       boxData.forEach((b) => {
-        const { guest, s, width, height } = b;
+        const { guest, s, width, height, mealPlanText } = b;
         const rectX = b.x - width / 2; const rectY = b.y - height / 2;
         const isHost = !!guest.fromHost;
         const hostFill = '#e3f2fd', hostStroke = '#1976d2';
@@ -441,6 +474,13 @@ export default function PlaygroundCanvas() {
           .attr('y', rectY + 14 + 14)
           .attr('text-anchor', 'middle')
           .text(`${guest.country || ''} | ${guest.company || ''}`);
+        
+        // NEW: Render meal plan text on BOTTOM LEFT
+        gbox.select('text.guest-meal-plan')
+          .attr('x', rectX + 4) // Left aligned with small padding
+          .attr('y', rectY + height - 4) // Bottom with small padding
+          .attr('text-anchor', 'start')
+          .text(selectedMealPlanIndex !== null ? `🍽️ ${mealPlanText}` : '');
       });
 
       // Update connectors to relaxed positions
@@ -468,7 +508,7 @@ export default function PlaygroundCanvas() {
 
     merged.call(drag as any);
 
-  }, [tables, moveTable, selectSeat, lockSeat, clearSeat, selectedTableId, selectedSeatId, ensureChunkExists, assignTableToChunk, expandWorldIfNeeded, cleanupEmptyChunks, hostGuests, externalGuests, connectorGap]);
+  }, [tables, moveTable, selectSeat, lockSeat, clearSeat, selectedTableId, selectedSeatId, ensureChunkExists, assignTableToChunk, expandWorldIfNeeded, cleanupEmptyChunks, hostGuests, externalGuests, connectorGap, selectedMealPlanIndex, guestLookup]);
 
   /** ---------- Handle Add Table ---------- */
   const handleAddTable = (config: TableConfig) => {
@@ -498,7 +538,7 @@ export default function PlaygroundCanvas() {
           config.roundSeats || 8,
           label,
           config.seatOrdering,
-          config.seatModes // NEW: Pass seat modes
+          config.seatModes
         );
       } else {
         const { top, bottom, left, right } = config.rectangleSeats || {
@@ -514,7 +554,7 @@ export default function PlaygroundCanvas() {
           right,
           label,
           config.seatOrdering,
-          config.seatModes // NEW: Pass seat modes
+          config.seatModes
         );
       }
 
@@ -533,142 +573,100 @@ export default function PlaygroundCanvas() {
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
 
-      {/* Statistics Panel */}
-      <SeatingStatsPanel />
-
-      {/* Seat Mode Legend */}
-      <Paper
-        elevation={2}
-        sx={{
-          position: 'absolute',
-          bottom: 24,
-          left: 24,
-          p: 1.5,
-          bgcolor: 'rgba(255,255,255,0.95)',
-          borderRadius: 2,
-        }}
-      >
-        <Typography variant="caption" fontWeight="bold" sx={{ mb: 1, display: 'block' }}>
-          Seat Modes
-        </Typography>
-        <Stack spacing={0.5}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Box
-              sx={{
-                width: 16,
-                height: 16,
-                borderRadius: '50%',
-                bgcolor: SEAT_MODE_CONFIGS['default'].color,
-                border: `2px solid ${SEAT_MODE_CONFIGS['default'].strokeColor}`,
+      {/* TOP LEFT CONTROL PANEL - Meal Plan Dropdown */}
+      {maxMealPlanCount > 0 && (
+        <Paper
+          elevation={3}
+          sx={{
+            position: 'absolute',
+            top: 16,
+            left: 16,
+            p: 2,
+            minWidth: 200,
+            bgcolor: 'white',
+            borderRadius: 2,
+          }}
+        >
+          <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+            <Restaurant color="success" fontSize="small" />
+            <Typography variant="subtitle2" fontWeight="bold">
+              Select Meal Plan
+            </Typography>
+          </Stack>
+          <FormControl fullWidth size="small">
+            <Select
+              value={selectedMealPlanIndex === null ? 'none' : selectedMealPlanIndex}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedMealPlanIndex(val === 'none' ? null : Number(val));
               }}
-            />
-            <Typography variant="caption">Default (Any Guest)</Typography>
-          </Stack>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Box sx={{ position: 'relative' }}>
-              <Box
-                sx={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: '50%',
-                  bgcolor: SEAT_MODE_CONFIGS['host-only'].color,
-                  border: `2.5px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}`,
-                }}
-              />
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: -4,
-                  right: -4,
-                  width: 10,
-                  height: 10,
-                  borderRadius: '50%',
-                  bgcolor: SEAT_MODE_CONFIGS['host-only'].strokeColor,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '6px',
-                  fontWeight: 'bold',
-                  color: 'white',
-                }}
-              >
-                H
-              </Box>
-            </Box>
-            <Typography variant="caption">Host Only</Typography>
-          </Stack>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <Box sx={{ position: 'relative' }}>
-              <Box
-                sx={{
-                  width: 16,
-                  height: 16,
-                  borderRadius: '50%',
-                  bgcolor: SEAT_MODE_CONFIGS['external-only'].color,
-                  border: `2.5px dashed ${SEAT_MODE_CONFIGS['external-only'].strokeColor}`,
-                }}
-              />
-              <Box
-                sx={{
-                  position: 'absolute',
-                  top: -4,
-                  right: -4,
-                  width: 10,
-                  height: 10,
-                  borderRadius: '50%',
-                  bgcolor: SEAT_MODE_CONFIGS['external-only'].strokeColor,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '6px',
-                  fontWeight: 'bold',
-                  color: 'white',
-                }}
-              >
-                E
-              </Box>
-            </Box>
-            <Typography variant="caption">External Only</Typography>
-          </Stack>
+            >
+              {mealPlanOptions.map((option) => (
+                <MenuItem key={option.value === null ? 'none' : option.value} value={option.value === null ? 'none' : option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {selectedMealPlanIndex !== null && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              Showing meal plan on guest boxes
+            </Typography>
+          )}
+        </Paper>
+      )}
+
+      {/* FLOATING CONTROLS - Right Side */}
+      <Stack spacing={1} sx={{ position: 'absolute', top: 16, right: 16 }}>
+        <Tooltip title="Add Table" placement="left">
+          <Fab color="primary" size="medium" onClick={handleAddTableClick}>
+            <AddIcon />
+          </Fab>
+        </Tooltip>
+        <Tooltip title="Zoom In" placement="left">
+          <Fab color="default" size="small" onClick={() => zoomByFactor(1.3)}>
+            <ZoomInIcon />
+          </Fab>
+        </Tooltip>
+        <Tooltip title="Zoom Out" placement="left">
+          <Fab color="default" size="small" onClick={() => zoomByFactor(0.7)}>
+            <ZoomOutIcon />
+          </Fab>
+        </Tooltip>
+        <Tooltip title="Reset View" placement="left">
+          <Fab color="default" size="small" onClick={resetZoom}>
+            <CenterFocusStrongIcon />
+          </Fab>
+        </Tooltip>
+      </Stack>
+
+      {/* ZOOM LEVEL + CONNECTOR GAP CONTROLS - Bottom Right */}
+      <Paper elevation={2} sx={{ position: 'absolute', bottom: 16, right: 16, px: 2, py: 1, minWidth: 140, borderRadius: 2 }}>
+        <Typography variant="caption" color="text.secondary">
+          Zoom: {Math.round(zoomLevel * 100)}%
+        </Typography>
+        <Stack direction="row" spacing={2} alignItems="center" mt={1}>
+          <Typography variant="caption">Gap:</Typography>
+          <Slider
+            size="small"
+            value={connectorGap}
+            onChange={(_, v) => setConnectorGap(v as number)}
+            min={2}
+            max={30}
+            sx={{ width: 80 }}
+          />
         </Stack>
       </Paper>
 
-      <Stack spacing={1} sx={{ position: 'absolute', bottom: 24, right: 24, alignItems: 'center' }}>
-        <Tooltip title="Add Table">
-          <Fab color="primary" size="medium" onClick={handleAddTableClick}><AddIcon /></Fab>
-        </Tooltip>
-
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-          <Tooltip title="Zoom Out">
-            <Fab size="small" onClick={() => zoomByFactor(0.8)}><ZoomOutIcon fontSize="small" /></Fab>
-          </Tooltip>
-          <Tooltip title="Reset View">
-            <Fab size="small" onClick={resetZoom}><CenterFocusStrongIcon fontSize="small" /></Fab>
-          </Tooltip>
-          <Tooltip title="Zoom In">
-            <Fab size="small" onClick={() => zoomByFactor(1.25)}><ZoomInIcon fontSize="small" /></Fab>
-          </Tooltip>
-        </Stack>
-
-        <Box sx={{ width: 120, mt: 2 }}>
-          <Typography variant="caption">Connector Gap</Typography>
-          <Slider
-            value={connectorGap}
-            min={2}
-            max={30}
-            step={1}
-            onChange={(e, val) => setConnectorGap(val as number)}
-          />
-        </Box>
-      </Stack>
-
-      {isAddTableModalOpen && (
-        <AddTableModal
-          open={isAddTableModalOpen}
-          onClose={() => setIsAddTableModalOpen(false)}
-          onConfirm={handleAddTable}
-        />
-      )}
+      {/* ADD TABLE MODAL */}
+      <AddTableModal
+        open={isAddTableModalOpen}
+        onClose={handleCloseAddModal}
+        onConfirm={(config) => {
+          handleAddTable(config);
+          handleCloseAddModal();
+        }}
+      />
     </div>
   );
 }

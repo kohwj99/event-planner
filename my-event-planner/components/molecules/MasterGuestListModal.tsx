@@ -1,3 +1,4 @@
+// components/molecules/MasterGuestListModal.tsx
 'use client';
 
 import {
@@ -35,14 +36,19 @@ import {
   Download,
   Add,
   Visibility,
+  Restaurant,
 } from '@mui/icons-material';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import MealPlanModal from './MealPlanModal';
 
 const salutations = ['Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Prof.'];
 const genders = ['Male', 'Female', 'Other'];
 const countries = ['Singapore', 'USA', 'UK', 'China', 'India', 'Japan', 'Australia'];
+
+// Define the known/required columns
+const KNOWN_COLUMNS = ['name', 'salutation', 'gender', 'country', 'company', 'title', 'ranking'];
 
 interface MasterGuestListModalProps {
   open: boolean;
@@ -72,6 +78,10 @@ export default function MasterGuestListModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Guest>>({});
   
+  // Meal Plan Modal state
+  const [mealPlanModalOpen, setMealPlanModalOpen] = useState(false);
+  const [selectedGuestForMealPlan, setSelectedGuestForMealPlan] = useState<Guest | null>(null);
+  
   const [addForm, setAddForm] = useState<Omit<Guest, 'id' | 'fromHost'>>({
     name: '',
     gender: 'Male',
@@ -80,6 +90,7 @@ export default function MasterGuestListModal({
     company: '',
     title: '',
     ranking: 10,
+    mealPlans: [],
   });
 
   if (!event) return null;
@@ -102,6 +113,18 @@ export default function MasterGuestListModal({
   const trackedCount = useMemo(() => {
     return guests.filter(g => isGuestTracked(eventId, g.id)).length;
   }, [guests, eventId, isGuestTracked]);
+
+  // Calculate max meal plans across all guests for display
+  const maxMealPlans = useMemo(() => {
+    const allGuests = [...(event?.masterHostGuests || []), ...(event?.masterExternalGuests || [])];
+    let max = 0;
+    allGuests.forEach(g => {
+      if (g.mealPlans && g.mealPlans.length > max) {
+        max = g.mealPlans.length;
+      }
+    });
+    return max;
+  }, [event]);
 
   /* -------------------- 📥 FILE UPLOAD HANDLERS -------------------- */
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -137,7 +160,7 @@ export default function MasterGuestListModal({
         skipEmptyLines: true,
         complete: (results) => {
           try {
-            const guests = parseGuestData(results.data);
+            const guests = parseGuestData(results.data, results.meta.fields || []);
             importGuests(guests);
             resolve();
           } catch (error) {
@@ -153,22 +176,75 @@ export default function MasterGuestListModal({
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
     
-    const guests = parseGuestData(jsonData);
+    // Get headers from the first row
+    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+    const headers = jsonData[0] as string[];
+    
+    // Convert to objects with headers
+    const dataWithHeaders = XLSX.utils.sheet_to_json(firstSheet) as any[];
+    
+    const guests = parseGuestData(dataWithHeaders, headers);
     importGuests(guests);
   };
 
-  const parseGuestData = (data: any[]): Omit<Guest, 'id' | 'fromHost'>[] => {
-    return data.map((row: any) => ({
-      name: row.Name || row.name || '',
-      salutation: row.Salutation || row.salutation || 'Mr.',
-      gender: (row.Gender || row.gender || 'Male') as Guest['gender'],
-      country: row.Country || row.country || 'Singapore',
-      company: row.Company || row.company || '',
-      title: row.Title || row.title || '',
-      ranking: parseInt(row.Ranking || row.ranking || '10', 10),
-    })).filter(g => g.name.trim() !== '');
+  /**
+   * Parse guest data from uploaded file
+   * Any columns after Ranking are treated as Meal Plan 1, 2, 3, etc.
+   */
+  const parseGuestData = (data: any[], headers: string[]): Omit<Guest, 'id' | 'fromHost'>[] => {
+    // Normalize headers to lowercase for comparison
+    const normalizedHeaders = headers.map(h => (h || '').toLowerCase().trim());
+    
+    // Find the index of the Ranking column
+    const rankingIndex = normalizedHeaders.findIndex(h => h === 'ranking');
+    
+    // Get additional columns after Ranking (these are meal plans)
+    const mealPlanHeaders: string[] = [];
+    if (rankingIndex !== -1) {
+      for (let i = rankingIndex + 1; i < headers.length; i++) {
+        if (headers[i] && headers[i].trim()) {
+          mealPlanHeaders.push(headers[i]);
+        }
+      }
+    }
+    
+    return data.map((row: any) => {
+      // Extract meal plans from additional columns
+      const mealPlans: string[] = [];
+      mealPlanHeaders.forEach((header) => {
+        const value = row[header] || row[header.toLowerCase()] || '';
+        if (value && String(value).trim()) {
+          mealPlans.push(String(value).trim());
+        } else {
+          // Keep empty string to maintain order
+          mealPlans.push('');
+        }
+      });
+      
+      // Filter out trailing empty meal plans but keep ones in between
+      let lastNonEmptyIndex = -1;
+      for (let i = mealPlans.length - 1; i >= 0; i--) {
+        if (mealPlans[i]) {
+          lastNonEmptyIndex = i;
+          break;
+        }
+      }
+      const trimmedMealPlans = lastNonEmptyIndex >= 0 
+        ? mealPlans.slice(0, lastNonEmptyIndex + 1) 
+        : [];
+
+      return {
+        name: row.Name || row.name || '',
+        salutation: row.Salutation || row.salutation || 'Mr.',
+        gender: (row.Gender || row.gender || 'Male') as Guest['gender'],
+        country: row.Country || row.country || 'Singapore',
+        company: row.Company || row.company || '',
+        title: row.Title || row.title || '',
+        ranking: parseInt(row.Ranking || row.ranking || '10', 10),
+        mealPlans: trimmedMealPlans,
+      };
+    }).filter(g => g.name.trim() !== '');
   };
 
   const importGuests = (guestsData: Omit<Guest, 'id' | 'fromHost'>[]) => {
@@ -193,6 +269,9 @@ export default function MasterGuestListModal({
         Company: 'Example Corp',
         Title: 'CEO',
         Ranking: 1,
+        'Meal Plan 1': 'Vegetarian',
+        'Meal Plan 2': 'No Nuts',
+        'Meal Plan 3': '',
       }
     ];
 
@@ -205,15 +284,32 @@ export default function MasterGuestListModal({
   const handleExportCurrent = () => {
     if (guests.length === 0) return;
 
-    const exportData = guests.map(g => ({
-      Name: g.name,
-      Salutation: g.salutation,
-      Gender: g.gender,
-      Country: g.country,
-      Company: g.company,
-      Title: g.title,
-      Ranking: g.ranking,
-    }));
+    // Find max meal plans to create consistent columns
+    let maxMealPlansInExport = 0;
+    guests.forEach(g => {
+      if (g.mealPlans && g.mealPlans.length > maxMealPlansInExport) {
+        maxMealPlansInExport = g.mealPlans.length;
+      }
+    });
+
+    const exportData = guests.map(g => {
+      const base: any = {
+        Name: g.name,
+        Salutation: g.salutation,
+        Gender: g.gender,
+        Country: g.country,
+        Company: g.company,
+        Title: g.title,
+        Ranking: g.ranking,
+      };
+      
+      // Add meal plan columns
+      for (let i = 0; i < maxMealPlansInExport; i++) {
+        base[`Meal Plan ${i + 1}`] = g.mealPlans?.[i] || '';
+      }
+      
+      return base;
+    });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -268,6 +364,7 @@ export default function MasterGuestListModal({
       company: '',
       title: '',
       ranking: 10,
+      mealPlans: [],
     });
   };
 
@@ -275,382 +372,451 @@ export default function MasterGuestListModal({
   const handleDeleteGuest = (guestId: string) => {
     const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
     const updatedList = guests.filter(g => g.id !== guestId);
-    updateEventDetails(eventId, { [listKey]: updatedList });
+
+    updateEventDetails(eventId, {
+      [listKey]: updatedList,
+    });
   };
 
-  /* -------------------- 👁️ TRACKING TOGGLE WITH PERSISTENCE -------------------- */
-  const handleTrackingToggle = useCallback((guestId: string) => {
-    // Toggle in tracking store (primary source of truth)
-    toggleGuestTracking(eventId, guestId);
-    
-    // CRITICAL: Sync to event store for backup persistence
-    // Use setTimeout to ensure tracking store has updated first
-    setTimeout(() => {
-      const updatedTrackedGuests = getTrackedGuests(eventId);
-      updateEventTrackedGuests(eventId, updatedTrackedGuests);
-      console.log(`🔄 Synced ${updatedTrackedGuests.length} tracked guests to event store`);
-    }, 0);
-  }, [eventId, toggleGuestTracking, getTrackedGuests, updateEventTrackedGuests]);
+  /* -------------------- 🍽️ MEAL PLAN HANDLERS -------------------- */
+  const handleOpenMealPlanModal = (guest: Guest) => {
+    setSelectedGuestForMealPlan(guest);
+    setMealPlanModalOpen(true);
+  };
+
+  const handleSaveMealPlans = (guestId: string, mealPlans: string[]) => {
+    const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
+    const updatedList = guests.map(g => 
+      g.id === guestId ? { ...g, mealPlans } : g
+    );
+
+    updateEventDetails(eventId, {
+      [listKey]: updatedList,
+    });
+  };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xl">
-      <DialogTitle>
-        <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Box>
-            <Typography variant="h6">Master Guest Lists - {event.name}</Typography>
-            {trackedCount > 0 && (
-              <Typography variant="caption" color="primary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
-                <Visibility fontSize="small" />
-                {trackedCount} guest{trackedCount !== 1 ? 's' : ''} tracked for Boss Adjacency
+    <>
+      <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box>
+              <Typography variant="h6">Master Guest List - {event.name}</Typography>
+              {trackedCount > 0 && (
+                <Typography variant="caption" color="primary">
+                  {trackedCount} guest{trackedCount > 1 ? 's' : ''} tracked for Boss Adjacency
+                </Typography>
+              )}
+              {maxMealPlans > 0 && (
+                <Typography variant="caption" color="secondary" sx={{ ml: 2 }}>
+                  • Up to {maxMealPlans} meal plan{maxMealPlans > 1 ? 's' : ''} imported
+                </Typography>
+              )}
+            </Box>
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                startIcon={<Download />}
+                onClick={handleExportTemplate}
+                variant="outlined"
+              >
+                Download Template
+              </Button>
+              <Button
+                size="small"
+                startIcon={<Download />}
+                onClick={handleExportCurrent}
+                variant="outlined"
+                disabled={guests.length === 0}
+              >
+                Export Current
+              </Button>
+            </Stack>
+          </Box>
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ bgcolor: '#fafafa' }}>
+          <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+            <Tab 
+              label={`Host Company (${event.masterHostGuests.length})`} 
+              value="host" 
+            />
+            <Tab 
+              label={`External Guests (${event.masterExternalGuests.length})`} 
+              value="external" 
+            />
+          </Tabs>
+
+          {/* Upload Section */}
+          <Box mb={3}>
+            <input
+              accept=".csv,.xlsx,.xls"
+              style={{ display: 'none' }}
+              id="guest-file-upload"
+              type="file"
+              onChange={handleFileUpload}
+            />
+            <label htmlFor="guest-file-upload">
+              <Button
+                variant="contained"
+                component="span"
+                startIcon={<UploadFile />}
+                disabled={uploading}
+              >
+                Upload Guest List (CSV/Excel)
+              </Button>
+            </label>
+            {uploading && <LinearProgress sx={{ mt: 1 }} />}
+            {uploadError && (
+              <Alert severity="error" sx={{ mt: 1 }} onClose={() => setUploadError('')}>
+                {uploadError}
+              </Alert>
+            )}
+            <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
+              Required columns: Name, Salutation, Gender, Country, Company, Title, Ranking
+            </Typography>
+            <Typography variant="caption" display="block" color="primary">
+              💡 Any columns after Ranking will be imported as Meal Plan 1, 2, 3, etc.
+            </Typography>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Add Guest Form */}
+          <Box mb={2} p={2} bgcolor="white" borderRadius={1} border="1px solid #ddd">
+            <Typography variant="subtitle2" mb={2} fontWeight={600}>
+              Add New Guest
+            </Typography>
+            <Stack direction="row" flexWrap="wrap" spacing={1.5}>
+              <TextField
+                size="small"
+                label="Salutation"
+                select
+                value={addForm.salutation}
+                onChange={(e) => setAddForm({ ...addForm, salutation: e.target.value })}
+                sx={{ minWidth: 100 }}
+              >
+                {salutations.map((s) => (
+                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                ))}
+              </TextField>
+
+              <TextField
+                size="small"
+                label="Name"
+                value={addForm.name}
+                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
+
+              <TextField
+                size="small"
+                label="Gender"
+                select
+                value={addForm.gender}
+                onChange={(e) => setAddForm({ ...addForm, gender: e.target.value as Guest['gender'] })}
+                sx={{ minWidth: 100 }}
+              >
+                {genders.map((g) => (
+                  <MenuItem key={g} value={g}>{g}</MenuItem>
+                ))}
+              </TextField>
+
+              <TextField
+                size="small"
+                label="Country"
+                select
+                value={addForm.country}
+                onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
+                sx={{ minWidth: 140 }}
+              >
+                {countries.map((c) => (
+                  <MenuItem key={c} value={c}>{c}</MenuItem>
+                ))}
+              </TextField>
+
+              <TextField
+                size="small"
+                label="Company"
+                value={addForm.company}
+                onChange={(e) => setAddForm({ ...addForm, company: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
+
+              <TextField
+                size="small"
+                label="Title"
+                value={addForm.title}
+                onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
+
+              <TextField
+                size="small"
+                label="Ranking"
+                type="number"
+                value={addForm.ranking}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, ranking: Math.min(10, Math.max(1, Number(e.target.value))) })
+                }
+                sx={{ minWidth: 100 }}
+              />
+
+              <Button
+                variant="contained"
+                onClick={handleAddGuest}
+                startIcon={<Add />}
+                sx={{ height: 40 }}
+              >
+                Add
+              </Button>
+            </Stack>
+          </Box>
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Filter & Stats */}
+          <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
+            <TextField
+              size="small"
+              placeholder="Search guests..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              sx={{ width: 300 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              Showing {filteredGuests.length} of {guests.length} guests
+            </Typography>
+          </Stack>
+
+          {/* Guest List Table Header */}
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: '80px 160px 80px 100px 140px 140px 80px 100px 80px auto',
+              gap: 1,
+              px: 1.5,
+              py: 1,
+              bgcolor: '#e0e0e0',
+              borderRadius: '4px 4px 0 0',
+              fontWeight: 600,
+              fontSize: '0.75rem',
+            }}
+          >
+            <Typography variant="caption" fontWeight="bold">Salutation</Typography>
+            <Typography variant="caption" fontWeight="bold">Name</Typography>
+            <Typography variant="caption" fontWeight="bold">Gender</Typography>
+            <Typography variant="caption" fontWeight="bold">Country</Typography>
+            <Typography variant="caption" fontWeight="bold">Company</Typography>
+            <Typography variant="caption" fontWeight="bold">Title</Typography>
+            <Typography variant="caption" fontWeight="bold">Rank</Typography>
+            <Typography variant="caption" fontWeight="bold">Meal Plans</Typography>
+            <Typography variant="caption" fontWeight="bold">Track</Typography>
+            <Typography variant="caption" fontWeight="bold">Actions</Typography>
+          </Box>
+
+          {/* Guest List Table */}
+          <Box
+            sx={{
+              maxHeight: 400,
+              overflowY: 'auto',
+              bgcolor: 'white',
+              borderRadius: '0 0 4px 4px',
+              border: '1px solid #ddd',
+            }}
+          >
+            {guests.length === 0 ? (
+              <Typography align="center" py={6} color="text.secondary">
+                No guests yet. Add guests manually or upload a file.
               </Typography>
+            ) : filteredGuests.length === 0 ? (
+              <Typography align="center" py={4} color="text.secondary">
+                No matching guests found.
+              </Typography>
+            ) : (
+              filteredGuests.map((guest) => {
+                const isEditing = editingId === guest.id;
+                const isTracked = isGuestTracked(eventId, guest.id);
+                const mealPlanCount = guest.mealPlans?.filter(mp => mp).length || 0;
+
+                return (
+                  <Box
+                    key={guest.id}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '80px 160px 80px 100px 140px 140px 80px 100px 80px auto',
+                      gap: 1,
+                      alignItems: 'center',
+                      p: 1.5,
+                      borderBottom: '1px solid #eee',
+                      bgcolor: isTracked ? '#f0f7ff' : 'transparent',
+                      '&:hover': { bgcolor: isTracked ? '#e3f2fd' : '#f9f9f9' },
+                    }}
+                  >
+                    {isEditing ? (
+                      <>
+                        <TextField
+                          size="small"
+                          select
+                          value={editForm.salutation || guest.salutation}
+                          onChange={(e) => setEditForm({ ...editForm, salutation: e.target.value })}
+                          sx={{ minWidth: 70 }}
+                        >
+                          {salutations.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+                        </TextField>
+
+                        <TextField
+                          size="small"
+                          value={editForm.name ?? guest.name}
+                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                        />
+
+                        <TextField
+                          size="small"
+                          select
+                          value={editForm.gender || guest.gender}
+                          onChange={(e) => setEditForm({ ...editForm, gender: e.target.value as Guest['gender'] })}
+                        >
+                          {genders.map(g => <MenuItem key={g} value={g}>{g}</MenuItem>)}
+                        </TextField>
+
+                        <TextField
+                          size="small"
+                          select
+                          value={editForm.country || guest.country}
+                          onChange={(e) => setEditForm({ ...editForm, country: e.target.value })}
+                        >
+                          {countries.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                        </TextField>
+
+                        <TextField
+                          size="small"
+                          value={editForm.company ?? guest.company}
+                          onChange={(e) => setEditForm({ ...editForm, company: e.target.value })}
+                        />
+
+                        <TextField
+                          size="small"
+                          value={editForm.title ?? guest.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                        />
+
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={editForm.ranking ?? guest.ranking}
+                          onChange={(e) => setEditForm({ ...editForm, ranking: Number(e.target.value) })}
+                        />
+
+                        {/* Meal Plans - not editable inline */}
+                        <Chip
+                          icon={<Restaurant />}
+                          label={mealPlanCount}
+                          size="small"
+                          color={mealPlanCount > 0 ? 'success' : 'default'}
+                        />
+
+                        {/* Track toggle disabled while editing */}
+                        <Box />
+
+                        <Stack direction="row" spacing={0.5}>
+                          <IconButton size="small" color="primary" onClick={saveEdit}>
+                            <Save />
+                          </IconButton>
+                          <IconButton size="small" onClick={cancelEdit}>
+                            <Cancel />
+                          </IconButton>
+                        </Stack>
+                      </>
+                    ) : (
+                      <>
+                        <Typography variant="body2">{guest.salutation}</Typography>
+                        <Typography variant="body2" fontWeight={500}>{guest.name}</Typography>
+                        <Typography variant="body2" color="text.secondary">{guest.gender}</Typography>
+                        <Typography variant="body2" color="text.secondary">{guest.country}</Typography>
+                        <Typography variant="body2" color="text.secondary" noWrap>{guest.company}</Typography>
+                        <Typography variant="body2" color="text.secondary" noWrap>{guest.title}</Typography>
+                        <Chip
+                          label={`${guest.ranking}`}
+                          size="small"
+                          color={guest.ranking <= 4 ? 'error' : 'default'}
+                        />
+
+                        {/* Meal Plans Button */}
+                        <Tooltip title={mealPlanCount > 0 ? `${mealPlanCount} meal plan(s)` : 'No meal plans'}>
+                          <Chip
+                            icon={<Restaurant />}
+                            label={mealPlanCount}
+                            size="small"
+                            color={mealPlanCount > 0 ? 'success' : 'default'}
+                            onClick={() => handleOpenMealPlanModal(guest)}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+
+                        {/* Boss Adjacency Tracking Toggle */}
+                        <Tooltip title={isTracked ? "Tracked for Boss Adjacency" : "Track for Boss Adjacency"}>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Visibility 
+                              fontSize="small" 
+                              sx={{ 
+                                color: isTracked ? 'primary.main' : 'text.disabled',
+                                mr: 0.5 
+                              }} 
+                            />
+                            <Switch
+                              size="small"
+                              checked={isTracked}
+                              onChange={() => toggleGuestTracking(eventId, guest.id)}
+                            />
+                          </Box>
+                        </Tooltip>
+
+                        <Stack direction="row" spacing={0.5}>
+                          <IconButton size="small" onClick={() => startEdit(guest)}>
+                            <Edit fontSize="small" />
+                          </IconButton>
+                          <IconButton 
+                            size="small" 
+                            color="error"
+                            onClick={() => handleDeleteGuest(guest.id)}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </>
+                    )}
+                  </Box>
+                );
+              })
             )}
           </Box>
-          <Stack direction="row" spacing={1}>
-            <Button
-              size="small"
-              startIcon={<Download />}
-              onClick={handleExportTemplate}
-              variant="outlined"
-            >
-              Download Template
-            </Button>
-            <Button
-              size="small"
-              startIcon={<Download />}
-              onClick={handleExportCurrent}
-              variant="outlined"
-              disabled={guests.length === 0}
-            >
-              Export Current
-            </Button>
-          </Stack>
-        </Box>
-      </DialogTitle>
+        </DialogContent>
 
-      <DialogContent dividers sx={{ bgcolor: '#fafafa' }}>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-          <Tab 
-            label={`Host Company (${event.masterHostGuests.length})`} 
-            value="host" 
-          />
-          <Tab 
-            label={`External Guests (${event.masterExternalGuests.length})`} 
-            value="external" 
-          />
-        </Tabs>
+        <DialogActions>
+          <Button onClick={onClose} variant="contained">
+            Done
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-        {/* Upload Section */}
-        <Box mb={3}>
-          <input
-            accept=".csv,.xlsx,.xls"
-            style={{ display: 'none' }}
-            id="guest-file-upload"
-            type="file"
-            onChange={handleFileUpload}
-          />
-          <label htmlFor="guest-file-upload">
-            <Button
-              variant="contained"
-              component="span"
-              startIcon={<UploadFile />}
-              disabled={uploading}
-            >
-              Upload Guest List (CSV/Excel)
-            </Button>
-          </label>
-          {uploading && <LinearProgress sx={{ mt: 1 }} />}
-          {uploadError && (
-            <Alert severity="error" sx={{ mt: 1 }} onClose={() => setUploadError('')}>
-              {uploadError}
-            </Alert>
-          )}
-          <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
-            Expected columns: Name, Salutation, Gender, Country, Company, Title, Ranking
-          </Typography>
-        </Box>
-
-        <Divider sx={{ my: 2 }} />
-
-        {/* Add Guest Form */}
-        <Box mb={2} p={2} bgcolor="white" borderRadius={1} border="1px solid #ddd">
-          <Typography variant="subtitle2" mb={2} fontWeight={600}>
-            Add New Guest
-          </Typography>
-          <Stack direction="row" flexWrap="wrap" spacing={1.5}>
-            <TextField
-              size="small"
-              label="Salutation"
-              select
-              value={addForm.salutation}
-              onChange={(e) => setAddForm({ ...addForm, salutation: e.target.value })}
-              sx={{ minWidth: 100 }}
-            >
-              {salutations.map((s) => (
-                <MenuItem key={s} value={s}>{s}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              size="small"
-              label="Name"
-              value={addForm.name}
-              onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-              sx={{ minWidth: 180 }}
-            />
-
-            <TextField
-              size="small"
-              label="Gender"
-              select
-              value={addForm.gender}
-              onChange={(e) => setAddForm({ ...addForm, gender: e.target.value as Guest['gender'] })}
-              sx={{ minWidth: 100 }}
-            >
-              {genders.map((g) => (
-                <MenuItem key={g} value={g}>{g}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              size="small"
-              label="Country"
-              select
-              value={addForm.country}
-              onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
-              sx={{ minWidth: 140 }}
-            >
-              {countries.map((c) => (
-                <MenuItem key={c} value={c}>{c}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              size="small"
-              label="Company"
-              value={addForm.company}
-              onChange={(e) => setAddForm({ ...addForm, company: e.target.value })}
-              sx={{ minWidth: 180 }}
-            />
-
-            <TextField
-              size="small"
-              label="Title"
-              value={addForm.title}
-              onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
-              sx={{ minWidth: 180 }}
-            />
-
-            <TextField
-              size="small"
-              label="Ranking"
-              type="number"
-              value={addForm.ranking}
-              onChange={(e) =>
-                setAddForm({ ...addForm, ranking: Math.min(10, Math.max(1, Number(e.target.value))) })
-              }
-              sx={{ minWidth: 100 }}
-            />
-
-            <Button
-              variant="contained"
-              onClick={handleAddGuest}
-              startIcon={<Add />}
-              sx={{ height: 40 }}
-            >
-              Add
-            </Button>
-          </Stack>
-        </Box>
-
-        <Divider sx={{ my: 2 }} />
-
-        {/* Filter & Stats */}
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
-          <TextField
-            size="small"
-            placeholder="Search guests..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            sx={{ width: 300 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search fontSize="small" />
-                </InputAdornment>
-              ),
-            }}
-          />
-          <Typography variant="body2" color="text.secondary">
-            Showing {filteredGuests.length} of {guests.length} guests
-          </Typography>
-        </Stack>
-
-        {/* Guest List Table */}
-        <Box
-          sx={{
-            maxHeight: 500,
-            overflowY: 'auto',
-            bgcolor: 'white',
-            borderRadius: 1,
-            border: '1px solid #ddd',
-          }}
-        >
-          {guests.length === 0 ? (
-            <Typography align="center" py={6} color="text.secondary">
-              No guests yet. Add guests manually or upload a file.
-            </Typography>
-          ) : filteredGuests.length === 0 ? (
-            <Typography align="center" py={4} color="text.secondary">
-              No matching guests found.
-            </Typography>
-          ) : (
-            filteredGuests.map((guest) => {
-              const isEditing = editingId === guest.id;
-              const isTracked = isGuestTracked(eventId, guest.id);
-
-              return (
-                <Stack
-                  key={guest.id}
-                  direction="row"
-                  spacing={1}
-                  alignItems="center"
-                  sx={{
-                    p: 1.5,
-                    borderBottom: '1px solid #eee',
-                    bgcolor: isTracked ? '#f0f7ff' : 'transparent',
-                    '&:hover': { bgcolor: isTracked ? '#e3f2fd' : '#f9f9f9' },
-                  }}
-                >
-                  {isEditing ? (
-                    <>
-                      <TextField
-                        size="small"
-                        select
-                        value={editForm.salutation || guest.salutation}
-                        onChange={(e) => setEditForm({ ...editForm, salutation: e.target.value })}
-                        sx={{ minWidth: 80 }}
-                      >
-                        {salutations.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                      </TextField>
-
-                      <TextField
-                        size="small"
-                        value={editForm.name ?? guest.name}
-                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        sx={{ minWidth: 160 }}
-                      />
-
-                      <TextField
-                        size="small"
-                        select
-                        value={editForm.gender || guest.gender}
-                        onChange={(e) => setEditForm({ ...editForm, gender: e.target.value as Guest['gender'] })}
-                        sx={{ minWidth: 100 }}
-                      >
-                        {genders.map(g => <MenuItem key={g} value={g}>{g}</MenuItem>)}
-                      </TextField>
-
-                      <TextField
-                        size="small"
-                        select
-                        value={editForm.country || guest.country}
-                        onChange={(e) => setEditForm({ ...editForm, country: e.target.value })}
-                        sx={{ minWidth: 120 }}
-                      >
-                        {countries.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                      </TextField>
-
-                      <TextField
-                        size="small"
-                        value={editForm.company ?? guest.company}
-                        onChange={(e) => setEditForm({ ...editForm, company: e.target.value })}
-                        sx={{ minWidth: 160 }}
-                      />
-
-                      <TextField
-                        size="small"
-                        value={editForm.title ?? guest.title}
-                        onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                        sx={{ minWidth: 160 }}
-                      />
-
-                      <TextField
-                        size="small"
-                        type="number"
-                        value={editForm.ranking ?? guest.ranking}
-                        onChange={(e) => setEditForm({ ...editForm, ranking: Number(e.target.value) })}
-                        sx={{ minWidth: 80 }}
-                      />
-
-                      <IconButton size="small" color="primary" onClick={saveEdit}>
-                        <Save />
-                      </IconButton>
-                      <IconButton size="small" onClick={cancelEdit}>
-                        <Cancel />
-                      </IconButton>
-                    </>
-                  ) : (
-                    <>
-                      <Typography variant="body2" sx={{ minWidth: 80 }}>
-                        {guest.salutation}
-                      </Typography>
-                      <Typography variant="body2" fontWeight={500} sx={{ minWidth: 160 }}>
-                        {guest.name}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 100 }}>
-                        {guest.gender}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 120 }}>
-                        {guest.country}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160 }}>
-                        {guest.company}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160 }}>
-                        {guest.title}
-                      </Typography>
-                      <Chip
-                        label={`Rank ${guest.ranking}`}
-                        size="small"
-                        color={guest.ranking <= 4 ? 'error' : 'default'}
-                        sx={{ minWidth: 80 }}
-                      />
-
-                      <Box flexGrow={1} />
-
-                      {/* Boss Adjacency Tracking Toggle */}
-                      <Tooltip title={isTracked ? "Tracked for Boss Adjacency" : "Track for Boss Adjacency"}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Visibility fontSize="small" sx={{ color: isTracked ? 'primary.main' : 'text.disabled' }} />
-                          <Switch
-                            size="small"
-                            checked={isTracked}
-                            onChange={() => handleTrackingToggle(guest.id)}
-                            color="primary"
-                          />
-                        </Box>
-                      </Tooltip>
-
-                      <IconButton size="small" onClick={() => startEdit(guest)}>
-                        <Edit fontSize="small" />
-                      </IconButton>
-                      <IconButton size="small" color="error" onClick={() => handleDeleteGuest(guest.id)}>
-                        <Delete fontSize="small" />
-                      </IconButton>
-                    </>
-                  )}
-                </Stack>
-              );
-            })
-          )}
-        </Box>
-      </DialogContent>
-
-      <DialogActions>
-        <Button onClick={onClose} variant="contained">
-          Done
-        </Button>
-      </DialogActions>
-    </Dialog>
+      {/* Meal Plan Modal */}
+      <MealPlanModal
+        open={mealPlanModalOpen}
+        onClose={() => {
+          setMealPlanModalOpen(false);
+          setSelectedGuestForMealPlan(null);
+        }}
+        guest={selectedGuestForMealPlan}
+        onSave={handleSaveMealPlans}
+      />
+    </>
   );
 }

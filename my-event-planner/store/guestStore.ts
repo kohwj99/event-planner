@@ -12,15 +12,19 @@ export interface Guest {
   ranking: number;      // 1–10 (1–4 are VIPs)
   fromHost: boolean;    // true = host company attendee
   deleted?: boolean;    // soft-delete flag
+  mealPlans?: string[]; // Variable meal plans (Meal Plan 1, 2, 3, etc.)
 }
 
 interface GuestStoreState {
   hostGuests: Guest[];
   externalGuests: Guest[];
+  selectedMealPlanIndex: number | null; // null = None, 0 = Meal Plan 1, 1 = Meal Plan 2, etc.
   addGuest: (guest: Guest) => void;
   updateGuest: (id: string, guest: Partial<Guest>) => void;
   toggleDeleted: (id: string, fromHost: boolean) => void;
   resetGuests: () => void;
+  setSelectedMealPlanIndex: (index: number | null) => void;
+  getMaxMealPlanCount: () => number;
 }
 
 export const useGuestStore = create<GuestStoreState>()(
@@ -29,6 +33,7 @@ export const useGuestStore = create<GuestStoreState>()(
       (set, get) => ({
         hostGuests: [],
         externalGuests: [],
+        selectedMealPlanIndex: null,
 
         addGuest: (guest) =>
           set((state) => {
@@ -59,6 +64,20 @@ export const useGuestStore = create<GuestStoreState>()(
           }),
 
         resetGuests: () => set({ hostGuests: [], externalGuests: [] }),
+
+        setSelectedMealPlanIndex: (index) => set({ selectedMealPlanIndex: index }),
+
+        getMaxMealPlanCount: () => {
+          const state = get();
+          const allGuests = [...state.hostGuests, ...state.externalGuests];
+          let max = 0;
+          allGuests.forEach((g) => {
+            if (g.mealPlans && g.mealPlans.length > max) {
+              max = g.mealPlans.length;
+            }
+          });
+          return max;
+        },
       }),
       { name: "guest-list-store" }
     ),
