@@ -60,7 +60,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const sessionData = getSessionById(currentSessionId);
     if (!sessionData) return;
 
-    const { tables, chunks } = useSeatStore.getState();
+    const { tables, chunks, selectedMealPlanIndex } = useSeatStore.getState();
 
     // Collect all assigned guest IDs from seats
     const activeGuestIds = new Set<string>();
@@ -74,11 +74,12 @@ export const useSessionLoader = (sessionId: string | null) => {
 
     console.log(`Saving session: ${sessionData.session.name}`);
     
-    // Save seat plan to event store
+    // Save seat plan to event store (including selectedMealPlanIndex)
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
+      selectedMealPlanIndex,
     });
 
     // Check if this session is tracked (using eventStore as source of truth)
@@ -127,6 +128,7 @@ export const useSessionLoader = (sessionId: string | null) => {
         chunks: seatPlan.chunks,
         selectedTableId: null,
         selectedSeatId: null,
+        selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
       });
     } else {
       // New session - initialize with proper chunk structure
@@ -168,7 +170,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   useEffect(() => {
     // CRITICAL: Don't do anything until mounted and stores are hydrated
     if (!isReady) {
-      console.log('â³ Waiting for store hydration before loading session...');
+      console.log('Ã¢ÂÂ³ Waiting for store hydration before loading session...');
       return;
     }
 

@@ -13,18 +13,21 @@ import {
 } from "@/utils/chunkHelper";
 import { detectProximityViolations, ProximityViolation } from "@/utils/violationDetector";
 
-/* -------------------- 🔧 Types for Proximity Rules -------------------- */
+/* -------------------- ðŸ”§ Types for Proximity Rules -------------------- */
 export interface ProximityRules {
   sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>;
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
 }
 
-/* -------------------- 🧠 Store Interface -------------------- */
+/* -------------------- ðŸ§  Store Interface -------------------- */
 interface SeatStoreState {
   tables: Table[];
   chunks: Record<string, Chunk>;
   selectedTableId: string | null;
   selectedSeatId: string | null;
+
+  // Meal plan selection (per session)
+  selectedMealPlanIndex: number | null;
 
   // Violation detection state
   violations: ProximityViolation[];
@@ -46,12 +49,15 @@ interface SeatStoreState {
   swapSeats: (table1Id: string, seat1Id: string, table2Id: string, seat2Id: string) => boolean;
   findGuestSeat: (guestId: string) => { tableId: string; seatId: string } | null;
 
+  // Meal plan action
+  setSelectedMealPlanIndex: (index: number | null) => void;
+
   // Violation detection actions
   setProximityRules: (rules: ProximityRules | null) => void;
   setGuestLookup: (lookup: Record<string, any>) => void;
   detectViolations: () => void;
 
-  // 🆕 NEW: Table-level operations
+  // ðŸ†• NEW: Table-level operations
   lockAllSeatsInTable: (tableId: string) => void;
   unlockAllSeatsInTable: (tableId: string) => void;
   deleteTable: (tableId: string) => void;
@@ -73,7 +79,7 @@ interface SeatStoreState {
   } | null;
 }
 
-/* -------------------- 🔧 Helper: Extract table number from label -------------------- */
+/* -------------------- ðŸ”§ Helper: Extract table number from label -------------------- */
 function extractTableNumber(label: string): number | null {
   // Match patterns like "Table 1", "Table 10", "VIP Table 5", etc.
   const match = label.match(/(\d+)\s*$/);
@@ -85,7 +91,7 @@ function updateTableLabel(label: string, newNumber: number): string {
   return label.replace(/(\d+)\s*$/, `${newNumber}`);
 }
 
-/* -------------------- 🧩 Zustand Store -------------------- */
+/* -------------------- ðŸ§© Zustand Store -------------------- */
 export const useSeatStore = create<SeatStoreState>()(
   devtools(
     persist(
@@ -101,6 +107,9 @@ export const useSeatStore = create<SeatStoreState>()(
         },
         selectedTableId: null,
         selectedSeatId: null,
+
+        // Meal plan selection (per session)
+        selectedMealPlanIndex: null,
 
         // Violation detection state
         violations: [],
@@ -159,7 +168,7 @@ export const useSeatStore = create<SeatStoreState>()(
             })),
           })),
 
-        /* ---------- 🧍 Guest Seat Assignment ---------- */
+        /* ---------- ðŸ§ Guest Seat Assignment ---------- */
         assignGuestToSeat: (tableId, seatId, guestId) =>
           set((state) => ({
             tables: state.tables.map((t) =>
@@ -234,6 +243,7 @@ export const useSeatStore = create<SeatStoreState>()(
             },
             selectedTableId: null,
             selectedSeatId: null,
+            selectedMealPlanIndex: null,
             violations: [],
           }),
 
@@ -248,6 +258,9 @@ export const useSeatStore = create<SeatStoreState>()(
           }
           return null;
         },
+
+        // Meal plan action
+        setSelectedMealPlanIndex: (index) => set({ selectedMealPlanIndex: index }),
 
         swapSeats: (table1Id, seat1Id, table2Id, seat2Id) => {
           const state = get();
@@ -355,7 +368,7 @@ export const useSeatStore = create<SeatStoreState>()(
           return swapSuccessful;
         },
 
-        /* ---------- 🔍 VIOLATION DETECTION ---------- */
+        /* ---------- ðŸ” VIOLATION DETECTION ---------- */
         setProximityRules: (rules) => set({ proximityRules: rules }),
 
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
@@ -376,7 +389,7 @@ export const useSeatStore = create<SeatStoreState>()(
           set({ violations });
         },
 
-        /* ---------- 🆕 NEW: TABLE-LEVEL OPERATIONS ---------- */
+        /* ---------- ðŸ†• NEW: TABLE-LEVEL OPERATIONS ---------- */
 
         /**
          * Lock all seats in a table

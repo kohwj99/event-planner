@@ -9,7 +9,7 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- 📊 ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- ðŸ“Š ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Record of which guests were adjacent to a tracked guest in a specific session
@@ -44,7 +44,7 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
+/* -------------------- ðŸ“… SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
@@ -54,7 +54,7 @@ export interface Session {
   startTime: string;      // ISO string
   endTime: string;        // ISO string
   
-  // 🆕 Session-level guest inheritance
+  // ðŸ†• Session-level guest inheritance
   inheritedHostGuestIds: string[];     // IDs from masterHostGuests
   inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
@@ -62,7 +62,7 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // 🆕 Boss Adjacency Tracking Metadata
+  // ðŸ†• Boss Adjacency Tracking Metadata
   isTrackedForAdjacency?: boolean;  // Whether this session is tracked
   planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
   needsAdjacencyReview?: boolean;   // Flag if upstream session changed
@@ -71,6 +71,7 @@ export interface Session {
     tables: Table[];
     chunks: Record<string, Chunk>;
     activeGuestIds: string[];
+    selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
   };
 }
 
@@ -80,7 +81,7 @@ export interface EventDay {
   sessions: Session[];
 }
 
-/* -------------------- 🎯 EVENT TYPE -------------------- */
+/* -------------------- ðŸŽ¯ EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
@@ -93,7 +94,7 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // 🆕 Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  // ðŸ†• Boss Adjacency Tracking Configuration (CONSOLIDATED)
   trackedGuestIds?: string[];                    // IDs of guests being tracked
   trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
   adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data

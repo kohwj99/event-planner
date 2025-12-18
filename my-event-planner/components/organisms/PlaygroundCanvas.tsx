@@ -58,6 +58,8 @@ export default function PlaygroundCanvas() {
     clearSeat,
     selectedTableId,
     selectedSeatId,
+    selectedMealPlanIndex,
+    setSelectedMealPlanIndex,
     ensureChunkExists,
     assignTableToChunk,
     expandWorldIfNeeded,
@@ -66,8 +68,6 @@ export default function PlaygroundCanvas() {
 
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
-  const selectedMealPlanIndex = useGuestStore((s) => s.selectedMealPlanIndex);
-  const setSelectedMealPlanIndex = useGuestStore((s) => s.setSelectedMealPlanIndex);
   
   const guests = useMemo(() => [...hostGuests, ...externalGuests], [hostGuests, externalGuests]);
   const guestLookup = useMemo(() => {
@@ -417,9 +417,9 @@ export default function PlaygroundCanvas() {
         
         const estTextWidth = Math.max(line1.length, line2.length, mealPlanText.length) * 7;
         const width = Math.min(Math.max(60, estTextWidth + 20), 300);
-        // Add extra height if showing meal plan
-        const baseHeight = 14 * 2 + 12;
-        const height = selectedMealPlanIndex !== null ? baseHeight + 14 : baseHeight;
+        // Keep box height constant - always include space for meal plan to avoid text shifting
+        const baseHeight = 14 * 2 + 12; // Height for name + meta
+        const height = baseHeight + 14; // Always include meal plan row space
         const seatR = s.radius ?? 8;
         const dist = seatR + connectorGap + width / 2;
         boxData.push({ s, guest, nx, ny, width, height, x: relX + nx * dist, y: relY + ny * dist, relX, relY, minRadialDist: dist, mealPlanText });
@@ -457,20 +457,25 @@ export default function PlaygroundCanvas() {
           .attr('fill', isHost ? hostFill : externalFill)
           .attr('stroke', isHost ? hostStroke : externalStroke);
 
+        // Calculate vertical centering for name/meta in the main content area (excluding meal plan row)
+        const mainContentHeight = height - 14; // Exclude meal plan row at bottom
+        const textBlockHeight = 28; // Two lines at 14px each
+        const verticalOffset = (mainContentHeight - textBlockHeight) / 2;
+        
         const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
         const stars = getRankStars(guest.ranking);
         gbox.select('text.guest-name')
           .attr('x', b.x)
-          .attr('y', rectY + 14)
+          .attr('y', rectY + verticalOffset + 14) // Centered in main content area
           .attr('text-anchor', 'middle')
           .text(`${name}${stars}`);
         gbox.select('text.guest-meta')
           .attr('x', b.x)
-          .attr('y', rectY + 14 + 14)
+          .attr('y', rectY + verticalOffset + 14 + 14) // Below name
           .attr('text-anchor', 'middle')
           .text(`${guest.country || ''} | ${guest.company || ''}`);
         
-        // NEW: Render meal plan text on BOTTOM LEFT
+        // Render meal plan text on BOTTOM LEFT (only when selected)
         gbox.select('text.guest-meal-plan')
           .attr('x', rectX + 4) // Left aligned with small padding
           .attr('y', rectY + height - 4) // Bottom with small padding
