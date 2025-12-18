@@ -6,19 +6,17 @@ import * as d3 from 'd3';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import Fab from '@mui/material/Fab';
-import ZoomInIcon from '@mui/icons-material/ZoomIn';
-import ZoomOutIcon from '@mui/icons-material/ZoomOut';
-import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 import AddIcon from '@mui/icons-material/Add';
 import Tooltip from '@mui/material/Tooltip';
 import Stack from '@mui/material/Stack';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
 import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import Restaurant from '@mui/icons-material/Restaurant';
+import Popover from '@mui/material/Popover';
+import Badge from '@mui/material/Badge';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 
@@ -44,6 +42,10 @@ export default function PlaygroundCanvas() {
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
+
+  // Meal plan popover state
+  const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const mealPlanPopoverOpen = Boolean(mealPlanAnchorEl);
 
   const {
     tables,
@@ -144,20 +146,13 @@ export default function PlaygroundCanvas() {
   const handleAddTableClick = () => setIsAddTableModalOpen(true);
   const handleCloseAddModal = () => setIsAddTableModalOpen(false);
 
-  const zoomByFactor = (factor: number) => {
-    if (!svgRef.current || !zoomBehavior.current) return;
-    d3.select(svgRef.current)
-      .transition()
-      .duration(200)
-      .call(zoomBehavior.current.scaleBy as any, factor);
+  /** ---------- Meal Plan Popover Handlers ---------- */
+  const handleMealPlanClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setMealPlanAnchorEl(event.currentTarget);
   };
 
-  const resetZoom = () => {
-    if (!svgRef.current || !zoomBehavior.current) return;
-    d3.select(svgRef.current)
-      .transition()
-      .duration(300)
-      .call((zoomBehavior.current as any).transform, d3.zoomIdentity);
+  const handleMealPlanClose = () => {
+    setMealPlanAnchorEl(null);
   };
 
   /** ---------- SVG + Zoom ---------- */
@@ -573,21 +568,71 @@ export default function PlaygroundCanvas() {
         <Box component="svg" ref={svgRef} sx={{ width: '100%', height: '100%', display: 'block', userSelect: 'none', touchAction: 'none' }} preserveAspectRatio="xMidYMid meet" />
       </Paper>
 
-      {/* TOP LEFT CONTROL PANEL - Meal Plan Dropdown */}
-      {maxMealPlanCount > 0 && (
-        <Paper
-          elevation={3}
-          sx={{
-            position: 'absolute',
-            top: 16,
-            left: 16,
-            p: 2,
-            minWidth: 200,
-            bgcolor: 'white',
-            borderRadius: 2,
-          }}
-        >
-          <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+      {/* BOTTOM RIGHT CONTROLS - FABs above Card */}
+      <Box sx={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1.5 }}>
+        {/* FLOATING ACTION BUTTONS - Vertical stack */}
+        <Stack direction="column" spacing={1} alignItems="flex-end">
+          {/* Meal Plan FAB - Left */}
+          {maxMealPlanCount > 0 && (
+            <Tooltip title="Select Meal Plan" placement="left">
+              <Badge
+                badgeContent={selectedMealPlanIndex !== null ? selectedMealPlanIndex + 1 : 0}
+                color="success"
+                invisible={selectedMealPlanIndex === null}
+              >
+                <Fab
+                  color={selectedMealPlanIndex !== null ? 'success' : 'default'}
+                  size="medium"
+                  onClick={handleMealPlanClick}
+                >
+                  <Restaurant />
+                </Fab>
+              </Badge>
+            </Tooltip>
+          )}
+          {/* Add Table FAB - Right */}
+          <Tooltip title="Add Table" placement="left">
+            <Fab color="primary" size="medium" onClick={handleAddTableClick}>
+              <AddIcon />
+            </Fab>
+          </Tooltip>
+        </Stack>
+
+        {/* ZOOM LEVEL + CONNECTOR GAP CONTROLS - Card */}
+        <Paper elevation={2} sx={{ px: 2, py: 1, minWidth: 140, borderRadius: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            Zoom: {Math.round(zoomLevel * 100)}%
+          </Typography>
+          <Stack direction="row" spacing={2} alignItems="center" mt={1}>
+            <Typography variant="caption">Gap:</Typography>
+            <Slider
+              size="small"
+              value={connectorGap}
+              onChange={(_, v) => setConnectorGap(v as number)}
+              min={2}
+              max={30}
+              sx={{ width: 80 }}
+            />
+          </Stack>
+        </Paper>
+      </Box>
+
+      {/* Meal Plan Popover */}
+      <Popover
+        open={mealPlanPopoverOpen}
+        anchorEl={mealPlanAnchorEl}
+        onClose={handleMealPlanClose}
+        anchorOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+      >
+        <Paper sx={{ p: 2, minWidth: 220 }}>
+          <Stack direction="row" spacing={1} alignItems="center" mb={2}>
             <Restaurant color="success" fontSize="small" />
             <Typography variant="subtitle2" fontWeight="bold">
               Select Meal Plan
@@ -599,6 +644,7 @@ export default function PlaygroundCanvas() {
               onChange={(e) => {
                 const val = e.target.value;
                 setSelectedMealPlanIndex(val === 'none' ? null : Number(val));
+                handleMealPlanClose();
               }}
             >
               {mealPlanOptions.map((option) => (
@@ -614,49 +660,7 @@ export default function PlaygroundCanvas() {
             </Typography>
           )}
         </Paper>
-      )}
-
-      {/* FLOATING CONTROLS - Right Side */}
-      <Stack spacing={1} sx={{ position: 'absolute', top: 16, right: 16 }}>
-        <Tooltip title="Add Table" placement="left">
-          <Fab color="primary" size="medium" onClick={handleAddTableClick}>
-            <AddIcon />
-          </Fab>
-        </Tooltip>
-        <Tooltip title="Zoom In" placement="left">
-          <Fab color="default" size="small" onClick={() => zoomByFactor(1.3)}>
-            <ZoomInIcon />
-          </Fab>
-        </Tooltip>
-        <Tooltip title="Zoom Out" placement="left">
-          <Fab color="default" size="small" onClick={() => zoomByFactor(0.7)}>
-            <ZoomOutIcon />
-          </Fab>
-        </Tooltip>
-        <Tooltip title="Reset View" placement="left">
-          <Fab color="default" size="small" onClick={resetZoom}>
-            <CenterFocusStrongIcon />
-          </Fab>
-        </Tooltip>
-      </Stack>
-
-      {/* ZOOM LEVEL + CONNECTOR GAP CONTROLS - Bottom Right */}
-      <Paper elevation={2} sx={{ position: 'absolute', bottom: 16, right: 16, px: 2, py: 1, minWidth: 140, borderRadius: 2 }}>
-        <Typography variant="caption" color="text.secondary">
-          Zoom: {Math.round(zoomLevel * 100)}%
-        </Typography>
-        <Stack direction="row" spacing={2} alignItems="center" mt={1}>
-          <Typography variant="caption">Gap:</Typography>
-          <Slider
-            size="small"
-            value={connectorGap}
-            onChange={(_, v) => setConnectorGap(v as number)}
-            min={2}
-            max={30}
-            sx={{ width: 80 }}
-          />
-        </Stack>
-      </Paper>
+      </Popover>
 
       {/* ADD TABLE MODAL */}
       <AddTableModal
