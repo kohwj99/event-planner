@@ -190,7 +190,7 @@ export default function ModifyTableModal({
   });
 
   // Ordering configuration
-  const [direction, setDirection] = useState<Direction>('clockwise');
+  const [direction, setDirection] = useState<Direction>('counter-clockwise');
   const [useAlternating, setUseAlternating] = useState<boolean>(false);
   const [startPosition, setStartPosition] = useState<number>(0);
 
@@ -221,7 +221,7 @@ export default function ModifyTableModal({
       setSeatModes(extractSeatModes(table));
 
       // Reset ordering to defaults
-      setDirection('clockwise');
+      setDirection('counter-clockwise');
       setUseAlternating(false);
       setStartPosition(0);
       setActiveTab('config');
@@ -292,7 +292,7 @@ export default function ModifyTableModal({
 
   // Reset ordering
   const handleResetOrdering = () => {
-    setDirection('clockwise');
+    setDirection('counter-clockwise');
     setUseAlternating(false);
     setStartPosition(0);
   };

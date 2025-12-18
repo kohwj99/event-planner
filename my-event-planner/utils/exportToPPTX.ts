@@ -17,6 +17,34 @@ const rgbToHex = (color: string) => {
   ).toUpperCase();
 };
 
+// Helper to parse transform attribute and extract cumulative translate values
+const getAccumulatedTransform = (element: Element, stopAtClass: string): { tx: number; ty: number } => {
+  let tx = 0;
+  let ty = 0;
+  let current: Element | null = element.parentElement;
+  
+  while (current) {
+    // Stop when we reach the table-group (which is handled separately via relTx/relTy)
+    if (current.classList?.contains(stopAtClass)) {
+      break;
+    }
+    
+    const transform = current.getAttribute("transform");
+    if (transform) {
+      // Parse translate(x, y) or translate(x y)
+      const translateMatch = transform.match(/translate\(\s*([^,\s)]+)[\s,]*([^)\s]*)\s*\)/);
+      if (translateMatch) {
+        tx += parseFloat(translateMatch[1]) || 0;
+        ty += parseFloat(translateMatch[2]) || 0;
+      }
+    }
+    
+    current = current.parentElement;
+  }
+  
+  return { tx, ty };
+};
+
 // Updated signature to match the call in page.tsx
 export const exportToPPTX = async (tables: any[]) => {
   const pptx = new pptxgen();
@@ -116,7 +144,7 @@ export const exportToPPTX = async (tables: any[]) => {
       children.forEach((child) => {
         const tag = child.tagName.toLowerCase();
         const style = window.getComputedStyle(child);
-        if (style.display === "none") return;
+        if (style.display === "none" || style.visibility === "hidden") return;
 
         const fillHex = rgbToHex(style.fill);
         const strokeHex = rgbToHex(style.stroke);
@@ -143,9 +171,12 @@ export const exportToPPTX = async (tables: any[]) => {
         }
 
         // Skip non-visual or structural elements
-        if (["g", "defs", "clippath", "style", "script"].includes(tag)) return;
+        if (["g", "defs", "clippath", "style", "script", "title", "desc"].includes(tag)) return;
 
-        // Get Bounding Box
+        // Get accumulated transform from parent groups (e.g., g.seat-mode-badge, g.guest-box)
+        const accumulated = getAccumulatedTransform(child, "table-group");
+
+        // Get Bounding Box (in local coordinate space)
         let bbox: DOMRect;
         try {
           bbox = (child as SVGGraphicsElement).getBBox();
@@ -153,15 +184,18 @@ export const exportToPPTX = async (tables: any[]) => {
           return;
         }
 
-        // Map Coordinates: Local -> Relative to Chunk -> Scaled to Slide
-        const finalX = (relTx + bbox.x) * scale + marginX;
-        const finalY = (relTy + bbox.y) * scale + marginY;
+        // Map Coordinates: Local + Accumulated Transform -> Relative to Chunk -> Scaled to Slide
+        const finalX = (relTx + accumulated.tx + bbox.x) * scale + marginX;
+        const finalY = (relTy + accumulated.ty + bbox.y) * scale + marginY;
         const finalW = bbox.width * scale;
         const finalH = bbox.height * scale;
 
         // --- SHAPE GENERATION ---
 
         if (tag === "circle" || tag === "ellipse") {
+          // Skip circles/ellipses with zero dimensions
+          if (finalW < 0.001 || finalH < 0.001) return;
+          
           slide.addShape(pptx.ShapeType.ellipse, {
             x: finalX,
             y: finalY,
@@ -173,7 +207,25 @@ export const exportToPPTX = async (tables: any[]) => {
         } 
         
         else if (tag === "rect") {
+          // Skip rects with zero dimensions
+          if (finalW < 0.001 || finalH < 0.001) return;
+          
           const rx = parseFloat(child.getAttribute("rx") || "0");
+          const ry = parseFloat(child.getAttribute("ry") || "0");
+          const rectWidth = parseFloat(child.getAttribute("width") || "0");
+          const rectHeight = parseFloat(child.getAttribute("height") || "0");
+          
+          // Calculate proper rectRadius as a proportion
+          // pptxgenjs rectRadius is relative to the shorter side of the rectangle
+          // We need to convert SVG's absolute rx/ry to a proportion
+          let rectRadius = 0;
+          if (rx > 0 && rectWidth > 0 && rectHeight > 0) {
+            const shorterSide = Math.min(rectWidth, rectHeight);
+            // Calculate the proportion, but cap it to prevent oval shapes
+            // SVG rx=8 on a 100px wide box should be subtle, not oval
+            rectRadius = Math.min((rx / shorterSide) * 0.5, 0.1); // Cap at 0.1 for subtle corners
+          }
+          
           slide.addShape(rx > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
             x: finalX,
             y: finalY,
@@ -181,21 +233,23 @@ export const exportToPPTX = async (tables: any[]) => {
             h: finalH,
             fill: pptFill,
             line: pptLine,
-            rectRadius: rx > 0 ? 0.15 : 0, 
+            rectRadius: rectRadius,
           });
         } 
         
         else if (tag === "line") {
             // Line needs special handling for direction
+            // Lines can have zero width (vertical) or zero height (horizontal)
             const x1 = parseFloat(child.getAttribute("x1") || "0");
             const y1 = parseFloat(child.getAttribute("y1") || "0");
             const x2 = parseFloat(child.getAttribute("x2") || "0");
             const y2 = parseFloat(child.getAttribute("y2") || "0");
 
-            let sx = (relTx + x1) * scale + marginX;
-            let sy = (relTy + y1) * scale + marginY;
-            let ex = (relTx + x2) * scale + marginX;
-            let ey = (relTy + y2) * scale + marginY;
+            // Apply accumulated transform to line endpoints
+            let sx = (relTx + accumulated.tx + x1) * scale + marginX;
+            let sy = (relTy + accumulated.ty + y1) * scale + marginY;
+            let ex = (relTx + accumulated.tx + x2) * scale + marginX;
+            let ey = (relTy + accumulated.ty + y2) * scale + marginY;
 
             // Normalize
             if (sx > ex) {
@@ -205,8 +259,8 @@ export const exportToPPTX = async (tables: any[]) => {
 
             const lx = sx;
             const ly = Math.min(sy, ey); 
-            const lw = Math.abs(ex - sx);
-            const lh = Math.abs(ey - sy);
+            const lw = Math.max(0.01, Math.abs(ex - sx));
+            const lh = Math.max(0.01, Math.abs(ey - sy));
             const flipV = sy > ey;
 
             slide.addShape(pptx.ShapeType.line, {
@@ -224,6 +278,8 @@ export const exportToPPTX = async (tables: any[]) => {
           if (!textContent.trim()) return;
 
           const fontSizePx = parseFloat(style.fontSize) || 12;
+          const fontWeight = style.fontWeight;
+          const isBold = fontWeight === "bold" || parseInt(fontWeight) >= 700;
           const pptFontSize = Math.max(1, fontSizePx * scale * 72);
           
           const anchor = child.getAttribute("text-anchor") || "start";
@@ -259,6 +315,7 @@ export const exportToPPTX = async (tables: any[]) => {
             h: finalH,
             fontSize: pptFontSize,
             color: textColor,
+            bold: isBold,
             align: align,
             valign: "middle", 
             fill: { type: "none" },

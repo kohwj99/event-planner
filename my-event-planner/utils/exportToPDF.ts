@@ -5,9 +5,64 @@ import { useSeatStore } from "@/store/seatStore";
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 
 /**
- * Export each chunk as one A4 landscape page (no visual scaling of Playground).
- * Fixes: resets any zoom transform on the cloned svg before setting viewBox.
- * Improvement: Increased html2canvas scale for higher resolution output.
+ * Inline all computed styles as attributes on SVG elements.
+ * This ensures styles are preserved when the SVG is cloned.
+ */
+function inlineComputedStyles(svgElement: SVGSVGElement): void {
+  const elementsToStyle = svgElement.querySelectorAll('circle, rect, ellipse, line, path, text, polygon, polyline');
+  
+  elementsToStyle.forEach((el) => {
+    const computed = window.getComputedStyle(el);
+    
+    // Inline fill
+    const fill = computed.fill;
+    if (fill && fill !== 'none') {
+      el.setAttribute('fill', fill);
+    }
+    
+    // Inline stroke
+    const stroke = computed.stroke;
+    if (stroke && stroke !== 'none') {
+      el.setAttribute('stroke', stroke);
+    }
+    
+    // Inline stroke-width
+    const strokeWidth = computed.strokeWidth;
+    if (strokeWidth) {
+      el.setAttribute('stroke-width', strokeWidth);
+    }
+    
+    // Inline stroke-dasharray
+    const strokeDasharray = computed.strokeDasharray;
+    if (strokeDasharray && strokeDasharray !== 'none') {
+      el.setAttribute('stroke-dasharray', strokeDasharray);
+    }
+    
+    // Inline opacity
+    const opacity = computed.opacity;
+    if (opacity && opacity !== '1') {
+      el.setAttribute('opacity', opacity);
+    }
+    
+    // For text elements, inline font properties
+    if (el.tagName.toLowerCase() === 'text') {
+      const fontSize = computed.fontSize;
+      const fontFamily = computed.fontFamily;
+      const fontWeight = computed.fontWeight;
+      
+      if (fontSize) el.setAttribute('font-size', fontSize);
+      if (fontFamily) el.setAttribute('font-family', fontFamily);
+      if (fontWeight && fontWeight !== 'normal' && fontWeight !== '400') {
+        el.setAttribute('font-weight', fontWeight);
+      }
+    }
+  });
+}
+
+/**
+ * Export each chunk as one PDF page maintaining exact aspect ratio.
+ * The chunk aspect ratio (CHUNK_WIDTH:CHUNK_HEIGHT = 2000:1200 = 5:3) is preserved.
+ * Uses high resolution rasterization for quality output.
  */
 export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") {
   const container = document.getElementById(elementId);
@@ -22,24 +77,33 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     return;
   }
 
-  // A4 landscape physical inches
-  const A4_IN_W = 11.6929133858;
-  const A4_IN_H = 8.2677165354;
+  // Chunk aspect ratio
+  const CHUNK_ASPECT = CHUNK_WIDTH / CHUNK_HEIGHT; // 2000/1200 = 1.6667
 
-  // Choose base export DPI (150 recommended for balanced quality/size; use 300 for print)
+  // Use custom page size that matches chunk aspect ratio
+  // We'll use a page that's 10 inches wide to maintain good resolution
+  const PAGE_WIDTH_IN = 10;
+  const PAGE_HEIGHT_IN = PAGE_WIDTH_IN / CHUNK_ASPECT; // ~6 inches
+
+  // DPI settings
   const exportDPI = 150;
-  // Canvas scale factor for high-resolution rasterization (4x 150 DPI = 600 DPI)
-  const RASTER_SCALE = 4;
+  const RASTER_SCALE = 3; // 3x for good quality without being too heavy
   
-  const pagePxW = Math.round(A4_IN_W * exportDPI);
-  const pagePxH = Math.round(A4_IN_H * exportDPI);
+  // Calculate page dimensions in pixels at export DPI
+  const pagePxW = Math.round(PAGE_WIDTH_IN * exportDPI);
+  const pagePxH = Math.round(PAGE_HEIGHT_IN * exportDPI);
 
-  const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  const pdfW_pt = pdf.internal.pageSize.getWidth();
-  const pdfH_pt = pdf.internal.pageSize.getHeight();
+  // Create PDF with custom page size (dimensions in inches converted to points: 1 inch = 72 points)
+  const pdfW_pt = PAGE_WIDTH_IN * 72;
+  const pdfH_pt = PAGE_HEIGHT_IN * 72;
+  
+  const pdf = new jsPDF({ 
+    orientation: "landscape", 
+    unit: "pt", 
+    format: [pdfW_pt, pdfH_pt] // Custom format matching chunk aspect ratio
+  });
 
   // px -> points conversion for given DPI
-  // This calculates how many PDF points (1/72 of an inch) are in one rendered pixel (at exportDPI)
   const pxToPt = (px: number) => (px * 72) / exportDPI;
 
   const chunks = useSeatStore.getState().getAllChunksSorted();
@@ -47,12 +111,12 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     // fallback: capture whole container
     const canvas = await html2canvas(container, { 
       backgroundColor: "#fff", 
-      scale: RASTER_SCALE, // Use high scale for fallback too
+      scale: RASTER_SCALE,
       useCORS: true 
     });
     const img = canvas.toDataURL("image/png");
     const ratio = Math.min(pdfW_pt / (canvas.width / RASTER_SCALE), pdfH_pt / (canvas.height / RASTER_SCALE));
-    const drawW = (canvas.width / RASTER_SCALE) * ratio; // Divide canvas size by scale factor before scaling to page
+    const drawW = (canvas.width / RASTER_SCALE) * ratio;
     const drawH = (canvas.height / RASTER_SCALE) * ratio;
     const x = (pdfW_pt - drawW) / 2;
     const y = (pdfH_pt - drawH) / 2;
@@ -61,26 +125,25 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     return;
   }
 
-  // Helper: capture exactly one chunk area into a canvas sized pagePxW x pagePxH
+  // Helper: capture exactly one chunk area into a canvas
   async function captureChunkCanvas(row: number, col: number) {
     const clone = svg!.cloneNode(true) as SVGSVGElement;
 
-    // Important: reset transform on zoom-layer (if present) so viewBox maps to world coords
+    // Reset transform on zoom-layer to get world coordinates
     const zoomLayer = clone.querySelector("g.zoom-layer") as SVGGElement | null;
     if (zoomLayer) {
-      zoomLayer.setAttribute("transform", ""); // clear transform
+      zoomLayer.setAttribute("transform", "");
     }
 
-    // set the viewBox exactly to chunk world rect
-    clone.setAttribute("viewBox", `${col * CHUNK_WIDTH} ${row * CHUNK_HEIGHT} ${CHUNK_WIDTH} ${CHUNK_HEIGHT}`);
+    // Set viewBox exactly to chunk world rect
+    const viewBoxX = col * CHUNK_WIDTH;
+    const viewBoxY = row * CHUNK_HEIGHT;
+    clone.setAttribute("viewBox", `${viewBoxX} ${viewBoxY} ${CHUNK_WIDTH} ${CHUNK_HEIGHT}`);
 
-    // force no aspect-preserve letterboxing
-    clone.setAttribute("preserveAspectRatio", "none");
+    // Use xMidYMid meet to maintain aspect ratio
+    clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
 
-    // size the clone to page pixel dimensions
-    // NOTE: HTML elements are sized based on CSS pixels (approx 96 DPI).
-    // We size it to the target DPI in CSS pixels (pagePxW/H) and use RASTER_SCALE
-    // in html2canvas to achieve the final high resolution.
+    // Size the clone to page pixel dimensions
     clone.setAttribute("width", `${pagePxW}px`);
     clone.setAttribute("height", `${pagePxH}px`);
     clone.style.width = `${pagePxW}px`;
@@ -95,13 +158,17 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     wrapper.style.width = `${pagePxW}px`;
     wrapper.style.height = `${pagePxH}px`;
     wrapper.style.background = "#ffffff";
+    wrapper.style.overflow = "hidden";
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
 
-    // rasterize at a high scale (e.g., scale: 4 for 4x resolution)
+    // IMPORTANT: Inline computed styles AFTER clone is in DOM so getComputedStyle works
+    inlineComputedStyles(clone);
+
+    // Rasterize at high scale for quality
     const canvas = await html2canvas(wrapper, {
       backgroundColor: "#ffffff",
-      scale: RASTER_SCALE, // KEY FIX: High resolution rendering
+      scale: RASTER_SCALE,
       useCORS: true,
       logging: false,
       allowTaint: true,
@@ -111,26 +178,28 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     return canvas;
   }
 
-  // Iterate chunks (top-left -> right -> down)
+  // Iterate chunks (sorted top-left -> right -> down)
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     const canvas = await captureChunkCanvas(c.row, c.col);
     const imgData = canvas.toDataURL("image/png");
 
-    // The canvas is RASTER_SCALE times the intended size (pagePxW x pagePxH)
-    // We use the original pagePxW/H for drawing, which aligns with pxToPt.
-    const drawW_pt = pxToPt(pagePxW);
-    const drawH_pt = pxToPt(pagePxH);
-    const offX_pt = (pdfW_pt - drawW_pt) / 2;
-    const offY_pt = (pdfH_pt - drawH_pt) / 2;
+    // Calculate draw dimensions to fill the page
+    const drawW_pt = pdfW_pt;
+    const drawH_pt = pdfH_pt;
 
-    if (i > 0) pdf.addPage("a4", "landscape");
-    pdf.addImage(imgData, "PNG", offX_pt, offY_pt, drawW_pt, drawH_pt);
+    if (i > 0) pdf.addPage([pdfW_pt, pdfH_pt], "landscape");
+    
+    // Draw image to fill the entire page
+    pdf.addImage(imgData, "PNG", 0, 0, drawW_pt, drawH_pt);
+    
+    // Add chunk label
     pdf.setFontSize(10);
+    pdf.setTextColor(128, 128, 128);
     pdf.text(`Chunk R${c.row}C${c.col}`, 10, 14);
   }
 
-  // Overview: render bounding box for all chunks
+  // Overview page: render bounding box for all chunks
   const minCol = Math.min(...chunks.map((ch) => ch.col));
   const maxCol = Math.max(...chunks.map((ch) => ch.col));
   const minRow = Math.min(...chunks.map((ch) => ch.row));
@@ -140,14 +209,26 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const worldW = (maxCol - minCol + 1) * CHUNK_WIDTH;
   const worldH = (maxRow - minRow + 1) * CHUNK_HEIGHT;
 
-  // compute px size for overview that fits within pagePxW/H
-  const scaleOverview = Math.min(pagePxW / worldW, pagePxH / worldH, 1);
-  const overviewPxW = Math.max(1, Math.round(worldW * scaleOverview));
-  const overviewPxH = Math.max(1, Math.round(worldH * scaleOverview));
+  // Calculate overview dimensions that fit within page while maintaining aspect ratio
+  const worldAspect = worldW / worldH;
+  let overviewPxW: number;
+  let overviewPxH: number;
+  
+  if (worldAspect > CHUNK_ASPECT) {
+    // World is wider, fit by width
+    overviewPxW = pagePxW;
+    overviewPxH = Math.round(overviewPxW / worldAspect);
+  } else {
+    // World is taller, fit by height
+    overviewPxH = pagePxH;
+    overviewPxW = Math.round(overviewPxH * worldAspect);
+  }
 
   const overviewClone = svg.cloneNode(true) as SVGSVGElement;
+  
   const zoomLayer2 = overviewClone.querySelector("g.zoom-layer") as SVGGElement | null;
   if (zoomLayer2) zoomLayer2.setAttribute("transform", "");
+  
   overviewClone.setAttribute("viewBox", `${worldX} ${worldY} ${worldW} ${worldH}`);
   overviewClone.setAttribute("preserveAspectRatio", "xMidYMid meet");
   overviewClone.setAttribute("width", `${overviewPxW}px`);
@@ -167,24 +248,29 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   wrapperOv.appendChild(overviewClone);
   document.body.appendChild(wrapperOv);
 
+  // IMPORTANT: Inline computed styles AFTER clone is in DOM so getComputedStyle works
+  inlineComputedStyles(overviewClone);
+
   const overviewCanvas = await html2canvas(wrapperOv, {
     backgroundColor: "#ffffff",
-    scale: RASTER_SCALE, // KEY FIX: High resolution rendering
+    scale: RASTER_SCALE,
     useCORS: true,
     logging: false,
     allowTaint: true,
   });
   document.body.removeChild(wrapperOv);
 
+  // Calculate overview position to center on page
   const ovW_pt = pxToPt(overviewPxW);
   const ovH_pt = pxToPt(overviewPxH);
   const ovOffsetX = (pdfW_pt - ovW_pt) / 2;
   const ovOffsetY = (pdfH_pt - ovH_pt) / 2;
 
   const overviewData = overviewCanvas.toDataURL("image/png");
-  pdf.addPage("a4", "landscape");
+  pdf.addPage([pdfW_pt, pdfH_pt], "landscape");
   pdf.addImage(overviewData, "PNG", ovOffsetX, ovOffsetY, ovW_pt, ovH_pt);
   pdf.setFontSize(12);
+  pdf.setTextColor(0, 0, 0);
   pdf.text("Full Map Overview", 10, 16);
 
   pdf.save(filename);
