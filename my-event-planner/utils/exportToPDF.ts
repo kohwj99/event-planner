@@ -196,7 +196,6 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     // Add chunk label
     pdf.setFontSize(10);
     pdf.setTextColor(128, 128, 128);
-    pdf.text(`Chunk R${c.row}C${c.col}`, 10, 14);
   }
 
   // Overview page: render bounding box for all chunks

@@ -182,7 +182,7 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
 
   // Reset to defaults
   const handleResetOrdering = () => {
-    setDirection('clockwise');
+    setDirection('counter-clockwise');
     setUseAlternating(false);
     setStartPosition(0);
   };
@@ -216,7 +216,7 @@ export default function AddTableModal({ open, onClose, onConfirm }: AddTableModa
 
     // Reset for next use
     setActiveTab('config');
-    setDirection('clockwise');
+    setDirection('counter-clockwise');
     setUseAlternating(false);
     setStartPosition(0);
     setSeatModes(Array.from({ length: totalSeats }, () => 'default' as SeatMode));
