@@ -1,5 +1,6 @@
 // components/molecules/SeatModeControls.tsx
 // Reusable component for configuring seat modes (default, host-only, external-only)
+// Uses centralized color configuration from colorConfig.ts
 
 'use client';
 
@@ -21,7 +22,36 @@ import {
   Public, 
   RadioButtonUnchecked,
 } from '@mui/icons-material';
-import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
+import { SeatMode } from '@/types/Seat';
+import { useColorScheme } from '@/store/colorModeStore';
+import { ColorScheme } from '@/utils/colorConfig';
+
+// ============================================================================
+// HELPER TO GET MODE COLORS FROM SCHEME
+// ============================================================================
+
+function getModeColorsFromScheme(mode: SeatMode, colorScheme: ColorScheme) {
+  switch (mode) {
+    case 'host-only':
+      return {
+        fill: colorScheme.seats.hostOnlyFill,
+        stroke: colorScheme.seats.hostOnlyStroke,
+        muiColor: 'primary' as const,
+      };
+    case 'external-only':
+      return {
+        fill: colorScheme.seats.externalOnlyFill,
+        stroke: colorScheme.seats.externalOnlyStroke,
+        muiColor: 'error' as const,
+      };
+    default:
+      return {
+        fill: colorScheme.seats.defaultFill,
+        stroke: colorScheme.seats.defaultStroke,
+        muiColor: 'success' as const,
+      };
+  }
+}
 
 // ============================================================================
 // MAIN CONTROLS COMPONENT
@@ -42,8 +72,22 @@ export default function SeatModeControls({
   showResetButton = true,
   modeCounts,
 }: SeatModeControlsProps) {
+  const colorScheme = useColorScheme();
+  
+  const defaultColors = getModeColorsFromScheme('default', colorScheme);
+  const hostColors = getModeColorsFromScheme('host-only', colorScheme);
+  const externalColors = getModeColorsFromScheme('external-only', colorScheme);
+
   return (
-    <Paper elevation={0} sx={{ p: compact ? 1.5 : 2, bgcolor: '#e8f5e9' }}>
+    <Paper 
+      elevation={0} 
+      sx={{ 
+        p: compact ? 1.5 : 2, 
+        bgcolor: colorScheme.seats.defaultFill,
+        border: `1px solid ${colorScheme.seats.defaultStroke}`,
+        borderRadius: 2,
+      }}
+    >
       <Stack spacing={compact ? 1.5 : 2}>
         <Stack 
           direction="row" 
@@ -51,7 +95,9 @@ export default function SeatModeControls({
           alignItems="center" 
           justifyContent="space-between"
         >
-          <Typography variant={compact ? 'body2' : 'subtitle2'}>Quick Actions:</Typography>
+          <Typography variant={compact ? 'body2' : 'subtitle2'} fontWeight="bold">
+            Quick Actions:
+          </Typography>
           
           {showResetButton && onReset && (
             <Button
@@ -65,13 +111,20 @@ export default function SeatModeControls({
           )}
         </Stack>
 
-        <Stack direction="row" spacing={1} flexWrap="wrap">
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Button
             size="small"
             variant="outlined"
-            color="success"
             onClick={() => onSetAllModes('default')}
             startIcon={<RadioButtonUnchecked />}
+            sx={{
+              borderColor: defaultColors.stroke,
+              color: defaultColors.stroke,
+              '&:hover': {
+                borderColor: defaultColors.stroke,
+                bgcolor: defaultColors.fill,
+              },
+            }}
           >
             All Default
             {modeCounts && ` (${modeCounts['default']})`}
@@ -79,9 +132,16 @@ export default function SeatModeControls({
           <Button
             size="small"
             variant="outlined"
-            color="primary"
             onClick={() => onSetAllModes('host-only')}
             startIcon={<Person />}
+            sx={{
+              borderColor: hostColors.stroke,
+              color: hostColors.stroke,
+              '&:hover': {
+                borderColor: hostColors.stroke,
+                bgcolor: hostColors.fill,
+              },
+            }}
           >
             All Host Only
             {modeCounts && ` (${modeCounts['host-only']})`}
@@ -89,9 +149,16 @@ export default function SeatModeControls({
           <Button
             size="small"
             variant="outlined"
-            color="error"
             onClick={() => onSetAllModes('external-only')}
             startIcon={<Public />}
+            sx={{
+              borderColor: externalColors.stroke,
+              color: externalColors.stroke,
+              '&:hover': {
+                borderColor: externalColors.stroke,
+                bgcolor: externalColors.fill,
+              },
+            }}
           >
             All External Only
             {modeCounts && ` (${modeCounts['external-only']})`}
@@ -119,32 +186,71 @@ interface SeatModeLegendProps {
 }
 
 export function SeatModeLegend({ modeCounts, compact = false }: SeatModeLegendProps) {
+  const colorScheme = useColorScheme();
+
+  const modes: { mode: SeatMode; label: string }[] = [
+    { mode: 'default', label: 'Default' },
+    { mode: 'host-only', label: 'Host Only' },
+    { mode: 'external-only', label: 'External Only' },
+  ];
+
   return (
-    <Paper elevation={0} sx={{ p: compact ? 1 : 1.5, bgcolor: '#f5f5f5' }}>
+    <Paper elevation={0} sx={{ p: compact ? 1 : 1.5, bgcolor: '#f5f5f5', borderRadius: 1.5 }}>
       <Stack 
         direction="row" 
         spacing={compact ? 1.5 : 3} 
         alignItems="center" 
         justifyContent="center"
         flexWrap="wrap"
+        useFlexGap
       >
-        {Object.values(SEAT_MODE_CONFIGS).map((config) => (
-          <Stack key={config.mode} direction="row" alignItems="center" spacing={0.5}>
-            <Box
-              sx={{
-                width: compact ? 12 : 16,
-                height: compact ? 12 : 16,
-                borderRadius: '50%',
-                bgcolor: config.color,
-                border: `2px ${config.mode === 'external-only' ? 'dashed' : 'solid'} ${config.strokeColor}`,
-              }}
-            />
-            <Typography variant="caption">
-              {config.label}
-              {modeCounts && ` (${modeCounts[config.mode]})`}
-            </Typography>
-          </Stack>
-        ))}
+        {modes.map(({ mode, label }) => {
+          const colors = getModeColorsFromScheme(mode, colorScheme);
+          return (
+            <Stack key={mode} direction="row" alignItems="center" spacing={0.5}>
+              <Box
+                sx={{
+                  width: compact ? 12 : 16,
+                  height: compact ? 12 : 16,
+                  borderRadius: '50%',
+                  bgcolor: colors.fill,
+                  border: `2px ${mode === 'external-only' ? 'dashed' : 'solid'} ${colors.stroke}`,
+                }}
+              />
+              <Typography variant="caption">
+                {label}
+                {modeCounts && ` (${modeCounts[mode]})`}
+              </Typography>
+            </Stack>
+          );
+        })}
+
+        {/* Locked and Selected states */}
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Box
+            sx={{
+              width: compact ? 12 : 16,
+              height: compact ? 12 : 16,
+              borderRadius: '50%',
+              bgcolor: colorScheme.seats.lockedFill,
+              border: `2px solid ${colorScheme.seats.lockedStroke}`,
+            }}
+          />
+          <Typography variant="caption">Locked</Typography>
+        </Stack>
+
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Box
+            sx={{
+              width: compact ? 12 : 16,
+              height: compact ? 12 : 16,
+              borderRadius: '50%',
+              bgcolor: colorScheme.seats.selectedFill,
+              border: `2px solid ${colorScheme.seats.selectedStroke}`,
+            }}
+          />
+          <Typography variant="caption">Selected</Typography>
+        </Stack>
       </Stack>
     </Paper>
   );
@@ -167,10 +273,16 @@ export function SeatModeMenu({
   onSelect,
   currentMode = 'default',
 }: SeatModeMenuProps) {
+  const colorScheme = useColorScheme();
+
   const handleSelect = (mode: SeatMode) => {
     onSelect(mode);
     onClose();
   };
+
+  const defaultColors = getModeColorsFromScheme('default', colorScheme);
+  const hostColors = getModeColorsFromScheme('host-only', colorScheme);
+  const externalColors = getModeColorsFromScheme('external-only', colorScheme);
 
   return (
     <Menu
@@ -185,7 +297,7 @@ export function SeatModeMenu({
         selected={currentMode === 'default'}
       >
         <ListItemIcon>
-          <RadioButtonUnchecked sx={{ color: SEAT_MODE_CONFIGS['default'].strokeColor }} />
+          <RadioButtonUnchecked sx={{ color: defaultColors.stroke }} />
         </ListItemIcon>
         <ListItemText 
           primary="Default" 
@@ -197,7 +309,7 @@ export function SeatModeMenu({
         selected={currentMode === 'host-only'}
       >
         <ListItemIcon>
-          <Person sx={{ color: SEAT_MODE_CONFIGS['host-only'].strokeColor }} />
+          <Person sx={{ color: hostColors.stroke }} />
         </ListItemIcon>
         <ListItemText 
           primary="Host Only" 
@@ -209,7 +321,7 @@ export function SeatModeMenu({
         selected={currentMode === 'external-only'}
       >
         <ListItemIcon>
-          <Public sx={{ color: SEAT_MODE_CONFIGS['external-only'].strokeColor }} />
+          <Public sx={{ color: externalColors.stroke }} />
         </ListItemIcon>
         <ListItemText 
           primary="External Only" 
@@ -237,6 +349,8 @@ export function ModePatternSelector({
   onPatternChange,
   compact = false,
 }: ModePatternSelectorProps) {
+  const colorScheme = useColorScheme();
+
   const patterns = [
     { key: 'allDefault', label: 'All Default', description: 'No restrictions' },
     { key: 'alternatingHostExternal', label: 'Alternating', description: 'Host/External alternating' },
@@ -246,15 +360,25 @@ export function ModePatternSelector({
 
   return (
     <Stack spacing={1}>
-      <Typography variant={compact ? 'body2' : 'subtitle2'}>Mode Pattern:</Typography>
-      <Stack direction="row" spacing={1} flexWrap="wrap">
+      <Typography variant={compact ? 'body2' : 'subtitle2'} fontWeight="bold">
+        Mode Pattern:
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         {patterns.map((p) => (
           <Button
             key={p.key}
             size="small"
             variant={selectedPattern === p.key ? 'contained' : 'outlined'}
             onClick={() => onPatternChange(p.key, DEFAULT_MODE_PATTERNS[p.key])}
-            sx={{ textTransform: 'none' }}
+            sx={{ 
+              textTransform: 'none',
+              ...(selectedPattern === p.key && {
+                bgcolor: colorScheme.ui.primary,
+                '&:hover': {
+                  bgcolor: colorScheme.ui.primary,
+                },
+              }),
+            }}
           >
             {p.label}
           </Button>

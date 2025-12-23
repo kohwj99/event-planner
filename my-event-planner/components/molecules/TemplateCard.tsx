@@ -1,5 +1,6 @@
 // components/molecules/TemplateCard.tsx
 // Card component for displaying table templates in a grid layout
+// Uses centralized color configuration from colorConfig.ts
 
 'use client';
 
@@ -32,6 +33,7 @@ import {
 import { useState } from 'react';
 import { TableTemplate, SESSION_TYPE_COLORS } from '@/types/Template';
 import { scaleTemplate, getTemplateBaseSeatCount } from '@/utils/templateScaler';
+import { useColorScheme } from '@/store/colorModeStore';
 import TablePreview from '../atoms/TablePreview';
 
 // ============================================================================
@@ -58,6 +60,7 @@ export function TemplateCard({
   showActions = true,
 }: TemplateCardProps) {
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
+  const colorScheme = useColorScheme();
 
   const baseSeatCount = getTemplateBaseSeatCount(template);
   const scaledResult = scaleTemplate(template, baseSeatCount);
@@ -95,10 +98,10 @@ export function TemplateCard({
         display: 'flex',
         flexDirection: 'column',
         border: selected ? '2px solid' : '1px solid',
-        borderColor: selected ? 'primary.main' : 'divider',
+        borderColor: selected ? colorScheme.ui.primary : 'divider',
         transition: 'all 0.2s',
         '&:hover': {
-          borderColor: 'primary.light',
+          borderColor: colorScheme.ui.primary,
           boxShadow: 2,
         },
       }}
@@ -128,6 +131,7 @@ export function TemplateCard({
             seatModes={scaledResult.seatModes}
             size="small"
             showLabels={false}
+            colorScheme={colorScheme}
           />
 
           {/* Built-in indicator */}
@@ -262,6 +266,8 @@ interface CreateTemplateCardProps {
 }
 
 export function CreateTemplateCard({ onClick }: CreateTemplateCardProps) {
+  const colorScheme = useColorScheme();
+
   return (
     <Card
       variant="outlined"
@@ -277,7 +283,7 @@ export function CreateTemplateCard({ onClick }: CreateTemplateCardProps) {
         cursor: 'pointer',
         transition: 'all 0.2s',
         '&:hover': {
-          borderColor: 'primary.main',
+          borderColor: colorScheme.ui.primary,
           bgcolor: 'action.hover',
         },
       }}

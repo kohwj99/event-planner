@@ -1,12 +1,15 @@
-// components/atom.tsx
+// components/atoms/TablePreview.tsx
 // Reusable SVG table preview component for both round and rectangle tables
 // Used in AddTableModal, ModifyTableModal, TemplateCard, and CreateEditTemplateModal
+// Uses centralized color configuration from colorConfig.ts
 
 'use client';
 
 import { useMemo } from 'react';
 import { Box, Chip } from '@mui/material';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
+import { useColorScheme } from '@/store/colorModeStore';
+import { ColorScheme, STANDARD_COLORS } from '@/utils/colorConfig';
 
 // ============================================================================
 // SHARED TYPES
@@ -19,6 +22,33 @@ export interface SeatPosition {
 }
 
 export type InteractionMode = 'none' | 'ordering' | 'modes';
+
+// ============================================================================
+// HELPER FUNCTION TO GET SEAT COLORS
+// ============================================================================
+
+function getSeatColorsFromScheme(
+  mode: SeatMode,
+  colorScheme: ColorScheme
+): { fill: string; stroke: string } {
+  switch (mode) {
+    case 'host-only':
+      return {
+        fill: colorScheme.seats.hostOnlyFill,
+        stroke: colorScheme.seats.hostOnlyStroke,
+      };
+    case 'external-only':
+      return {
+        fill: colorScheme.seats.externalOnlyFill,
+        stroke: colorScheme.seats.externalOnlyStroke,
+      };
+    default:
+      return {
+        fill: colorScheme.seats.defaultFill,
+        stroke: colorScheme.seats.defaultStroke,
+      };
+  }
+}
 
 // ============================================================================
 // ROUND TABLE PREVIEW
@@ -34,6 +64,7 @@ interface RoundTablePreviewProps {
   size?: 'small' | 'medium' | 'large';
   showLabels?: boolean;
   highlightPosition?: number | null;
+  colorScheme?: ColorScheme;
 }
 
 export function RoundTablePreview({
@@ -46,7 +77,12 @@ export function RoundTablePreview({
   size = 'medium',
   showLabels = true,
   highlightPosition = null,
+  colorScheme: propColorScheme,
 }: RoundTablePreviewProps) {
+  // Use provided color scheme or get from store
+  const storeColorScheme = useColorScheme();
+  const colorScheme = propColorScheme || storeColorScheme;
+
   // Size configurations
   const sizeConfig = {
     small: { container: 120, table: 35, seat: 8, font: 8 },
@@ -91,8 +127,8 @@ export function RoundTablePreview({
           cx={centerX}
           cy={centerY}
           r={config.table}
-          fill="#e0e0e0"
-          stroke="#9e9e9e"
+          fill="#e8e8e8"
+          stroke="#bdbdbd"
           strokeWidth={2}
         />
 
@@ -100,12 +136,16 @@ export function RoundTablePreview({
         {seatPositions.map((pos) => {
           const seatNumber = seatOrdering[pos.index] || pos.index + 1;
           const mode = seatModes[pos.index] || 'default';
-          const modeConfig = SEAT_MODE_CONFIGS[mode];
+          const seatColors = getSeatColorsFromScheme(mode, colorScheme);
           const isStart = pos.index === startPosition;
           const isHighlighted = highlightPosition === pos.index;
 
-          const fillColor = modeConfig.color;
-          const strokeColor = isStart ? '#4caf50' : isHighlighted ? '#ff9800' : modeConfig.strokeColor;
+          const fillColor = seatColors.fill;
+          const strokeColor = isStart 
+            ? colorScheme.ui.success 
+            : isHighlighted 
+              ? colorScheme.seats.selectedStroke 
+              : seatColors.stroke;
           const strokeWidth = isStart || isHighlighted ? 3 : 2;
           const strokeDasharray = mode === 'external-only' ? '3,2' : 'none';
 
@@ -130,14 +170,14 @@ export function RoundTablePreview({
                   y={pos.y + config.font / 3}
                   textAnchor="middle"
                   fontSize={config.font}
-                  fill={isStart ? 'white' : '#0d47a1'}
+                  fill={isStart ? 'white' : colorScheme.table.tableStroke}
                   fontWeight={isStart ? 'bold' : 'normal'}
                 >
                   {seatNumber}
                 </text>
               )}
               {/* Mode indicator for small views */}
-              {size === 'small' && mode !== 'default' && modeConfig.shortLabel && (
+              {size === 'small' && mode !== 'default' && (
                 <text
                   x={pos.x}
                   y={pos.y + config.seat + 8}
@@ -146,7 +186,7 @@ export function RoundTablePreview({
                   fill={strokeColor}
                   fontWeight="bold"
                 >
-                  {modeConfig.shortLabel}
+                  {mode === 'host-only' ? 'H' : 'E'}
                 </text>
               )}
             </g>
@@ -182,6 +222,7 @@ interface RectangleTablePreviewProps {
   showLabels?: boolean;
   highlightPosition?: number | null;
   growthSides?: { top: boolean; bottom: boolean; left: boolean; right: boolean };
+  colorScheme?: ColorScheme;
 }
 
 export function RectangleTablePreview({
@@ -195,7 +236,12 @@ export function RectangleTablePreview({
   showLabels = true,
   highlightPosition = null,
   growthSides,
+  colorScheme: propColorScheme,
 }: RectangleTablePreviewProps) {
+  // Use provided color scheme or get from store
+  const storeColorScheme = useColorScheme();
+  const colorScheme = propColorScheme || storeColorScheme;
+
   // Size configurations
   const sizeConfig = {
     small: { width: 150, height: 100, seat: 8, font: 7, tablePadding: 20 },
@@ -298,8 +344,8 @@ export function RectangleTablePreview({
           height={tableHeight}
           rx={8}
           ry={8}
-          fill="#e0e0e0"
-          stroke="#9e9e9e"
+          fill="#e8e8e8"
+          stroke="#bdbdbd"
           strokeWidth={2}
         />
 
@@ -312,7 +358,7 @@ export function RectangleTablePreview({
                 y={centerY - tableHeight / 2 - config.seat - 20}
                 textAnchor="middle"
                 fontSize={10}
-                fill="#4caf50"
+                fill={colorScheme.ui.success}
               >
                 ↕ grows
               </text>
@@ -323,7 +369,7 @@ export function RectangleTablePreview({
                 y={centerY + tableHeight / 2 + config.seat + 28}
                 textAnchor="middle"
                 fontSize={10}
-                fill="#4caf50"
+                fill={colorScheme.ui.success}
               >
                 ↕ grows
               </text>
@@ -334,7 +380,7 @@ export function RectangleTablePreview({
                 y={centerY}
                 textAnchor="middle"
                 fontSize={10}
-                fill="#4caf50"
+                fill={colorScheme.ui.success}
                 transform={`rotate(-90, ${centerX - tableWidth / 2 - config.seat - 20}, ${centerY})`}
               >
                 ↕ grows
@@ -346,7 +392,7 @@ export function RectangleTablePreview({
                 y={centerY}
                 textAnchor="middle"
                 fontSize={10}
-                fill="#4caf50"
+                fill={colorScheme.ui.success}
                 transform={`rotate(90, ${centerX + tableWidth / 2 + config.seat + 20}, ${centerY})`}
               >
                 ↕ grows
@@ -359,12 +405,16 @@ export function RectangleTablePreview({
         {seatPositions.map((pos) => {
           const seatNumber = seatOrdering[pos.index] || pos.index + 1;
           const mode = seatModes[pos.index] || 'default';
-          const modeConfig = SEAT_MODE_CONFIGS[mode];
+          const seatColors = getSeatColorsFromScheme(mode, colorScheme);
           const isStart = pos.index === startPosition;
           const isHighlighted = highlightPosition === pos.index;
 
-          const fillColor = modeConfig.color;
-          const strokeColor = isStart ? '#4caf50' : isHighlighted ? '#ff9800' : modeConfig.strokeColor;
+          const fillColor = seatColors.fill;
+          const strokeColor = isStart 
+            ? colorScheme.ui.success 
+            : isHighlighted 
+              ? colorScheme.seats.selectedStroke 
+              : seatColors.stroke;
           const strokeWidth = isStart || isHighlighted ? 3 : 2;
           const strokeDasharray = mode === 'external-only' ? '3,2' : 'none';
 
@@ -389,7 +439,7 @@ export function RectangleTablePreview({
                   y={pos.y + config.font / 3}
                   textAnchor="middle"
                   fontSize={config.font}
-                  fill={isStart ? 'white' : '#0d47a1'}
+                  fill={isStart ? 'white' : colorScheme.table.tableStroke}
                   fontWeight={isStart ? 'bold' : 'normal'}
                 >
                   {seatNumber}
@@ -433,6 +483,7 @@ interface TablePreviewProps {
   size?: 'small' | 'medium' | 'large';
   showLabels?: boolean;
   highlightPosition?: number | null;
+  colorScheme?: ColorScheme;
 }
 
 export default function TablePreview({
@@ -448,6 +499,7 @@ export default function TablePreview({
   size = 'medium',
   showLabels = true,
   highlightPosition = null,
+  colorScheme,
 }: TablePreviewProps) {
   if (type === 'round') {
     return (
@@ -461,6 +513,7 @@ export default function TablePreview({
         size={size}
         showLabels={showLabels}
         highlightPosition={highlightPosition}
+        colorScheme={colorScheme}
       />
     );
   }
@@ -477,6 +530,7 @@ export default function TablePreview({
       showLabels={showLabels}
       highlightPosition={highlightPosition}
       growthSides={growthSides}
+      colorScheme={colorScheme}
     />
   );
 }

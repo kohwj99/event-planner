@@ -1,6 +1,6 @@
 // utils/tableSVGHelper.ts
 // Helper functions for generating table SVG elements in PlaygroundCanvas
-// Extracted to keep PlaygroundCanvas.tsx manageable and prevent code loss
+// Uses centralized color configuration from colorConfig.ts
 //
 // IMPORTANT: This file contains the RADIAL CONFIGURATION for guest text boxes
 // around BOTH round AND rectangle tables. This creates an "oval" formation
@@ -8,8 +8,16 @@
 
 import * as d3 from 'd3';
 import { Table } from '@/types/Table';
-import { Seat, SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
+import { Seat, SeatMode } from '@/types/Seat';
 import { Guest } from '@/store/guestStore';
+import {
+  ColorScheme,
+  getSeatFillColor as getConfigSeatFillColor,
+  getSeatStrokeColor as getConfigSeatStrokeColor,
+  getGuestBoxColors as getConfigGuestBoxColors,
+  getSeatStrokeDashArray as getConfigStrokeDashArray,
+  getSeatStrokeWidth,
+} from '@/utils/colorConfig';
 
 // ============================================================================
 // TYPES
@@ -109,58 +117,61 @@ export function getRankStars(ranking: number | string | undefined): string {
 }
 
 // ============================================================================
-// SEAT APPEARANCE HELPERS
+// SEAT APPEARANCE HELPERS (using centralized colors)
 // ============================================================================
 
 /**
  * Get seat fill color based on state and mode
  */
-export function getSeatFillColor(seat: Seat): string {
-  const mode = seat.mode || 'default';
-  const modeConfig = SEAT_MODE_CONFIGS[mode];
-
-  // Locked seats are always grey
-  if (seat.locked) return '#b0bec5';
-
-  // Assigned seats are green (takes priority over mode)
-  if (seat.assignedGuestId) return '#66bb6a';
-
-  // Selected seats are yellow
-  if (seat.selected) return '#ffb300';
-
-  // Return mode-specific color
-  return modeConfig.color;
+export function getSeatFillColor(seat: Seat, colorScheme: ColorScheme): string {
+  const mode = (seat.mode || 'default') as 'default' | 'host-only' | 'external-only';
+  return getConfigSeatFillColor(
+    {
+      mode,
+      isLocked: !!seat.locked,
+      isSelected: !!seat.selected,
+      isAssigned: !!seat.assignedGuestId,
+    },
+    colorScheme
+  );
 }
 
 /**
- * Get seat stroke color based on mode
+ * Get seat stroke color based on state and mode
  */
-export function getSeatStrokeColor(seat: Seat): string {
-  const mode = seat.mode || 'default';
-  return SEAT_MODE_CONFIGS[mode].strokeColor;
+export function getSeatStrokeColor(seat: Seat, colorScheme: ColorScheme): string {
+  const mode = (seat.mode || 'default') as 'default' | 'host-only' | 'external-only';
+  return getConfigSeatStrokeColor(
+    {
+      mode,
+      isLocked: !!seat.locked,
+      isSelected: !!seat.selected,
+      isAssigned: !!seat.assignedGuestId,
+    },
+    colorScheme
+  );
 }
 
 /**
  * Get seat stroke dash array based on mode
  */
-export function getSeatStrokeDashArray(seat: Seat): string {
-  return seat.mode === 'external-only' ? '4,2' : 'none';
+export function getSeatStrokeDashArray(seat: Seat, colorScheme: ColorScheme): string {
+  const mode = (seat.mode || 'default') as 'default' | 'host-only' | 'external-only';
+  return getConfigStrokeDashArray(mode, colorScheme.mode);
 }
 
 // ============================================================================
-// GUEST BOX COLORS
+// GUEST BOX COLORS (using centralized colors)
 // ============================================================================
 
 /**
  * Get guest box colors based on guest type
  */
-export function getGuestBoxColors(isHost: boolean): {
-  fill: string;
-  stroke: string;
-} {
-  return isHost
-    ? { fill: '#e3f2fd', stroke: '#1976d2' }
-    : { fill: '#e8f5e9', stroke: '#2e7d32' };
+export function getGuestBoxColors(
+  isHost: boolean,
+  colorScheme: ColorScheme
+): { fill: string; stroke: string; text: string } {
+  return getConfigGuestBoxColors(isHost, colorScheme);
 }
 
 // ============================================================================
@@ -206,25 +217,19 @@ export function generateGuestBoxData(
     // Calculate box dimensions with proper spacing for all elements
     const charPx = 7;
     const nameWidth = name.length * charPx;
-    const starsWidth = stars.length * 10; // Stars are wider
+    const starsWidth = stars.length * 10;
     const line2Width = line2.length * charPx;
     const mealPlanWidth = mealPlanText.length * charPx;
     const estTextWidth = Math.max(nameWidth, starsWidth, line2Width, mealPlanWidth);
     const width = Math.min(Math.max(80, estTextWidth + 24), 300);
 
-    // Height calculation:
-    // - Top padding: 6px
-    // - Stars row (if VIP): 14px
-    // - Name line: 14px
-    // - Meta line: 14px  
-    // - Meal plan row (if selected): 14px
-    // - Bottom padding: 6px
+    // Height calculation
     const hasStars = stars.length > 0;
     const hasMealPlan = selectedMealPlanIndex !== null;
     const starsHeight = hasStars ? 14 : 0;
     const mealPlanHeight = hasMealPlan ? 14 : 0;
-    const contentHeight = 28; // Name + Meta
-    const padding = 12; // 6px top + 6px bottom
+    const contentHeight = 28;
+    const padding = 12;
     const height = padding + starsHeight + contentHeight + mealPlanHeight;
 
     const seatR = s.radius ?? 8;
@@ -330,7 +335,7 @@ export function getConnectorEndpoint(
 }
 
 // ============================================================================
-// MAIN RENDERING FUNCTIONS
+// MAIN RENDERING FUNCTIONS (using centralized colors)
 // ============================================================================
 
 /**
@@ -340,7 +345,8 @@ export function renderConnectors(
   group: d3.Selection<SVGGElement, any, any, any>,
   seatsWithGuest: Seat[],
   tableDatum: Table,
-  boxData: GuestBoxData[]
+  boxData: GuestBoxData[],
+  colorScheme: ColorScheme
 ): void {
   let connectorsLayer = group.select<SVGGElement>('g.connectors-layer');
   if (connectorsLayer.empty()) {
@@ -357,7 +363,7 @@ export function renderConnectors(
     .enter()
     .append('line')
     .attr('class', 'connector-line')
-    .attr('stroke', '#90a4ae')
+    .attr('stroke', colorScheme.ui.connectorLine)
     .attr('stroke-width', 1)
     .attr('pointer-events', 'none');
 
@@ -368,7 +374,8 @@ export function renderConnectors(
         .attr('x1', endpoint.x1)
         .attr('y1', endpoint.y1)
         .attr('x2', endpoint.x2)
-        .attr('y2', endpoint.y2);
+        .attr('y2', endpoint.y2)
+        .attr('stroke', colorScheme.ui.connectorLine);
     }
   });
 }
@@ -379,10 +386,13 @@ export function renderConnectors(
 export function renderSeats(
   group: d3.Selection<SVGGElement, any, any, any>,
   tableDatum: Table,
+  colorScheme: ColorScheme,
   onSeatClick: (tableId: string, seatId: string) => void,
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
 ): void {
+  const strokeWidth = getSeatStrokeWidth(colorScheme.mode);
+
   const seatsSel = group
     .selectAll<SVGCircleElement, Seat>('circle.seat')
     .data(tableDatum.seats || [], (s) => s.id);
@@ -395,10 +405,10 @@ export function renderSeats(
     .attr('cx', (s) => s.x - tableDatum.x)
     .attr('cy', (s) => s.y - tableDatum.y)
     .attr('r', (s) => s.radius)
-    .attr('fill', (s) => getSeatFillColor(s))
-    .attr('stroke', (s) => getSeatStrokeColor(s))
-    .attr('stroke-width', 2)
-    .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s))
+    .attr('fill', (s) => getSeatFillColor(s, colorScheme))
+    .attr('stroke', (s) => getSeatStrokeColor(s, colorScheme))
+    .attr('stroke-width', strokeWidth)
+    .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s, colorScheme))
     .style('cursor', 'pointer')
     .on('click', (event, s) => {
       event.stopPropagation();
@@ -425,8 +435,9 @@ export function renderSeats(
     .attr('x', (s) => s.x - tableDatum.x)
     .attr('y', (s) => s.y - tableDatum.y + 3)
     .attr('text-anchor', 'middle')
-    .attr('fill', '#0d47a1')
+    .attr('fill', colorScheme.table.tableStroke)
     .attr('font-size', '10px')
+    .attr('font-weight', 'bold')
     .text((s) => s.seatNumber);
 }
 
@@ -442,7 +453,8 @@ export function renderGuestBoxes(
   group: d3.Selection<SVGGElement, any, any, any>,
   seatsWithGuest: Seat[],
   boxData: GuestBoxData[],
-  selectedMealPlanIndex: number | null
+  selectedMealPlanIndex: number | null,
+  colorScheme: ColorScheme
 ): void {
   const guestBoxes = group
     .selectAll<SVGGElement, Seat>('g.guest-box')
@@ -462,14 +474,13 @@ export function renderGuestBoxes(
     .attr('class', 'guest-rect')
     .attr('rx', 8)
     .attr('ry', 8)
-    .attr('stroke-width', 1.2);
+    .attr('stroke-width', 1.5);
 
   // Stars text (top, centered)
   guestBoxesEnter
     .append('text')
     .attr('class', 'guest-stars')
     .attr('font-size', 10)
-    .attr('fill', '#f59e0b')
     .style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
 
   // Name text (centered)
@@ -477,22 +488,19 @@ export function renderGuestBoxes(
     .append('text')
     .attr('class', 'guest-name')
     .attr('font-size', 11)
-    .attr('fill', '#0d47a1')
     .attr('font-weight', 'bold');
 
   // Meta text (country | company, centered)
   guestBoxesEnter
     .append('text')
     .attr('class', 'guest-meta')
-    .attr('font-size', 10)
-    .attr('fill', '#455a64');
+    .attr('font-size', 10);
 
   // Meal plan text (bottom, centered)
   guestBoxesEnter
     .append('text')
     .attr('class', 'guest-meal-plan')
     .attr('font-size', 9)
-    .attr('fill', '#2e7d32')
     .style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
 
   // Render each guest box with proper layout
@@ -502,13 +510,13 @@ export function renderGuestBoxes(
     const rectY = b.y - height / 2;
 
     const isHost = !!guest.fromHost;
-    const colors = getGuestBoxColors(isHost);
+    const colors = getGuestBoxColors(isHost, colorScheme);
 
     const gbox = group
       .selectAll<SVGGElement, any>('g.guest-box')
       .filter((d) => d.id === s.id);
 
-    // Update rectangle
+    // Update rectangle with color scheme colors
     gbox.select('rect.guest-rect')
       .attr('x', rectX)
       .attr('y', rectY)
@@ -517,66 +525,60 @@ export function renderGuestBoxes(
       .attr('fill', colors.fill)
       .attr('stroke', colors.stroke);
 
-    // Layout calculation:
-    // Box structure (from top to bottom):
-    // [6px padding]
-    // [Stars row - 14px if VIP]
-    // [Name - 14px]        } These two are
-    // [Meta - 14px]        } the centered content
-    // [Meal plan - 14px if selected]
-    // [6px padding]
-    
+    // Layout calculation
     const topPadding = 6;
     const starsRowHeight = hasStars ? 14 : 0;
     const mealPlanRowHeight = hasMealPlan ? 14 : 0;
-    const contentHeight = 28; // Name (14) + Meta (14)
-    
-    // Calculate Y positions
+
     let currentY = rectY + topPadding;
-    
+
     // Stars at top (if VIP)
     const starsY = currentY + starsRowHeight / 2;
     currentY += starsRowHeight;
-    
+
     // Name and Meta centered in middle area
-    const nameY = currentY + 14 / 2 + 3; // +3 for visual centering
+    const nameY = currentY + 14 / 2 + 3;
     currentY += 14;
     const metaY = currentY + 14 / 2 + 2;
     currentY += 14;
-    
+
     // Meal plan at bottom (if selected)
     const mealPlanY = currentY + mealPlanRowHeight / 2 + 2;
 
-    // Update stars text (top, centered)
+    // Update stars text (top, centered) - using UI stars color
     gbox.select('text.guest-stars')
       .attr('x', b.x)
       .attr('y', starsY)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
+      .attr('fill', colorScheme.ui.starsColor)
       .text(hasStars ? starsText.trim() : '');
 
-    // Update name text (centered)
+    // Update name text (centered) - using guest text color
     gbox.select('text.guest-name')
       .attr('x', b.x)
       .attr('y', nameY)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
+      .attr('fill', colors.text)
       .text(nameText);
 
-    // Update meta text (centered, below name)
+    // Update meta text (centered, below name) - using meta text color
     gbox.select('text.guest-meta')
       .attr('x', b.x)
       .attr('y', metaY)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
+      .attr('fill', colorScheme.ui.metaText)
       .text(metaText);
 
-    // Update meal plan text (bottom, centered)
+    // Update meal plan text (bottom, centered) - using meal plan color
     gbox.select('text.guest-meal-plan')
       .attr('x', b.x)
       .attr('y', mealPlanY)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
+      .attr('fill', colorScheme.ui.mealPlanText)
       .text(hasMealPlan ? `🍽 ${mealPlanText}` : '');
 
     // Update connector endpoint
@@ -597,7 +599,8 @@ export function renderTableGuestDisplay(
   tableDatum: Table,
   guestLookup: Record<string, Guest>,
   connectorGap: number,
-  selectedMealPlanIndex: number | null
+  selectedMealPlanIndex: number | null,
+  colorScheme: ColorScheme
 ): void {
   const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
 
@@ -606,16 +609,18 @@ export function renderTableGuestDisplay(
   relaxGuestBoxPositions(boxData, 150, 2, 6);
 
   // Render connectors
-  renderConnectors(group, seatsWithGuest, tableDatum, boxData);
+  renderConnectors(group, seatsWithGuest, tableDatum, boxData, colorScheme);
 
   // Render guest boxes with centered text
-  renderGuestBoxes(group, seatsWithGuest, boxData, selectedMealPlanIndex);
+  renderGuestBoxes(group, seatsWithGuest, boxData, selectedMealPlanIndex, colorScheme);
 }
 
 // ============================================================================
 // EXPORTS SUMMARY
 // ============================================================================
 // 
+// All rendering functions now accept ColorScheme parameter for centralized colors.
+//
 // Geometry:
 //   - boxRectFromCenter(box) - Convert center coords to bounding rect
 //   - rectsOverlap(a, b, padding) - Check rectangle overlap
@@ -626,17 +631,17 @@ export function renderTableGuestDisplay(
 //   - relaxGuestBoxPositions(boxData, ...) - Prevent overlap via radial push
 //
 // Seat Appearance:
-//   - getSeatFillColor(seat) - Color based on state/mode
-//   - getSeatStrokeColor(seat) - Stroke based on mode
-//   - getSeatStrokeDashArray(seat) - Dashed for external-only
+//   - getSeatFillColor(seat, colorScheme) - Color based on state/mode
+//   - getSeatStrokeColor(seat, colorScheme) - Stroke based on mode
+//   - getSeatStrokeDashArray(seat, colorScheme) - Dashed for external-only
 //   - getRankStars(ranking) - VIP star indicators
 //
 // Colors:
-//   - getGuestBoxColors(isHost) - Host vs external colors
+//   - getGuestBoxColors(isHost, colorScheme) - Host vs external colors
 //
 // Rendering:
-//   - renderConnectors(...) - Draw connector lines
-//   - renderSeats(...) - Draw seats with mode colors
-//   - renderGuestBoxes(...) - Draw guest boxes with CENTERED text + meal plan
-//   - renderTableGuestDisplay(...) - Main entry point for all guest elements
+//   - renderConnectors(..., colorScheme) - Draw connector lines
+//   - renderSeats(..., colorScheme) - Draw seats with mode colors
+//   - renderGuestBoxes(..., colorScheme) - Draw guest boxes
+//   - renderTableGuestDisplay(..., colorScheme) - Main entry point
 //

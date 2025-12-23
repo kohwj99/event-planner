@@ -1,6 +1,6 @@
 // components/organisms/PlaygroundCanvas.tsx
 // Main canvas for seat planning with D3-based SVG rendering
-// SVG rendering logic is delegated to tableSVGHelper.ts
+// Uses centralized color configuration from colorConfig.ts via colorModeStore
 
 'use client';
 
@@ -22,9 +22,11 @@ import Popover from '@mui/material/Popover';
 import Badge from '@mui/material/Badge';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
+import ColorModeToggle, { CanvasColorLegend } from '@/components/atoms/ColorModeToggle';
 
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
+import { useColorScheme } from '@/store/colorModeStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
@@ -54,10 +56,14 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
+  const [showLegend, setShowLegend] = useState(false);
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
   const mealPlanPopoverOpen = Boolean(mealPlanAnchorEl);
+
+  // Get color scheme from store
+  const colorScheme = useColorScheme();
 
   // Store hooks
   const {
@@ -224,7 +230,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   }, [chunks]);
 
   // ============================================================================
-  // TABLES RENDERING (using tableSVGHelper)
+  // TABLES RENDERING (using tableSVGHelper with colorScheme)
   // ============================================================================
 
   useEffect(() => {
@@ -244,14 +250,17 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       .attr('transform', (d) => `translate(${d.x},${d.y})`)
       .style('cursor', 'grab');
 
-    // Create table shapes on enter
+    // Create table shapes on enter - using colorScheme
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
+      const isSelected = d.id === selectedTableId;
+      const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
+      
       if (d.shape === 'round') {
         grp.append('circle')
           .attr('r', d.radius)
-          .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
-          .attr('stroke', '#0d47a1')
+          .attr('fill', fillColor)
+          .attr('stroke', colorScheme.table.tableStroke)
           .attr('stroke-width', 2)
           .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
       } else {
@@ -262,31 +271,55 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           .attr('y', -height / 2)
           .attr('width', width)
           .attr('height', height)
-          .attr('fill', d.id === selectedTableId ? '#1565c0' : '#1976d2')
-          .attr('stroke', '#0d47a1')
+          .attr('fill', fillColor)
+          .attr('stroke', colorScheme.table.tableStroke)
           .attr('stroke-width', 2)
+          .attr('rx', 4)
+          .attr('ry', 4)
           .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
       }
     });
 
-    // Table label
+    // Table label - using colorScheme
     enter.append('text')
       .attr('y', 5)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'white')
+      .attr('fill', colorScheme.table.tableText)
       .attr('font-size', '14px')
+      .attr('font-weight', 'bold')
       .text((d) => d.label);
 
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Render table contents using helper functions
+    // Update table colors when selection changes
+    merged.each(function (d) {
+      const grp = d3.select(this);
+      const isSelected = d.id === selectedTableId;
+      const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
+      
+      if (d.shape === 'round') {
+        grp.select('circle')
+          .attr('fill', fillColor)
+          .attr('stroke', colorScheme.table.tableStroke);
+      } else {
+        grp.select('rect')
+          .attr('fill', fillColor)
+          .attr('stroke', colorScheme.table.tableStroke);
+      }
+      
+      grp.select('text')
+        .attr('fill', colorScheme.table.tableText);
+    });
+
+    // Render table contents using helper functions with colorScheme
     merged.each(function (tableDatum) {
       const group = d3.select(this);
 
-      // Render seats with mode-based colors (using helper)
+      // Render seats with mode-based colors (using helper with colorScheme)
       renderSeats(
         group as any,
         tableDatum,
+        colorScheme,
         selectSeat,
         lockSeat,
         clearSeat
@@ -298,7 +331,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         tableDatum,
         guestLookup,
         connectorGap,
-        selectedMealPlanIndex
+        selectedMealPlanIndex,
+        colorScheme
       );
     });
 
@@ -336,7 +370,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     tables, moveTable, selectSeat, lockSeat, clearSeat,
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
-    cleanupEmptyChunks, connectorGap, guestLookup
+    cleanupEmptyChunks, connectorGap, guestLookup, colorScheme
   ]);
 
   // ============================================================================
@@ -409,6 +443,45 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           preserveAspectRatio="xMidYMid meet"
         />
       </Paper>
+
+      {/* Top Right - Color Mode Toggle */}
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 1,
+        }}
+      >
+        <Paper elevation={2} sx={{ px: 2, py: 1, borderRadius: 2 }}>
+          <ColorModeToggle size="small" showLabel />
+        </Paper>
+        
+        {/* Toggle Legend Button */}
+        <Tooltip title={showLegend ? 'Hide Legend' : 'Show Legend'} placement="left">
+          <Paper
+            elevation={1}
+            sx={{
+              px: 1.5,
+              py: 0.5,
+              borderRadius: 1,
+              cursor: 'pointer',
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
+            onClick={() => setShowLegend(!showLegend)}
+          >
+            <Typography variant="caption" color="text.secondary">
+              {showLegend ? 'Hide Legend' : 'Legend'}
+            </Typography>
+          </Paper>
+        </Tooltip>
+        
+        {/* Color Legend (collapsible) */}
+        {showLegend && <CanvasColorLegend />}
+      </Box>
 
       {/* Bottom Right Controls */}
       <Box
