@@ -22,7 +22,8 @@ import Popover from '@mui/material/Popover';
 import Badge from '@mui/material/Badge';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
-import ColorModeToggle, { CanvasColorLegend } from '@/components/atoms/ColorModeToggle';
+import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
+import ColorModeToggle from '@/components/atoms/ColorModeToggle';
 
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
@@ -56,7 +57,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
-  const [showLegend, setShowLegend] = useState(false);
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
@@ -444,45 +444,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         />
       </Paper>
 
-      {/* Top Right - Color Mode Toggle */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 16,
-          right: 16,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 1,
-        }}
-      >
-        <Paper elevation={2} sx={{ px: 2, py: 1, borderRadius: 2 }}>
-          <ColorModeToggle size="small" showLabel />
-        </Paper>
-        
-        {/* Toggle Legend Button */}
-        <Tooltip title={showLegend ? 'Hide Legend' : 'Show Legend'} placement="left">
-          <Paper
-            elevation={1}
-            sx={{
-              px: 1.5,
-              py: 0.5,
-              borderRadius: 1,
-              cursor: 'pointer',
-              '&:hover': { bgcolor: 'action.hover' },
-            }}
-            onClick={() => setShowLegend(!showLegend)}
-          >
-            <Typography variant="caption" color="text.secondary">
-              {showLegend ? 'Hide Legend' : 'Legend'}
-            </Typography>
-          </Paper>
-        </Tooltip>
-        
-        {/* Color Legend (collapsible) */}
-        {showLegend && <CanvasColorLegend />}
-      </Box>
-
       {/* Bottom Right Controls */}
       <Box
         sx={{
@@ -525,7 +486,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         </Stack>
 
         {/* Zoom & Connector Gap Controls Card */}
-        <Paper elevation={2} sx={{ px: 2, py: 1, minWidth: 140, borderRadius: 2 }}>
+        <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 140, borderRadius: 2 }}>
           <Typography variant="caption" color="text.secondary">
             Zoom: {Math.round(zoomLevel * 100)}%
           </Typography>
@@ -540,6 +501,11 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
               sx={{ width: 80 }}
             />
           </Stack>
+          
+          {/* Colorblind Toggle - Below Zoom/Gap, with hover legend */}
+          <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+            <ColorModeToggle size="small" showLabel />
+          </Box>
         </Paper>
       </Box>
 

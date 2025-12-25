@@ -1,6 +1,9 @@
 // utils/colorConfig.ts
 // Centralized color configuration for table-related SVG components
-// Includes standard and colorblind-friendly color schemes
+// Uses chroma-js library for colorblind-safe color generation
+// Based on Okabe-Ito and IBM Design palettes - scientifically validated for colorblind accessibility
+
+import chroma from 'chroma-js';
 
 // ============================================================================
 // COLOR MODE TYPES
@@ -9,15 +12,12 @@
 export type ColorMode = 'standard' | 'colorblind';
 
 export interface SeatColors {
-  // Seat mode colors (fill)
   defaultFill: string;
   hostOnlyFill: string;
   externalOnlyFill: string;
   lockedFill: string;
   selectedFill: string;
   assignedFill: string;
-  
-  // Seat mode strokes
   defaultStroke: string;
   hostOnlyStroke: string;
   externalOnlyStroke: string;
@@ -27,19 +27,15 @@ export interface SeatColors {
 }
 
 export interface GuestBoxColors {
-  // Host guest box
   hostFill: string;
   hostStroke: string;
   hostText: string;
-  
-  // External guest box
   externalFill: string;
   externalStroke: string;
   externalText: string;
 }
 
 export interface TableColors {
-  // Table shape
   tableFill: string;
   tableSelectedFill: string;
   tableStroke: string;
@@ -47,25 +43,16 @@ export interface TableColors {
 }
 
 export interface UIColors {
-  // General UI colors
   primary: string;
   secondary: string;
   success: string;
   warning: string;
   error: string;
   info: string;
-  
-  // VIP stars
   starsColor: string;
-  
-  // Meal plan
   mealPlanText: string;
   mealPlanIcon: string;
-  
-  // Connector lines
   connectorLine: string;
-  
-  // Meta text (country | company)
   metaText: string;
 }
 
@@ -78,143 +65,217 @@ export interface ColorScheme {
 }
 
 // ============================================================================
+// OKABE-ITO COLORBLIND-SAFE PALETTE
+// Scientific palette designed to be distinguishable by people with all types
+// of color vision deficiencies (protanopia, deuteranopia, tritanopia)
+// ============================================================================
+
+const OKABE_ITO = {
+  black: '#000000',
+  orange: '#E69F00',
+  skyBlue: '#56B4E9',
+  bluishGreen: '#009E73',
+  yellow: '#F0E442',
+  blue: '#0072B2',
+  vermillion: '#D55E00',
+  reddishPurple: '#CC79A7',
+};
+
+// ============================================================================
+// IBM DESIGN COLORBLIND-SAFE PALETTE
+// Another scientifically validated palette with good contrast
+// ============================================================================
+
+const IBM_PALETTE = {
+  blue: '#648FFF',
+  purple: '#785EF0',
+  magenta: '#DC267F',
+  orange: '#FE6100',
+  yellow: '#FFB000',
+};
+
+// ============================================================================
+// HELPER FUNCTIONS USING CHROMA-JS
+// ============================================================================
+
+/**
+ * Generate a light fill color from a base color
+ */
+function generateLightFill(baseColor: string, lightness = 0.92): string {
+  return chroma(baseColor).luminance(lightness).hex();
+}
+
+/**
+ * Generate a dark text color that contrasts well with a fill
+ */
+function generateContrastText(fillColor: string): string {
+  const bgLuminance = chroma(fillColor).luminance();
+  // Use dark text on light backgrounds, light text on dark
+  return bgLuminance > 0.5 
+    ? chroma(fillColor).darken(3).saturate(0.5).hex()
+    : '#ffffff';
+}
+
+/**
+ * Ensure minimum contrast ratio for accessibility (WCAG AA = 4.5:1)
+ */
+function ensureContrast(foreground: string, background: string, minRatio = 4.5): string {
+  const contrast = chroma.contrast(foreground, background);
+  if (contrast >= minRatio) return foreground;
+  
+  // Darken or lighten to meet contrast
+  const bgLuminance = chroma(background).luminance();
+  let adjusted = chroma(foreground);
+  
+  for (let i = 0; i < 10; i++) {
+    if (bgLuminance > 0.5) {
+      adjusted = adjusted.darken(0.5);
+    } else {
+      adjusted = adjusted.brighten(0.5);
+    }
+    if (chroma.contrast(adjusted.hex(), background) >= minRatio) break;
+  }
+  
+  return adjusted.hex();
+}
+
+// ============================================================================
 // STANDARD COLOR SCHEME
-// Professional, polished colors with good contrast
+// Uses traditional colors that most users are familiar with
 // ============================================================================
 
-export const STANDARD_COLORS: ColorScheme = {
-  mode: 'standard',
-  
-  seats: {
-    // Default mode - Green (available for anyone)
-    defaultFill: '#e8f5e9',      // Light green
-    defaultStroke: '#4caf50',    // Green
+function createStandardColors(): ColorScheme {
+  // Standard palette - familiar colors
+  const hostBlue = '#1976d2';
+  const externalRed = '#d32f2f';
+  const defaultGreen = '#4caf50';
+  const lockedGrey = '#78909c';
+  const selectedYellow = '#ffc107';
+  const assignedGreen = '#388e3c';
+
+  return {
+    mode: 'standard',
     
-    // Host-only mode - Blue
-    hostOnlyFill: '#e3f2fd',     // Light blue
-    hostOnlyStroke: '#1976d2',   // Blue
+    seats: {
+      defaultFill: generateLightFill(defaultGreen),
+      defaultStroke: defaultGreen,
+      hostOnlyFill: generateLightFill(hostBlue),
+      hostOnlyStroke: hostBlue,
+      externalOnlyFill: generateLightFill(externalRed),
+      externalOnlyStroke: externalRed,
+      lockedFill: generateLightFill(lockedGrey, 0.88),
+      lockedStroke: lockedGrey,
+      selectedFill: generateLightFill(selectedYellow, 0.9),
+      selectedStroke: selectedYellow,
+      assignedFill: generateLightFill(assignedGreen, 0.85),
+      assignedStroke: assignedGreen,
+    },
     
-    // External-only mode - Red
-    externalOnlyFill: '#ffebee', // Light red
-    externalOnlyStroke: '#d32f2f', // Red
+    guestBox: {
+      hostFill: generateLightFill(hostBlue),
+      hostStroke: hostBlue,
+      hostText: ensureContrast(chroma(hostBlue).darken(1.5).hex(), generateLightFill(hostBlue)),
+      externalFill: generateLightFill(externalRed),
+      externalStroke: externalRed,
+      externalText: ensureContrast(chroma(externalRed).darken(1.5).hex(), generateLightFill(externalRed)),
+    },
     
-    // Locked - Grey
-    lockedFill: '#eceff1',       // Light grey
-    lockedStroke: '#78909c',     // Blue grey
+    table: {
+      tableFill: hostBlue,
+      tableSelectedFill: chroma(hostBlue).darken(0.5).hex(),
+      tableStroke: chroma(hostBlue).darken(1).hex(),
+      tableText: '#ffffff',
+    },
     
-    // Selected - Yellow
-    selectedFill: '#fff8e1',     // Light amber
-    selectedStroke: '#ffc107',   // Amber
-    
-    // Assigned (has guest) - Darker green
-    assignedFill: '#c8e6c9',     // Medium green
-    assignedStroke: '#388e3c',   // Dark green
-  },
-  
-  guestBox: {
-    // Host guests - Blue theme
-    hostFill: '#e3f2fd',         // Light blue
-    hostStroke: '#1976d2',       // Blue
-    hostText: '#0d47a1',         // Dark blue
-    
-    // External guests - Red theme
-    externalFill: '#ffebee',     // Light red
-    externalStroke: '#d32f2f',   // Red
-    externalText: '#b71c1c',     // Dark red
-  },
-  
-  table: {
-    tableFill: '#1976d2',        // Blue
-    tableSelectedFill: '#1565c0', // Darker blue
-    tableStroke: '#0d47a1',      // Dark blue
-    tableText: '#ffffff',        // White
-  },
-  
-  ui: {
-    primary: '#1976d2',
-    secondary: '#9c27b0',
-    success: '#4caf50',
-    warning: '#ff9800',
-    error: '#d32f2f',
-    info: '#0288d1',
-    
-    starsColor: '#f59e0b',       // Amber/gold for VIP stars
-    mealPlanText: '#2e7d32',     // Green
-    mealPlanIcon: '#4caf50',     // Green
-    connectorLine: '#90a4ae',    // Blue grey
-    metaText: '#546e7a',         // Blue grey
-  },
-};
+    ui: {
+      primary: hostBlue,
+      secondary: '#9c27b0',
+      success: defaultGreen,
+      warning: '#ff9800',
+      error: externalRed,
+      info: '#0288d1',
+      starsColor: '#f59e0b',
+      mealPlanText: '#2e7d32',
+      mealPlanIcon: defaultGreen,
+      connectorLine: '#90a4ae',
+      metaText: '#546e7a',
+    },
+  };
+}
 
 // ============================================================================
-// COLORBLIND-FRIENDLY COLOR SCHEME
-// Uses patterns and shapes in addition to color differences
-// Based on Wong's colorblind-safe palette
+// COLORBLIND-SAFE COLOR SCHEME
+// Uses Okabe-Ito palette - designed for all types of color vision deficiency
 // ============================================================================
 
-export const COLORBLIND_COLORS: ColorScheme = {
-  mode: 'colorblind',
-  
-  seats: {
-    // Default mode - Teal (distinct from blue/orange)
-    defaultFill: '#e0f2f1',      // Light teal
-    defaultStroke: '#009688',    // Teal
+function createColorblindColors(): ColorScheme {
+  // Okabe-Ito palette assignments for maximum distinguishability
+  const hostBlue = OKABE_ITO.blue;           // #0072B2 - Safe blue
+  const externalOrange = OKABE_ITO.vermillion; // #D55E00 - Orange (not red!)
+  const defaultTeal = OKABE_ITO.bluishGreen;  // #009E73 - Teal green
+  const lockedGrey = chroma('#757575').hex(); // Neutral grey
+  const selectedYellow = OKABE_ITO.yellow;    // #F0E442 - Bright yellow
+  const assignedGreen = chroma(OKABE_ITO.bluishGreen).darken(0.3).hex();
+
+  return {
+    mode: 'colorblind',
     
-    // Host-only mode - Blue (safe for most colorblind types)
-    hostOnlyFill: '#e3f2fd',     // Light blue
-    hostOnlyStroke: '#0077bb',   // Strong blue
+    seats: {
+      defaultFill: generateLightFill(defaultTeal),
+      defaultStroke: defaultTeal,
+      hostOnlyFill: generateLightFill(hostBlue),
+      hostOnlyStroke: hostBlue,
+      externalOnlyFill: generateLightFill(externalOrange),
+      externalOnlyStroke: externalOrange,
+      lockedFill: generateLightFill(lockedGrey, 0.85),
+      lockedStroke: lockedGrey,
+      selectedFill: generateLightFill(selectedYellow, 0.85),
+      selectedStroke: chroma(selectedYellow).darken(1).hex(),
+      assignedFill: generateLightFill(assignedGreen, 0.8),
+      assignedStroke: assignedGreen,
+    },
     
-    // External-only mode - Orange (instead of red, better for colorblind)
-    externalOnlyFill: '#fff3e0', // Light orange
-    externalOnlyStroke: '#ee7733', // Orange
+    guestBox: {
+      hostFill: generateLightFill(hostBlue),
+      hostStroke: hostBlue,
+      hostText: ensureContrast(chroma(hostBlue).darken(1.5).hex(), generateLightFill(hostBlue)),
+      externalFill: generateLightFill(externalOrange),
+      externalStroke: externalOrange,
+      externalText: ensureContrast(chroma(externalOrange).darken(1.5).hex(), generateLightFill(externalOrange)),
+    },
     
-    // Locked - Grey with pattern
-    lockedFill: '#e0e0e0',       // Light grey
-    lockedStroke: '#616161',     // Dark grey
+    table: {
+      tableFill: hostBlue,
+      tableSelectedFill: chroma(hostBlue).darken(0.5).hex(),
+      tableStroke: chroma(hostBlue).darken(1).hex(),
+      tableText: '#ffffff',
+    },
     
-    // Selected - Yellow (safe for all)
-    selectedFill: '#fff9c4',     // Light yellow
-    selectedStroke: '#f9a825',   // Amber
-    
-    // Assigned - Dark teal
-    assignedFill: '#b2dfdb',     // Medium teal
-    assignedStroke: '#00796b',   // Dark teal
-  },
-  
-  guestBox: {
-    // Host guests - Blue theme (safe)
-    hostFill: '#e3f2fd',         // Light blue
-    hostStroke: '#0077bb',       // Strong blue
-    hostText: '#004488',         // Dark blue
-    
-    // External guests - Orange theme (instead of red)
-    externalFill: '#fff3e0',     // Light orange
-    externalStroke: '#ee7733',   // Orange
-    externalText: '#cc5500',     // Dark orange
-  },
-  
-  table: {
-    tableFill: '#0077bb',        // Strong blue
-    tableSelectedFill: '#005588', // Darker blue
-    tableStroke: '#004488',      // Dark blue
-    tableText: '#ffffff',        // White
-  },
-  
-  ui: {
-    primary: '#0077bb',          // Blue
-    secondary: '#882288',        // Purple
-    success: '#009988',          // Teal
-    warning: '#ee7733',          // Orange
-    error: '#cc3311',            // Red-orange
-    info: '#33bbee',             // Cyan
-    
-    starsColor: '#ddaa33',       // Yellow-gold for VIP stars
-    mealPlanText: '#009988',     // Teal
-    mealPlanIcon: '#009988',     // Teal
-    connectorLine: '#888888',    // Grey
-    metaText: '#555555',         // Dark grey
-  },
-};
+    ui: {
+      primary: hostBlue,
+      secondary: OKABE_ITO.reddishPurple,
+      success: defaultTeal,
+      warning: OKABE_ITO.orange,
+      error: externalOrange,
+      info: OKABE_ITO.skyBlue,
+      starsColor: OKABE_ITO.orange,
+      mealPlanText: chroma(defaultTeal).darken(0.5).hex(),
+      mealPlanIcon: defaultTeal,
+      connectorLine: '#888888',
+      metaText: '#555555',
+    },
+  };
+}
+
+// ============================================================================
+// CACHED COLOR SCHEMES (computed once)
+// ============================================================================
+
+const STANDARD_COLORS = createStandardColors();
+const COLORBLIND_COLORS = createColorblindColors();
+
+// Export for direct access if needed
+export { STANDARD_COLORS, COLORBLIND_COLORS };
 
 // ============================================================================
 // COLOR SCHEME GETTER
@@ -226,7 +287,6 @@ export function getColorScheme(mode: ColorMode): ColorScheme {
 
 // ============================================================================
 // SEAT COLOR HELPERS
-// These functions return the appropriate color based on seat state
 // ============================================================================
 
 export interface SeatColorParams {
@@ -265,7 +325,6 @@ export function getSeatStrokeColor(
   const { mode, isLocked, isSelected, isAssigned } = params;
   const { seats } = colorScheme;
   
-  // Priority order: locked > selected > assigned > mode
   if (isLocked) return seats.lockedStroke;
   if (isSelected) return seats.selectedStroke;
   if (isAssigned) return seats.assignedStroke;
@@ -305,90 +364,77 @@ export function getGuestBoxColors(
 
 // ============================================================================
 // STROKE PATTERNS
-// Used to differentiate seat modes for colorblind accessibility
 // ============================================================================
 
 export function getSeatStrokeDashArray(
   mode: 'default' | 'host-only' | 'external-only',
   colorMode: ColorMode
 ): string {
-  // In colorblind mode, use patterns to help differentiate
-  if (colorMode === 'colorblind') {
-    switch (mode) {
-      case 'external-only':
-        return '4,2';  // Dashed for external
-      case 'host-only':
-        return '1,0';  // Solid for host
-      default:
-        return '1,0';  // Solid for default
-    }
-  }
-  
-  // In standard mode, only external-only is dashed
+  // External-only always dashed for extra differentiation
   return mode === 'external-only' ? '4,2' : 'none';
 }
 
-// ============================================================================
-// STROKE WIDTH
-// Slightly thicker strokes in colorblind mode for better visibility
-// ============================================================================
-
 export function getSeatStrokeWidth(colorMode: ColorMode): number {
+  // Slightly thicker in colorblind mode for better visibility
   return colorMode === 'colorblind' ? 2.5 : 2;
 }
 
 // ============================================================================
-// CSS CUSTOM PROPERTIES GENERATOR
-// Generate CSS variables for use throughout the app
+// COLOR UTILITIES
 // ============================================================================
 
-export function generateCSSVariables(colorScheme: ColorScheme): Record<string, string> {
-  return {
-    // Seat colors
-    '--seat-default-fill': colorScheme.seats.defaultFill,
-    '--seat-default-stroke': colorScheme.seats.defaultStroke,
-    '--seat-host-fill': colorScheme.seats.hostOnlyFill,
-    '--seat-host-stroke': colorScheme.seats.hostOnlyStroke,
-    '--seat-external-fill': colorScheme.seats.externalOnlyFill,
-    '--seat-external-stroke': colorScheme.seats.externalOnlyStroke,
-    '--seat-locked-fill': colorScheme.seats.lockedFill,
-    '--seat-locked-stroke': colorScheme.seats.lockedStroke,
-    '--seat-selected-fill': colorScheme.seats.selectedFill,
-    '--seat-selected-stroke': colorScheme.seats.selectedStroke,
-    '--seat-assigned-fill': colorScheme.seats.assignedFill,
-    '--seat-assigned-stroke': colorScheme.seats.assignedStroke,
-    
-    // Guest box colors
-    '--guest-host-fill': colorScheme.guestBox.hostFill,
-    '--guest-host-stroke': colorScheme.guestBox.hostStroke,
-    '--guest-host-text': colorScheme.guestBox.hostText,
-    '--guest-external-fill': colorScheme.guestBox.externalFill,
-    '--guest-external-stroke': colorScheme.guestBox.externalStroke,
-    '--guest-external-text': colorScheme.guestBox.externalText,
-    
-    // Table colors
-    '--table-fill': colorScheme.table.tableFill,
-    '--table-selected-fill': colorScheme.table.tableSelectedFill,
-    '--table-stroke': colorScheme.table.tableStroke,
-    '--table-text': colorScheme.table.tableText,
-    
-    // UI colors
-    '--color-primary': colorScheme.ui.primary,
-    '--color-secondary': colorScheme.ui.secondary,
-    '--color-success': colorScheme.ui.success,
-    '--color-warning': colorScheme.ui.warning,
-    '--color-error': colorScheme.ui.error,
-    '--color-info': colorScheme.ui.info,
-    '--color-stars': colorScheme.ui.starsColor,
-    '--color-meal-plan': colorScheme.ui.mealPlanText,
-    '--color-connector': colorScheme.ui.connectorLine,
-    '--color-meta-text': colorScheme.ui.metaText,
-  };
+/**
+ * Get contrasting text color for any background
+ */
+export function getContrastTextColor(backgroundColor: string): string {
+  return chroma(backgroundColor).luminance() > 0.5 ? '#000000' : '#ffffff';
+}
+
+/**
+ * Lighten a color by a percentage
+ */
+export function lightenColor(color: string, amount: number): string {
+  return chroma(color).brighten(amount).hex();
+}
+
+/**
+ * Darken a color by a percentage
+ */
+export function darkenColor(color: string, amount: number): string {
+  return chroma(color).darken(amount).hex();
+}
+
+/**
+ * Check if two colors have sufficient contrast (WCAG AA)
+ */
+export function hasGoodContrast(color1: string, color2: string): boolean {
+  return chroma.contrast(color1, color2) >= 4.5;
 }
 
 // ============================================================================
-// EXPORTS
+// PALETTE INFO (for legend/documentation)
 // ============================================================================
+
+export const PALETTE_INFO = {
+  standard: {
+    name: 'Standard',
+    description: 'Traditional color scheme',
+    colors: {
+      host: 'Blue',
+      external: 'Red',
+      default: 'Green',
+    },
+  },
+  colorblind: {
+    name: 'Colorblind Safe',
+    description: 'Okabe-Ito palette - accessible for all color vision types',
+    colors: {
+      host: 'Blue',
+      external: 'Orange',
+      default: 'Teal',
+    },
+  },
+};
 
 export default {
   STANDARD_COLORS,
@@ -399,5 +445,9 @@ export default {
   getGuestBoxColors,
   getSeatStrokeDashArray,
   getSeatStrokeWidth,
-  generateCSSVariables,
+  getContrastTextColor,
+  lightenColor,
+  darkenColor,
+  hasGoodContrast,
+  PALETTE_INFO,
 };
