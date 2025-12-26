@@ -1,10 +1,12 @@
 // components/atoms/TablePreview.tsx
 // Reusable SVG table preview component for both round and rectangle tables
-// Used in AddTableModal, ModifyTableModal, TemplateCard, and CreateEditTemplateModal
+// Used in AddTableModal, ModifyTableModal, TemplateCard, CreateEditTemplateModal
 // Uses centralized color configuration from colorConfig.ts
 // 
-// UPDATED: Dynamic sizing based on seat count - large tables now render at full size
-// and can be scrolled in their container
+// FEATURES:
+// - Dynamic sizing based on seat count - large tables render at full size
+// - Supports multiple interaction modes: none, ordering, modes, manual-ordering
+// - Manual ordering shows click-to-assign with position labels and checkmarks
 
 'use client';
 
@@ -12,7 +14,7 @@ import { useMemo } from 'react';
 import { Box, Chip } from '@mui/material';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 import { useColorScheme } from '@/store/colorModeStore';
-import { ColorScheme, STANDARD_COLORS } from '@/utils/colorConfig';
+import { ColorScheme } from '@/utils/colorConfig';
 
 // ============================================================================
 // SHARED TYPES
@@ -53,18 +55,14 @@ function getSeatColorsFromScheme(
   }
 }
 
-/**
- * Get stroke width based on seat mode
- * Host-only is thicker to indicate restriction
- */
 function getModeStrokeWidth(mode: SeatMode): number {
   switch (mode) {
     case 'host-only':
-      return 3.5;  // Thickest - most restricted
+      return 3.5;
     case 'external-only':
-      return 2.5;  // Medium + dashed
+      return 2.5;
     default:
-      return 2;    // Standard
+      return 2;
   }
 }
 
@@ -83,7 +81,6 @@ interface RoundTablePreviewProps {
   showLabels?: boolean;
   highlightPosition?: number | null;
   colorScheme?: ColorScheme;
-  // NEW: Manual ordering props
   manualAssignments?: Map<number, number>;
   nextManualNumber?: number;
 }
@@ -102,11 +99,10 @@ export function RoundTablePreview({
   manualAssignments,
   nextManualNumber,
 }: RoundTablePreviewProps) {
-  // Use provided color scheme or get from store
   const storeColorScheme = useColorScheme();
   const colorScheme = propColorScheme || storeColorScheme;
 
-  // UPDATED: Dynamic size calculation based on seat count
+  // Dynamic size calculation based on seat count
   const config = useMemo(() => {
     const baseConfig = {
       small: { tableRadius: 35, seatRadius: 8, font: 8, minSpacing: 20 },
@@ -115,15 +111,9 @@ export function RoundTablePreview({
     };
     
     const base = baseConfig[size];
-    
-    // Calculate minimum circumference needed for all seats with proper spacing
     const minCircumference = seatCount * base.minSpacing;
     const minRadius = minCircumference / (2 * Math.PI);
-    
-    // The seat distance is table radius + seat radius + gap
     const seatDistance = Math.max(base.tableRadius + base.seatRadius + 10, minRadius);
-    
-    // Container needs to fit all seats with padding
     const containerSize = (seatDistance + base.seatRadius) * 2 + 40;
     
     return {
@@ -138,7 +128,6 @@ export function RoundTablePreview({
   const centerX = config.container / 2;
   const centerY = config.container / 2;
 
-  // Generate seat positions
   const seatPositions = useMemo(() => {
     const positions: SeatPosition[] = [];
     for (let i = 0; i < seatCount; i++) {
@@ -166,7 +155,6 @@ export function RoundTablePreview({
         viewBox={`0 0 ${config.container} ${config.container}`}
         style={{ display: 'block' }}
       >
-        {/* Table Circle */}
         <circle
           cx={centerX}
           cy={centerY}
@@ -176,29 +164,24 @@ export function RoundTablePreview({
           strokeWidth={2}
         />
 
-        {/* Seats */}
         {seatPositions.map((pos) => {
           const seatNumber = seatOrdering[pos.index] || pos.index + 1;
           const mode = seatModes[pos.index] || 'default';
           const seatColors = getSeatColorsFromScheme(mode, colorScheme);
           
-          // Manual ordering state
           const isManualMode = interactionMode === 'manual-ordering';
           const manualSeatNum = manualAssignments?.get(pos.index);
           const isManualAssigned = isManualMode && manualSeatNum !== undefined;
           const isNextToAssign = isManualMode && !isManualAssigned && nextManualNumber !== undefined;
           
-          // Only show start position indicator in 'ordering' mode
           const isStart = interactionMode === 'ordering' && pos.index === startPosition;
           const isHighlighted = highlightPosition === pos.index;
 
-          // Determine fill color
           let fillColor = seatColors.fill;
           if (isManualAssigned) {
-            fillColor = 'rgba(76, 175, 80, 0.3)'; // Green tint for assigned
+            fillColor = 'rgba(76, 175, 80, 0.3)';
           }
           
-          // Determine stroke color
           let strokeColor = seatColors.stroke;
           if (isStart) {
             strokeColor = colorScheme.ui.success;
@@ -208,12 +191,10 @@ export function RoundTablePreview({
             strokeColor = '#4caf50';
           }
               
-          // Use mode-based stroke width
           const modeStrokeWidth = getModeStrokeWidth(mode);
           const strokeWidth = isStart || isHighlighted || isManualAssigned ? Math.max(modeStrokeWidth, 3) : modeStrokeWidth;
           const strokeDasharray = mode === 'external-only' ? '4,2' : 'none';
 
-          // Display text
           let displayText = String(seatNumber);
           if (isManualMode) {
             displayText = isManualAssigned ? String(manualSeatNum) : `P${pos.index + 1}`;
@@ -225,7 +206,6 @@ export function RoundTablePreview({
               onClick={(e) => handleSeatClick(e, pos.index)}
               style={{ cursor: interactionMode !== 'none' ? 'pointer' : 'default' }}
             >
-              {/* Start position ring indicator (only in ordering mode) */}
               {isStart && (
                 <circle
                   cx={pos.x}
@@ -236,7 +216,6 @@ export function RoundTablePreview({
                   strokeWidth={2}
                 />
               )}
-              {/* Next to assign indicator (manual mode) */}
               {isNextToAssign && (
                 <circle
                   cx={pos.x}
@@ -269,7 +248,6 @@ export function RoundTablePreview({
                   {displayText}
                 </text>
               )}
-              {/* Checkmark for assigned seats in manual mode */}
               {isManualAssigned && (
                 <text
                   x={pos.x + config.seatRadius * 0.6}
@@ -280,7 +258,6 @@ export function RoundTablePreview({
                   ✓
                 </text>
               )}
-              {/* Mode indicator for small views */}
               {size === 'small' && mode !== 'default' && !isManualMode && (
                 <text
                   x={pos.x}
@@ -298,7 +275,6 @@ export function RoundTablePreview({
         })}
       </svg>
 
-      {/* Start position indicator chip */}
       {interactionMode === 'ordering' && (
         <Chip
           label={`Seat #1 at Position ${startPosition + 1}`}
@@ -327,7 +303,6 @@ interface RectangleTablePreviewProps {
   highlightPosition?: number | null;
   growthSides?: { top: boolean; bottom: boolean; left: boolean; right: boolean };
   colorScheme?: ColorScheme;
-  // NEW: Manual ordering props
   manualAssignments?: Map<number, number>;
   nextManualNumber?: number;
 }
@@ -353,7 +328,7 @@ export function RectangleTablePreview({
   const { top, bottom, left, right } = seats;
   const totalSeats = top + bottom + left + right;
 
-  // UPDATED: Dynamic size calculation based on seat count per side
+  // Dynamic size calculation based on seat count per side
   const config = useMemo(() => {
     const baseConfig = {
       small: { seatRadius: 8, font: 7, minSpacing: 22, padding: 30 },
@@ -362,22 +337,15 @@ export function RectangleTablePreview({
     };
     
     const base = baseConfig[size];
-    
-    // Calculate minimum table width based on top/bottom seats
     const maxHorizontalSeats = Math.max(top, bottom, 1);
     const minTableWidth = maxHorizontalSeats * base.minSpacing + base.minSpacing;
-    
-    // Calculate minimum table height based on left/right seats
     const maxVerticalSeats = Math.max(left, right, 1);
     const minTableHeight = maxVerticalSeats * base.minSpacing + base.minSpacing * 0.5;
-    
-    // Add space for seats outside the table
     const seatOffset = base.seatRadius * 2;
     
     const width = minTableWidth + seatOffset * 2 + base.padding * 2;
     const height = minTableHeight + seatOffset * 2 + base.padding * 2;
     
-    // Minimum dimensions for small tables
     const minDims = {
       small: { width: 150, height: 100 },
       medium: { width: 350, height: 220 },
@@ -399,13 +367,11 @@ export function RectangleTablePreview({
   const tableWidth = config.tableWidth;
   const tableHeight = config.tableHeight;
 
-  // Generate seat positions in order: top (L→R), right (T→B), bottom (R→L), left (B→T)
   const seatPositions = useMemo(() => {
     const positions: SeatPosition[] = [];
     const seatOffset = config.seatRadius * 1.8;
     let index = 0;
 
-    // Top seats (left to right)
     if (top > 0) {
       const spacing = tableWidth / (top + 1);
       for (let i = 0; i < top; i++) {
@@ -417,7 +383,6 @@ export function RectangleTablePreview({
       }
     }
 
-    // Right seats (top to bottom)
     if (right > 0) {
       const spacing = tableHeight / (right + 1);
       for (let i = 0; i < right; i++) {
@@ -429,7 +394,6 @@ export function RectangleTablePreview({
       }
     }
 
-    // Bottom seats (right to left)
     if (bottom > 0) {
       const spacing = tableWidth / (bottom + 1);
       for (let i = 0; i < bottom; i++) {
@@ -441,7 +405,6 @@ export function RectangleTablePreview({
       }
     }
 
-    // Left seats (bottom to top)
     if (left > 0) {
       const spacing = tableHeight / (left + 1);
       for (let i = 0; i < left; i++) {
@@ -462,7 +425,6 @@ export function RectangleTablePreview({
     }
   };
 
-  // Determine which sides show growth indicators
   const showGrowthIndicators = growthSides && size !== 'small';
 
   return (
@@ -473,7 +435,6 @@ export function RectangleTablePreview({
         viewBox={`0 0 ${config.width} ${config.height}`}
         style={{ display: 'block' }}
       >
-        {/* Table Rectangle */}
         <rect
           x={centerX - tableWidth / 2}
           y={centerY - tableHeight / 2}
@@ -486,192 +447,83 @@ export function RectangleTablePreview({
           strokeWidth={2}
         />
 
-        {/* Growth indicators */}
         {showGrowthIndicators && (
           <>
             {growthSides.top && (
-              <text
-                x={centerX}
-                y={centerY - tableHeight / 2 - config.seatRadius - 20}
-                textAnchor="middle"
-                fontSize={10}
-                fill={colorScheme.ui.success}
-              >
-                ↕ grows
-              </text>
+              <text x={centerX} y={centerY - tableHeight / 2 - config.seatRadius - 20} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}>↕ grows</text>
             )}
             {growthSides.bottom && (
-              <text
-                x={centerX}
-                y={centerY + tableHeight / 2 + config.seatRadius + 28}
-                textAnchor="middle"
-                fontSize={10}
-                fill={colorScheme.ui.success}
-              >
-                ↕ grows
-              </text>
+              <text x={centerX} y={centerY + tableHeight / 2 + config.seatRadius + 28} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}>↕ grows</text>
             )}
             {growthSides.left && (
-              <text
-                x={centerX - tableWidth / 2 - config.seatRadius - 20}
-                y={centerY}
-                textAnchor="middle"
-                fontSize={10}
-                fill={colorScheme.ui.success}
-                transform={`rotate(-90, ${centerX - tableWidth / 2 - config.seatRadius - 20}, ${centerY})`}
-              >
-                ↕ grows
-              </text>
+              <text x={centerX - tableWidth / 2 - config.seatRadius - 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(-90, ${centerX - tableWidth / 2 - config.seatRadius - 20}, ${centerY})`}>↕ grows</text>
             )}
             {growthSides.right && (
-              <text
-                x={centerX + tableWidth / 2 + config.seatRadius + 20}
-                y={centerY}
-                textAnchor="middle"
-                fontSize={10}
-                fill={colorScheme.ui.success}
-                transform={`rotate(90, ${centerX + tableWidth / 2 + config.seatRadius + 20}, ${centerY})`}
-              >
-                ↕ grows
-              </text>
+              <text x={centerX + tableWidth / 2 + config.seatRadius + 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(90, ${centerX + tableWidth / 2 + config.seatRadius + 20}, ${centerY})`}>↕ grows</text>
             )}
           </>
         )}
 
-        {/* Seats */}
         {seatPositions.map((pos) => {
           const seatNumber = seatOrdering[pos.index] || pos.index + 1;
           const mode = seatModes[pos.index] || 'default';
           const seatColors = getSeatColorsFromScheme(mode, colorScheme);
           
-          // Manual ordering state
           const isManualMode = interactionMode === 'manual-ordering';
           const manualSeatNum = manualAssignments?.get(pos.index);
           const isManualAssigned = isManualMode && manualSeatNum !== undefined;
           const isNextToAssign = isManualMode && !isManualAssigned && nextManualNumber !== undefined;
           
-          // Only show start position indicator in 'ordering' mode
           const isStart = interactionMode === 'ordering' && pos.index === startPosition;
           const isHighlighted = highlightPosition === pos.index;
 
-          // Determine fill color
           let fillColor = seatColors.fill;
-          if (isManualAssigned) {
-            fillColor = 'rgba(76, 175, 80, 0.3)';
-          }
+          if (isManualAssigned) fillColor = 'rgba(76, 175, 80, 0.3)';
           
-          // Determine stroke color
           let strokeColor = seatColors.stroke;
-          if (isStart) {
-            strokeColor = colorScheme.ui.success;
-          } else if (isHighlighted) {
-            strokeColor = colorScheme.seats.selectedStroke;
-          } else if (isManualAssigned) {
-            strokeColor = '#4caf50';
-          }
+          if (isStart) strokeColor = colorScheme.ui.success;
+          else if (isHighlighted) strokeColor = colorScheme.seats.selectedStroke;
+          else if (isManualAssigned) strokeColor = '#4caf50';
               
-          // Use mode-based stroke width
           const modeStrokeWidth = getModeStrokeWidth(mode);
           const strokeWidth = isStart || isHighlighted || isManualAssigned ? Math.max(modeStrokeWidth, 3) : modeStrokeWidth;
           const strokeDasharray = mode === 'external-only' ? '4,2' : 'none';
 
-          // Display text
           let displayText = String(seatNumber);
-          if (isManualMode) {
-            displayText = isManualAssigned ? String(manualSeatNum) : `P${pos.index + 1}`;
-          }
+          if (isManualMode) displayText = isManualAssigned ? String(manualSeatNum) : `P${pos.index + 1}`;
 
           return (
-            <g
-              key={pos.index}
-              onClick={(e) => handleSeatClick(e, pos.index)}
-              style={{ cursor: interactionMode !== 'none' ? 'pointer' : 'default' }}
-            >
-              {/* Start position ring indicator (only in ordering mode) */}
-              {isStart && (
-                <circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={config.seatRadius + 4}
-                  fill="none"
-                  stroke={colorScheme.ui.success}
-                  strokeWidth={2}
-                />
-              )}
-              {/* Next to assign indicator (manual mode) */}
-              {isNextToAssign && (
-                <circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={config.seatRadius + 4}
-                  fill="none"
-                  stroke="#ff9800"
-                  strokeWidth={2}
-                  strokeDasharray="4,4"
-                />
-              )}
-              <circle
-                cx={pos.x}
-                cy={pos.y}
-                r={config.seatRadius}
-                fill={fillColor}
-                stroke={strokeColor}
-                strokeWidth={strokeWidth}
-                strokeDasharray={strokeDasharray}
-              />
+            <g key={pos.index} onClick={(e) => handleSeatClick(e, pos.index)} style={{ cursor: interactionMode !== 'none' ? 'pointer' : 'default' }}>
+              {isStart && <circle cx={pos.x} cy={pos.y} r={config.seatRadius + 4} fill="none" stroke={colorScheme.ui.success} strokeWidth={2} />}
+              {isNextToAssign && <circle cx={pos.x} cy={pos.y} r={config.seatRadius + 4} fill="none" stroke="#ff9800" strokeWidth={2} strokeDasharray="4,4" />}
+              <circle cx={pos.x} cy={pos.y} r={config.seatRadius} fill={fillColor} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={strokeDasharray} />
               {showLabels && (
-                <text
-                  x={pos.x}
-                  y={pos.y + config.font / 3}
-                  textAnchor="middle"
-                  fontSize={isManualMode && !isManualAssigned ? config.font * 0.8 : config.font}
-                  fill={isManualAssigned ? '#2e7d32' : colorScheme.table.tableStroke}
-                  fontWeight={isStart || isManualAssigned ? 'bold' : 'normal'}
-                >
+                <text x={pos.x} y={pos.y + config.font / 3} textAnchor="middle" fontSize={isManualMode && !isManualAssigned ? config.font * 0.8 : config.font} fill={isManualAssigned ? '#2e7d32' : colorScheme.table.tableStroke} fontWeight={isStart || isManualAssigned ? 'bold' : 'normal'}>
                   {displayText}
                 </text>
               )}
-              {/* Checkmark for assigned seats in manual mode */}
-              {isManualAssigned && (
-                <text
-                  x={pos.x + config.seatRadius * 0.6}
-                  y={pos.y - config.seatRadius * 0.5}
-                  fontSize={config.font * 0.7}
-                  fill="#2e7d32"
-                >
-                  ✓
-                </text>
-              )}
+              {isManualAssigned && <text x={pos.x + config.seatRadius * 0.6} y={pos.y - config.seatRadius * 0.5} fontSize={config.font * 0.7} fill="#2e7d32">✓</text>}
             </g>
           );
         })}
       </svg>
 
-      {/* Start position indicator */}
       {interactionMode === 'ordering' && totalSeats > 0 && (
-        <Chip
-          label={`Seat #1 at Position ${startPosition + 1}`}
-          color="success"
-          size="small"
-          sx={{ position: 'absolute', top: 4, left: 4, fontSize: size === 'small' ? 8 : 12 }}
-        />
+        <Chip label={`Seat #1 at Position ${startPosition + 1}`} color="success" size="small" sx={{ position: 'absolute', top: 4, left: 4, fontSize: size === 'small' ? 8 : 12 }} />
       )}
     </Box>
   );
 }
 
 // ============================================================================
-// UNIFIED TABLE PREVIEW (Auto-selects based on type)
+// UNIFIED TABLE PREVIEW
 // ============================================================================
 
 interface TablePreviewProps {
   type: 'round' | 'rectangle';
-  // For round
   roundSeats?: number;
-  // For rectangle
   rectangleSeats?: { top: number; bottom: number; left: number; right: number };
   growthSides?: { top: boolean; bottom: boolean; left: boolean; right: boolean };
-  // Common props
   seatOrdering: number[];
   seatModes: SeatMode[];
   startPosition?: number;
@@ -681,7 +533,6 @@ interface TablePreviewProps {
   showLabels?: boolean;
   highlightPosition?: number | null;
   colorScheme?: ColorScheme;
-  // NEW: Manual ordering props
   manualAssignments?: Map<number, number>;
   nextManualNumber?: number;
 }
