@@ -12,18 +12,22 @@ import chroma from 'chroma-js';
 export type ColorMode = 'standard' | 'colorblind';
 
 export interface SeatColors {
-  defaultFill: string;
-  hostOnlyFill: string;
-  externalOnlyFill: string;
-  lockedFill: string;
-  selectedFill: string;
-  assignedFill: string;
+  // Mode colors (stroke always shows mode)
   defaultStroke: string;
   hostOnlyStroke: string;
   externalOnlyStroke: string;
-  lockedStroke: string;
-  selectedStroke: string;
-  assignedStroke: string;
+  
+  // Mode fill colors (when empty/unassigned)
+  defaultFill: string;
+  hostOnlyFill: string;
+  externalOnlyFill: string;
+  
+  // State overlays (applied on top of mode colors)
+  assignedOverlay: string;      // Darkens/saturates the mode fill
+  selectedFill: string;         // Yellow - overrides mode fill
+  selectedStroke: string;       // Yellow stroke
+  lockedFill: string;           // Grey - overrides mode fill
+  lockedStroke: string;         // Grey stroke
 }
 
 export interface GuestBoxColors {
@@ -151,24 +155,27 @@ function createStandardColors(): ColorScheme {
   const defaultGreen = '#4caf50';
   const lockedGrey = '#78909c';
   const selectedYellow = '#ffc107';
-  const assignedGreen = '#388e3c';
 
   return {
     mode: 'standard',
     
     seats: {
-      defaultFill: generateLightFill(defaultGreen),
+      // Mode strokes (ALWAYS visible - indicates what type of guest can sit here)
       defaultStroke: defaultGreen,
-      hostOnlyFill: generateLightFill(hostBlue),
       hostOnlyStroke: hostBlue,
-      externalOnlyFill: generateLightFill(externalRed),
       externalOnlyStroke: externalRed,
-      lockedFill: generateLightFill(lockedGrey, 0.88),
-      lockedStroke: lockedGrey,
-      selectedFill: generateLightFill(selectedYellow, 0.9),
+      
+      // Mode fills (when empty/unassigned - light version of mode color)
+      defaultFill: generateLightFill(defaultGreen),
+      hostOnlyFill: generateLightFill(hostBlue),
+      externalOnlyFill: generateLightFill(externalRed),
+      
+      // State colors
+      assignedOverlay: '0.35',   // Opacity multiplier - darkens the mode fill
+      selectedFill: generateLightFill(selectedYellow, 0.88),
       selectedStroke: selectedYellow,
-      assignedFill: generateLightFill(assignedGreen, 0.85),
-      assignedStroke: assignedGreen,
+      lockedFill: generateLightFill(lockedGrey, 0.85),
+      lockedStroke: lockedGrey,
     },
     
     guestBox: {
@@ -215,24 +222,27 @@ function createColorblindColors(): ColorScheme {
   const defaultTeal = OKABE_ITO.bluishGreen;  // #009E73 - Teal green
   const lockedGrey = chroma('#757575').hex(); // Neutral grey
   const selectedYellow = OKABE_ITO.yellow;    // #F0E442 - Bright yellow
-  const assignedGreen = chroma(OKABE_ITO.bluishGreen).darken(0.3).hex();
 
   return {
     mode: 'colorblind',
     
     seats: {
-      defaultFill: generateLightFill(defaultTeal),
+      // Mode strokes (ALWAYS visible - indicates what type of guest can sit here)
       defaultStroke: defaultTeal,
-      hostOnlyFill: generateLightFill(hostBlue),
       hostOnlyStroke: hostBlue,
-      externalOnlyFill: generateLightFill(externalOrange),
       externalOnlyStroke: externalOrange,
-      lockedFill: generateLightFill(lockedGrey, 0.85),
-      lockedStroke: lockedGrey,
+      
+      // Mode fills (when empty/unassigned - light version of mode color)
+      defaultFill: generateLightFill(defaultTeal),
+      hostOnlyFill: generateLightFill(hostBlue),
+      externalOnlyFill: generateLightFill(externalOrange),
+      
+      // State colors
+      assignedOverlay: '0.35',   // Opacity multiplier - darkens the mode fill
       selectedFill: generateLightFill(selectedYellow, 0.85),
       selectedStroke: chroma(selectedYellow).darken(1).hex(),
-      assignedFill: generateLightFill(assignedGreen, 0.8),
-      assignedStroke: assignedGreen,
+      lockedFill: generateLightFill(lockedGrey, 0.85),
+      lockedStroke: lockedGrey,
     },
     
     guestBox: {
@@ -287,6 +297,18 @@ export function getColorScheme(mode: ColorMode): ColorScheme {
 
 // ============================================================================
 // SEAT COLOR HELPERS
+// 
+// DESIGN PRINCIPLE:
+// - STROKE = Always shows seat MODE (what type of guest can sit here)
+//   - Default: green solid 2px
+//   - Host-only: blue solid 3.5px (thicker = restricted)
+//   - External-only: red/orange dashed 2.5px
+//
+// - FILL = Shows seat STATE (empty, assigned, selected, locked)
+//   - Empty: white (neutral - mode shown by stroke)
+//   - Assigned: light mode color (blue/green/red tint)
+//   - Selected: yellow (override)
+//   - Locked: grey (override)
 // ============================================================================
 
 export interface SeatColorParams {
@@ -296,18 +318,24 @@ export interface SeatColorParams {
   isAssigned: boolean;
 }
 
-export function getSeatFillColor(
-  params: SeatColorParams,
-  colorScheme: ColorScheme
-): string {
-  const { mode, isLocked, isSelected, isAssigned } = params;
-  const { seats } = colorScheme;
-  
-  // Priority order: locked > selected > assigned > mode
-  if (isLocked) return seats.lockedFill;
-  if (isSelected) return seats.selectedFill;
-  if (isAssigned) return seats.assignedFill;
-  
+/**
+ * Get the mode stroke color - ALWAYS based on mode, never state
+ */
+function getModeStrokeColor(mode: 'default' | 'host-only' | 'external-only', seats: SeatColors): string {
+  switch (mode) {
+    case 'host-only':
+      return seats.hostOnlyStroke;
+    case 'external-only':
+      return seats.externalOnlyStroke;
+    default:
+      return seats.defaultStroke;
+  }
+}
+
+/**
+ * Get the mode fill color (for assigned state)
+ */
+function getModeFillColor(mode: 'default' | 'host-only' | 'external-only', seats: SeatColors): string {
   switch (mode) {
     case 'host-only':
       return seats.hostOnlyFill;
@@ -318,25 +346,57 @@ export function getSeatFillColor(
   }
 }
 
-export function getSeatStrokeColor(
+/**
+ * Get seat FILL color based on state
+ * 
+ * Priority: locked > selected > assigned > empty
+ * - Locked: Grey (overrides everything)
+ * - Selected: Yellow (overrides assigned/empty)
+ * - Assigned: Light mode color (shows both mode AND assigned state)
+ * - Empty: White (mode shown by stroke only)
+ */
+export function getSeatFillColor(
   params: SeatColorParams,
   colorScheme: ColorScheme
 ): string {
   const { mode, isLocked, isSelected, isAssigned } = params;
   const { seats } = colorScheme;
   
-  if (isLocked) return seats.lockedStroke;
-  if (isSelected) return seats.selectedStroke;
-  if (isAssigned) return seats.assignedStroke;
+  // Locked: grey fill (overrides everything)
+  if (isLocked) return seats.lockedFill;
   
-  switch (mode) {
-    case 'host-only':
-      return seats.hostOnlyStroke;
-    case 'external-only':
-      return seats.externalOnlyStroke;
-    default:
-      return seats.defaultStroke;
-  }
+  // Selected: yellow fill
+  if (isSelected) return seats.selectedFill;
+  
+  // Assigned: light mode color fill (shows mode info!)
+  if (isAssigned) return getModeFillColor(mode, seats);
+  
+  // Empty: white/neutral fill (mode shown by stroke only)
+  return '#ffffff';
+}
+
+/**
+ * Get seat STROKE color based on mode
+ * 
+ * STROKE ALWAYS SHOWS THE MODE - this is the key principle!
+ * Only locked/selected override the stroke color.
+ */
+export function getSeatStrokeColor(
+  params: SeatColorParams,
+  colorScheme: ColorScheme
+): string {
+  const { mode, isLocked, isSelected } = params;
+  const { seats } = colorScheme;
+  
+  // Locked: grey stroke
+  if (isLocked) return seats.lockedStroke;
+  
+  // Selected: keep mode stroke but can optionally highlight
+  // Actually, let's keep mode stroke even when selected for clarity
+  if (isSelected) return getModeStrokeColor(mode, seats);
+  
+  // All other cases: mode stroke color
+  return getModeStrokeColor(mode, seats);
 }
 
 // ============================================================================
@@ -363,7 +423,8 @@ export function getGuestBoxColors(
 }
 
 // ============================================================================
-// STROKE PATTERNS
+// STROKE PATTERNS & WIDTHS
+// Different modes have different visual treatments for accessibility
 // ============================================================================
 
 export function getSeatStrokeDashArray(
@@ -371,12 +432,27 @@ export function getSeatStrokeDashArray(
   colorMode: ColorMode
 ): string {
   // External-only always dashed for extra differentiation
-  return mode === 'external-only' ? '4,2' : 'none';
+  return mode === 'external-only' ? '5,3' : 'none';
 }
 
-export function getSeatStrokeWidth(colorMode: ColorMode): number {
-  // Slightly thicker in colorblind mode for better visibility
-  return colorMode === 'colorblind' ? 2.5 : 2;
+/**
+ * Get stroke width based on seat mode
+ * Host-only is thicker to indicate restriction
+ */
+export function getSeatStrokeWidth(
+  mode: 'default' | 'host-only' | 'external-only',
+  colorMode: ColorMode
+): number {
+  const baseWidth = colorMode === 'colorblind' ? 0.5 : 0; // Extra width in colorblind mode
+  
+  switch (mode) {
+    case 'host-only':
+      return 3.5 + baseWidth;  // Thickest - most restricted
+    case 'external-only':
+      return 2.5 + baseWidth;  // Medium + dashed
+    default:
+      return 2 + baseWidth;    // Standard
+  }
 }
 
 // ============================================================================

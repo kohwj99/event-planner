@@ -1,5 +1,5 @@
-// utils/generateTable.ts - UPDATED WITH SEAT MODE SUPPORT
-import { Table } from "@/types/Table";
+// utils/generateTable.ts - UPDATED WITH SEAT MODE SUPPORT & RECTANGLE METADATA
+import { Table, RectangleSeatsConfig } from "@/types/Table";
 import { Seat, SeatMode } from "@/types/Seat";
 
 /**
@@ -13,7 +13,7 @@ export function createRoundTable(
   seatCount: number,
   label: string,
   seatOrdering?: number[], // Custom seat numbering
-  seatModes?: SeatMode[] // NEW: Custom seat modes
+  seatModes?: SeatMode[] // Custom seat modes
 ): Table {
   const seats: Seat[] = [];
   const seatRadius = 12;
@@ -54,7 +54,7 @@ export function createRoundTable(
       selected: false,
       position: i,
       adjacentSeats,
-      mode: modes[i] || 'default', // NEW: Apply seat mode
+      mode: modes[i] || 'default',
     });
   }
 
@@ -71,6 +71,8 @@ export function createRoundTable(
 
 /**
  * Create a rectangular table with custom seat ordering, adjacency tracking, and seat modes
+ * 
+ * NEW: Now stores rectangleSeats metadata for accurate reconstruction
  */
 export function createRectangleTable(
   id: string,
@@ -82,7 +84,7 @@ export function createRectangleTable(
   right: number,
   label: string,
   seatOrdering?: number[], // Custom seat numbering
-  seatModes?: SeatMode[] // NEW: Custom seat modes
+  seatModes?: SeatMode[] // Custom seat modes
 ): Table {
   const seats: Seat[] = [];
   const seatRadius = 12;
@@ -128,7 +130,7 @@ export function createRectangleTable(
       selected: false,
       position: seatIndex,
       adjacentSeats: [], // Will be computed below
-      mode: modes[seatIndex] || 'default', // NEW: Apply seat mode
+      mode: modes[seatIndex] || 'default',
     });
     seatIndex++;
   };
@@ -183,6 +185,9 @@ export function createRectangleTable(
     ];
   }
 
+  // Store rectangle seats configuration for accurate reconstruction
+  const rectangleSeats: RectangleSeatsConfig = { top, bottom, left, right };
+
   return {
     id,
     x: centerX,
@@ -193,5 +198,6 @@ export function createRectangleTable(
     width,
     height,
     seats,
+    rectangleSeats, // NEW: Store the configuration
   };
 }

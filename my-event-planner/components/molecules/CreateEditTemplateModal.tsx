@@ -1,10 +1,10 @@
 // components/molecules/CreateEditTemplateModal.tsx
-// Modal for creating and editing table templates
-// Reuses the same configuration components as AddTableModal
+// ENHANCED: Modal for creating/editing table templates with intelligent pattern system
+// UPDATED: Removed seat limits, added scrollable preview areas for large tables
 
 'use client';
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -24,59 +24,112 @@ import {
   Divider,
   Tabs,
   Tab,
-  Checkbox,
+  ToggleButtonGroup,
+  ToggleButton,
+  Switch,
   FormControlLabel,
-  FormGroup,
-  Alert,
   Slider,
+  Alert,
+  FormGroup,
+  Checkbox,
+  Stepper,
+  Step,
+  StepLabel,
+  StepContent,
 } from '@mui/material';
-import { Save, Close } from '@mui/icons-material';
-import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
+import {
+  Refresh,
+  Circle,
+  Rectangle,
+  RotateLeft,
+  RotateRight,
+  FilterList,
+  Check,
+  Warning,
+} from '@mui/icons-material';
+import { SeatMode } from '@/types/Seat';
 import { EventType } from '@/types/Event';
 import {
   TableTemplate,
-  CreateTemplateInput,
   Direction,
   OrderingPattern,
-  SeatModePattern,
-  RectangleGrowthConfig,
+  CreateTemplateInput,
+  EnhancedSeatModePattern,
+  isEnhancedPattern,
   SESSION_TYPE_COLORS,
 } from '@/types/Template';
 import {
   generateOrdering,
-  generateSeatModes,
-  scaleRectangleSeats,
   validateTemplate,
   getTemplateBaseSeatCount,
+  createPatternFromModes,
 } from '@/utils/templateScaler';
-import SeatOrderingControls, { PatternPreview } from './SeatOrderingControls';
-import SeatModeControls, { SeatModeLegend, SeatModeMenu } from './SeatModeControls';
+import { detectPattern, getPatternSummary } from '@/utils/patternDetector';
+import { scalePattern, modesToString } from '@/utils/patternScaler';
 import TablePreview from '../atoms/TablePreview';
+import PatternEditor from './PatternEditor';
+import SeatOrderingControls, { PatternPreview } from './SeatOrderingControls';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type TabValue = 'basic' | 'config' | 'ordering' | 'modes' | 'scaling';
-
 interface CreateEditTemplateModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (template: CreateTemplateInput) => void;
-  editTemplate?: TableTemplate | null; // null = create mode
+  editTemplate?: TableTemplate | null;
   initialSessionType?: EventType | null;
 }
 
+type TabValue = 'basic' | 'ordering' | 'pattern' | 'preview';
+
 // ============================================================================
-// SESSION TYPES
+// SCROLLABLE PREVIEW CONTAINER - Key component for large tables
 // ============================================================================
 
-const ALL_SESSION_TYPES: EventType[] = [
-  'Executive meeting',
-  'Bilateral Meeting',
-  'Meal',
-  'Phototaking',
-];
+interface ScrollablePreviewContainerProps {
+  children: React.ReactNode;
+  bgcolor?: string;
+  maxHeight?: number;
+}
+
+function ScrollablePreviewContainer({ 
+  children, 
+  bgcolor = '#fafafa',
+  maxHeight = 400,
+}: ScrollablePreviewContainerProps) {
+  return (
+    <Box
+      sx={{
+        bgcolor,
+        borderRadius: 2,
+        border: '1px solid',
+        borderColor: 'divider',
+        maxHeight,
+        overflow: 'auto',
+        // These are critical for scrolling to work properly
+        '& > *': {
+          display: 'block',
+        },
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          p: 2,
+          // Allow the content to define its own size
+          minWidth: 'max-content',
+          minHeight: 'max-content',
+        }}
+      >
+        {children}
+      </Box>
+    </Box>
+  );
+}
 
 // ============================================================================
 // MAIN COMPONENT
@@ -86,366 +139,331 @@ export default function CreateEditTemplateModal({
   open,
   onClose,
   onSave,
-  editTemplate,
-  initialSessionType,
+  editTemplate = null,
+  initialSessionType = null,
 }: CreateEditTemplateModalProps) {
-  const isEditMode = Boolean(editTemplate);
+  const isEditing = !!editTemplate;
+  
+  // Current tab
+  const [currentTab, setCurrentTab] = useState<TabValue>('basic');
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<TabValue>('basic');
-
-  // Basic info
+  // ============================================================================
+  // BASIC INFO STATE
+  // ============================================================================
+  
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [sessionTypes, setSessionTypes] = useState<EventType[]>([]);
-
-  // Table configuration
+  const [selectedSessionTypes, setSelectedSessionTypes] = useState<EventType[]>([]);
   const [tableType, setTableType] = useState<'round' | 'rectangle'>('round');
-  const [roundSeats, setRoundSeats] = useState(8);
-  const [rectangleSeats, setRectangleSeats] = useState({
-    top: 2,
-    bottom: 2,
-    left: 1,
-    right: 1,
-  });
-  const [growthSides, setGrowthSides] = useState<RectangleGrowthConfig>({
-    top: true,
-    bottom: true,
-    left: false,
-    right: false,
-  });
 
-  // Ordering configuration
+  // ============================================================================
+  // SEAT COUNT STATE
+  // ============================================================================
+  
+  const [roundSeatCount, setRoundSeatCount] = useState(8);
+  const [rectangleSeats, setRectangleSeats] = useState({ top: 3, bottom: 3, left: 1, right: 1 });
+  const [growthSides, setGrowthSides] = useState({ top: true, bottom: true, left: false, right: false });
+  const [minSeats, setMinSeats] = useState(4);
+  const [maxSeats, setMaxSeats] = useState(16);
+
+  // ============================================================================
+  // ORDERING STATE
+  // ============================================================================
+  
   const [direction, setDirection] = useState<Direction>('counter-clockwise');
   const [orderingPattern, setOrderingPattern] = useState<OrderingPattern>('sequential');
   const [startPosition, setStartPosition] = useState(0);
 
-  // Seat modes
+  // ============================================================================
+  // PATTERN STATE (NEW ENHANCED SYSTEM)
+  // ============================================================================
+  
   const [seatModes, setSeatModes] = useState<SeatMode[]>([]);
-  const [modeMenuAnchor, setModeMenuAnchor] = useState<HTMLElement | null>(null);
-  const [selectedSeatIndex, setSelectedSeatIndex] = useState<number | null>(null);
 
-  // Scaling limits
-  const [minSeats, setMinSeats] = useState(4);
-  const [maxSeats, setMaxSeats] = useState(20);
-
-  // Validation
-  const [errors, setErrors] = useState<string[]>([]);
-
-  // Calculate total seats
-  const totalSeats = useMemo(() => {
-    if (tableType === 'round') {
-      return roundSeats;
-    }
+  // ============================================================================
+  // COMPUTED VALUES
+  // ============================================================================
+  
+  const baseSeatCount = useMemo(() => {
+    if (tableType === 'round') return roundSeatCount;
     return rectangleSeats.top + rectangleSeats.bottom + rectangleSeats.left + rectangleSeats.right;
-  }, [tableType, roundSeats, rectangleSeats]);
+  }, [tableType, roundSeatCount, rectangleSeats]);
 
-  // Generate ordering
   const seatOrdering = useMemo(() => {
-    const rectangleConfig = tableType === 'rectangle' ? rectangleSeats : undefined;
-    return generateOrdering(totalSeats, direction, orderingPattern, startPosition, rectangleConfig);
-  }, [totalSeats, direction, orderingPattern, startPosition, tableType, rectangleSeats]);
+    const config = tableType === 'rectangle' ? rectangleSeats : undefined;
+    return generateOrdering(baseSeatCount, direction, orderingPattern, startPosition, config);
+  }, [baseSeatCount, direction, orderingPattern, startPosition, tableType, rectangleSeats]);
 
-  // Initialize/reset form
+  const detectedPattern = useMemo(() => {
+    return detectPattern(seatModes);
+  }, [seatModes]);
+
+  const validationErrors = useMemo(() => {
+    const template: Partial<TableTemplate> = {
+      name,
+      sessionTypes: selectedSessionTypes,
+      baseConfig: {
+        type: tableType,
+        baseSeatCount: tableType === 'round' ? roundSeatCount : undefined,
+        baseSeats: tableType === 'rectangle' ? rectangleSeats : undefined,
+        growthSides: tableType === 'rectangle' ? growthSides : undefined,
+      },
+      minSeats,
+      maxSeats,
+    };
+    return validateTemplate(template);
+  }, [name, selectedSessionTypes, tableType, roundSeatCount, rectangleSeats, growthSides, minSeats, maxSeats]);
+
+  const isValid = validationErrors.length === 0;
+
+  // ============================================================================
+  // EFFECTS
+  // ============================================================================
+
+  // Initialize seat modes when seat count changes
   useEffect(() => {
-    if (open) {
-      if (editTemplate) {
-        // Edit mode - populate from template
-        setName(editTemplate.name);
-        setDescription(editTemplate.description);
-        setSessionTypes([...editTemplate.sessionTypes]);
-        setTableType(editTemplate.baseConfig.type);
-        
-        if (editTemplate.baseConfig.type === 'round') {
-          setRoundSeats(editTemplate.baseConfig.baseSeatCount || 8);
-        } else {
-          setRectangleSeats(editTemplate.baseConfig.baseSeats || {
-            top: 2, bottom: 2, left: 1, right: 1
-          });
-          setGrowthSides(editTemplate.baseConfig.growthSides || {
-            top: true, bottom: true, left: false, right: false
-          });
-        }
+    setSeatModes(prev => {
+      if (prev.length === baseSeatCount) return prev;
+      
+      // If we have existing modes, scale them using the pattern system
+      if (prev.length > 0) {
+        const pattern = detectPattern(prev);
+        return scalePattern(pattern, baseSeatCount);
+      }
+      
+      // Initialize with all default
+      return Array(baseSeatCount).fill('default' as SeatMode);
+    });
+  }, [baseSeatCount]);
 
-        setDirection(editTemplate.orderingDirection);
-        setOrderingPattern(editTemplate.orderingPattern);
-        setStartPosition(editTemplate.startPosition);
-        setMinSeats(editTemplate.minSeats);
-        setMaxSeats(editTemplate.maxSeats);
+  // Reset start position if it exceeds seat count
+  useEffect(() => {
+    if (startPosition >= baseSeatCount) {
+      setStartPosition(0);
+    }
+  }, [baseSeatCount, startPosition]);
 
-        // Generate seat modes from pattern
-        const baseSeatCount = getTemplateBaseSeatCount(editTemplate);
-        setSeatModes(generateSeatModes(editTemplate.seatModePattern, baseSeatCount));
+  // Load existing template data when editing
+  useEffect(() => {
+    if (editTemplate) {
+      setName(editTemplate.name);
+      setDescription(editTemplate.description);
+      setSelectedSessionTypes([...editTemplate.sessionTypes]);
+      setTableType(editTemplate.baseConfig.type);
+      setMinSeats(editTemplate.minSeats);
+      setMaxSeats(editTemplate.maxSeats);
+      setDirection(editTemplate.orderingDirection);
+      setOrderingPattern(editTemplate.orderingPattern);
+      setStartPosition(editTemplate.startPosition);
+
+      if (editTemplate.baseConfig.type === 'round') {
+        setRoundSeatCount(editTemplate.baseConfig.baseSeatCount || 8);
       } else {
-        // Create mode - reset to defaults
-        setName('');
-        setDescription('');
-        setSessionTypes(initialSessionType ? [initialSessionType] : []);
-        setTableType('round');
-        setRoundSeats(8);
-        setRectangleSeats({ top: 2, bottom: 2, left: 1, right: 1 });
-        setGrowthSides({ top: true, bottom: true, left: false, right: false });
-        setDirection('counter-clockwise');
-        setOrderingPattern('sequential');
-        setStartPosition(0);
-        setMinSeats(4);
-        setMaxSeats(20);
-        setSeatModes(Array(8).fill('default'));
+        setRectangleSeats(editTemplate.baseConfig.baseSeats || { top: 3, bottom: 3, left: 1, right: 1 });
+        setGrowthSides(editTemplate.baseConfig.growthSides || { top: true, bottom: true, left: false, right: false });
       }
 
-      setActiveTab('basic');
-      setErrors([]);
+      // Load pattern
+      if (isEnhancedPattern(editTemplate.seatModePattern)) {
+        setSeatModes([...editTemplate.seatModePattern.baseModes]);
+      } else {
+        // Convert legacy pattern to modes
+        const baseCount = getTemplateBaseSeatCount(editTemplate);
+        const modes: SeatMode[] = [];
+        const pattern = editTemplate.seatModePattern;
+        
+        if (pattern.type === 'repeating' && pattern.pattern) {
+          for (let i = 0; i < baseCount; i++) {
+            modes.push(pattern.pattern[i % pattern.pattern.length]);
+          }
+        } else if (pattern.type === 'alternating' && pattern.alternatingModes) {
+          for (let i = 0; i < baseCount; i++) {
+            modes.push(pattern.alternatingModes[i % 2]);
+          }
+        } else if (pattern.type === 'specific') {
+          for (let i = 0; i < baseCount; i++) {
+            modes.push(pattern.specificModes?.[i] || pattern.defaultMode);
+          }
+        } else {
+          for (let i = 0; i < baseCount; i++) {
+            modes.push(pattern.defaultMode);
+          }
+        }
+        
+        setSeatModes(modes);
+      }
+    }
+  }, [editTemplate]);
+
+  // Reset form when modal opens for new template
+  useEffect(() => {
+    if (open && !editTemplate) {
+      setName('');
+      setDescription('');
+      setSelectedSessionTypes(initialSessionType ? [initialSessionType] : []);
+      setTableType('round');
+      setRoundSeatCount(8);
+      setRectangleSeats({ top: 3, bottom: 3, left: 1, right: 1 });
+      setGrowthSides({ top: true, bottom: true, left: false, right: false });
+      setMinSeats(4);
+      setMaxSeats(16);
+      setDirection('counter-clockwise');
+      setOrderingPattern('sequential');
+      setStartPosition(0);
+      setSeatModes(Array(8).fill('default' as SeatMode));
+      setCurrentTab('basic');
     }
   }, [open, editTemplate, initialSessionType]);
 
-  // Update seat modes when seat count changes
-  useEffect(() => {
-    setSeatModes((prev) => {
-      if (prev.length === totalSeats) return prev;
-      if (totalSeats > prev.length) {
-        return [...prev, ...Array(totalSeats - prev.length).fill('default')];
-      }
-      return prev.slice(0, totalSeats);
-    });
-  }, [totalSeats]);
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
 
-  // Reset start position when seat count changes
-  useEffect(() => {
-    if (startPosition >= totalSeats) {
-      setStartPosition(0);
-    }
-  }, [totalSeats, startPosition]);
-
-  // Mode counts for summary
-  const modeCounts = useMemo(() => {
-    const counts: Record<SeatMode, number> = {
-      'default': 0,
-      'host-only': 0,
-      'external-only': 0,
-    };
-    seatModes.forEach((mode) => {
-      counts[mode]++;
-    });
-    return counts;
-  }, [seatModes]);
-
-  // Session type toggle
   const handleSessionTypeToggle = (type: EventType) => {
-    setSessionTypes((prev) => {
+    setSelectedSessionTypes(prev => {
       if (prev.includes(type)) {
-        return prev.filter((t) => t !== type);
+        return prev.filter(t => t !== type);
       }
       return [...prev, type];
     });
   };
 
-  // Growth side toggle
-  const handleGrowthSideToggle = (side: keyof RectangleGrowthConfig) => {
-    setGrowthSides((prev) => ({
-      ...prev,
-      [side]: !prev[side],
-    }));
-  };
+  const handleSave = () => {
+    if (!isValid) return;
 
-  // Seat click handler
-  const handleSeatClick = (event: React.MouseEvent, index: number) => {
-    if (activeTab === 'ordering') {
-      setStartPosition(index);
-    } else if (activeTab === 'modes') {
-      setModeMenuAnchor(event.currentTarget as HTMLElement);
-      setSelectedSeatIndex(index);
-    }
-  };
+    // Build the enhanced pattern from current modes
+    const enhancedPattern = createPatternFromModes(seatModes);
 
-  // Mode menu handlers
-  const handleModeMenuClose = () => {
-    setModeMenuAnchor(null);
-    setSelectedSeatIndex(null);
-  };
-
-  const handleModeSelect = (mode: SeatMode) => {
-    if (selectedSeatIndex !== null) {
-      setSeatModes((prev) => {
-        const newModes = [...prev];
-        newModes[selectedSeatIndex] = mode;
-        return newModes;
-      });
-    }
-    handleModeMenuClose();
-  };
-
-  // Set all modes
-  const handleSetAllModes = (mode: SeatMode) => {
-    setSeatModes(Array(totalSeats).fill(mode));
-  };
-
-  // Reset ordering
-  const handleResetOrdering = () => {
-    setDirection('counter-clockwise');
-    setOrderingPattern('sequential');
-    setStartPosition(0);
-  };
-
-  // Build template object
-  const buildTemplate = useCallback((): CreateTemplateInput => {
-    // Convert seat modes array to pattern
-    const seatModePattern: SeatModePattern = {
-      type: 'specific',
-      specificModes: seatModes.reduce((acc, mode, idx) => {
-        if (mode !== 'default') {
-          acc[idx] = mode;
-        }
-        return acc;
-      }, {} as Record<number, SeatMode>),
-      defaultMode: 'default',
-    };
-
-    return {
+    const template: CreateTemplateInput = {
       name: name.trim(),
       description: description.trim(),
-      sessionTypes,
+      sessionTypes: selectedSessionTypes,
       isUserCreated: true,
-      color: sessionTypes.length > 0 ? SESSION_TYPE_COLORS[sessionTypes[0]] : '#666666',
+      color: SESSION_TYPE_COLORS[selectedSessionTypes[0]] || '#666',
       baseConfig: {
         type: tableType,
-        baseSeatCount: tableType === 'round' ? roundSeats : undefined,
+        baseSeatCount: tableType === 'round' ? roundSeatCount : undefined,
         baseSeats: tableType === 'rectangle' ? rectangleSeats : undefined,
         growthSides: tableType === 'rectangle' ? growthSides : undefined,
       },
       orderingDirection: direction,
       orderingPattern: orderingPattern,
       startPosition,
-      seatModePattern,
+      seatModePattern: enhancedPattern,
       minSeats,
       maxSeats,
     };
-  }, [
-    name, description, sessionTypes, tableType, roundSeats, rectangleSeats,
-    growthSides, direction, orderingPattern, startPosition, seatModes,
-    minSeats, maxSeats,
-  ]);
-
-  // Validate and save
-  const handleSave = () => {
-    const template = buildTemplate();
-    const validationErrors = validateTemplate(template);
-
-    if (validationErrors.length > 0) {
-      setErrors(validationErrors);
-      return;
-    }
 
     onSave(template);
     onClose();
   };
 
+  const handleClose = () => {
+    onClose();
+  };
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
       <DialogTitle>
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6">
-            {isEditMode ? 'Edit Template' : 'Create New Template'}
-          </Typography>
-        </Stack>
+        {isEditing ? 'Edit Template' : 'Create New Template'}
       </DialogTitle>
 
+      {/* Tabs */}
       <Tabs
-        value={activeTab}
-        onChange={(_, v) => setActiveTab(v)}
+        value={currentTab}
+        onChange={(_, v) => setCurrentTab(v)}
         sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
       >
-        <Tab label="Basic Info" value="basic" />
-        <Tab label="Table Config" value="config" />
-        <Tab label="Seat Ordering" value="ordering" />
-        <Tab label="Seat Modes" value="modes" />
-        <Tab label="Scaling" value="scaling" />
+        <Tab label="1. Basic Info" value="basic" />
+        <Tab label="2. Ordering" value="ordering" disabled={validationErrors.includes('Template name is required')} />
+        <Tab label="3. Seat Modes" value="pattern" disabled={validationErrors.includes('Template name is required')} />
+        <Tab label="4. Preview" value="preview" disabled={!isValid} />
       </Tabs>
 
       <DialogContent sx={{ minHeight: 500 }}>
-        {errors.length > 0 && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErrors([])}>
-            {errors.map((err, idx) => (
-              <div key={idx}>{err}</div>
-            ))}
-          </Alert>
-        )}
-
-        {/* BASIC INFO TAB */}
-        {activeTab === 'basic' && (
+        {/* ============ BASIC INFO TAB ============ */}
+        {currentTab === 'basic' && (
           <Stack spacing={3} sx={{ mt: 2 }}>
             <TextField
               label="Template Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              fullWidth
               required
-              placeholder="e.g., Executive Round Table"
+              error={!name.trim()}
+              helperText={!name.trim() ? 'Required' : ''}
+              fullWidth
             />
 
             <TextField
               label="Description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              fullWidth
               multiline
               rows={2}
-              placeholder="Describe the use case for this template..."
+              fullWidth
             />
 
+            {/* Session Types */}
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                Recommended for Session Types:
+                Recommended for Session Types *
               </Typography>
-              <FormGroup row>
-                {ALL_SESSION_TYPES.map((type) => (
-                  <FormControlLabel
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {(['Executive meeting', 'Bilateral Meeting', 'Meal', 'Phototaking'] as EventType[]).map(type => (
+                  <Chip
                     key={type}
-                    control={
-                      <Checkbox
-                        checked={sessionTypes.includes(type)}
-                        onChange={() => handleSessionTypeToggle(type)}
-                      />
-                    }
-                    label={
-                      <Chip
-                        label={type}
-                        size="small"
-                        sx={{
-                          bgcolor: sessionTypes.includes(type)
-                            ? SESSION_TYPE_COLORS[type]
-                            : 'grey.300',
-                          color: sessionTypes.includes(type) ? 'white' : 'text.primary',
-                        }}
-                      />
-                    }
+                    label={type}
+                    onClick={() => handleSessionTypeToggle(type)}
+                    sx={{
+                      bgcolor: selectedSessionTypes.includes(type) ? SESSION_TYPE_COLORS[type] : 'transparent',
+                      color: selectedSessionTypes.includes(type) ? 'white' : 'text.primary',
+                      borderColor: SESSION_TYPE_COLORS[type],
+                    }}
+                    variant={selectedSessionTypes.includes(type) ? 'filled' : 'outlined'}
                   />
                 ))}
-              </FormGroup>
+              </Stack>
+              {selectedSessionTypes.length === 0 && (
+                <Typography variant="caption" color="error">
+                  Select at least one session type
+                </Typography>
+              )}
             </Box>
-          </Stack>
-        )}
 
-        {/* TABLE CONFIG TAB */}
-        {activeTab === 'config' && (
-          <Stack spacing={3} sx={{ mt: 2 }}>
-            <FormControl fullWidth>
-              <InputLabel>Table Type</InputLabel>
-              <Select
+            <Divider />
+
+            {/* Table Type */}
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                Table Type
+              </Typography>
+              <ToggleButtonGroup
                 value={tableType}
-                label="Table Type"
-                onChange={(e) => setTableType(e.target.value as 'round' | 'rectangle')}
+                exclusive
+                onChange={(_, v) => v && setTableType(v)}
               >
-                <MenuItem value="round">Round Table</MenuItem>
-                <MenuItem value="rectangle">Rectangle Table</MenuItem>
-              </Select>
-            </FormControl>
+                <ToggleButton value="round">
+                  <Circle sx={{ mr: 1 }} /> Round
+                </ToggleButton>
+                <ToggleButton value="rectangle">
+                  <Rectangle sx={{ mr: 1 }} /> Rectangle
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
 
+            {/* Seat Configuration */}
             {tableType === 'round' ? (
               <Box>
-                <Typography gutterBottom>Number of Seats: {roundSeats}</Typography>
+                <Typography variant="subtitle2" gutterBottom>
+                  Base Seat Count: {roundSeatCount}
+                </Typography>
                 <Slider
-                  value={roundSeats}
-                  onChange={(_, val) => setRoundSeats(val as number)}
+                  value={roundSeatCount}
+                  onChange={(_, v) => setRoundSeatCount(v as number)}
                   min={4}
                   max={20}
                   marks
@@ -453,280 +471,278 @@ export default function CreateEditTemplateModal({
                 />
               </Box>
             ) : (
-              <>
+              <Stack spacing={2}>
+                <Typography variant="subtitle2">Seats per Side (no limit)</Typography>
                 <Stack direction="row" spacing={2}>
+                  {/* UPDATED: Removed max limits on all sides */}
                   <TextField
-                    label="Top Seats"
+                    label="Top"
                     type="number"
                     value={rectangleSeats.top}
-                    onChange={(e) =>
-                      setRectangleSeats((prev) => ({
-                        ...prev,
-                        top: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
+                    onChange={(e) => setRectangleSeats(prev => ({ ...prev, top: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    inputProps={{ min: 0 }}
+                    size="small"
                   />
                   <TextField
-                    label="Bottom Seats"
+                    label="Bottom"
                     type="number"
                     value={rectangleSeats.bottom}
-                    onChange={(e) =>
-                      setRectangleSeats((prev) => ({
-                        ...prev,
-                        bottom: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 10 }}
+                    onChange={(e) => setRectangleSeats(prev => ({ ...prev, bottom: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    inputProps={{ min: 0 }}
+                    size="small"
                   />
                   <TextField
-                    label="Left Seats"
+                    label="Left"
                     type="number"
                     value={rectangleSeats.left}
-                    onChange={(e) =>
-                      setRectangleSeats((prev) => ({
-                        ...prev,
-                        left: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 5 }}
+                    onChange={(e) => setRectangleSeats(prev => ({ ...prev, left: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    inputProps={{ min: 0 }}
+                    size="small"
                   />
                   <TextField
-                    label="Right Seats"
+                    label="Right"
                     type="number"
                     value={rectangleSeats.right}
-                    onChange={(e) =>
-                      setRectangleSeats((prev) => ({
-                        ...prev,
-                        right: Math.max(0, parseInt(e.target.value) || 0),
-                      }))
-                    }
-                    inputProps={{ min: 0, max: 5 }}
+                    onChange={(e) => setRectangleSeats(prev => ({ ...prev, right: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    inputProps={{ min: 0 }}
+                    size="small"
                   />
                 </Stack>
 
-                <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Growth Sides (which sides expand when scaling):
-                  </Typography>
-                  <FormGroup row>
-                    {(['top', 'bottom', 'left', 'right'] as const).map((side) => (
-                      <FormControlLabel
-                        key={side}
-                        control={
-                          <Checkbox
-                            checked={growthSides[side]}
-                            onChange={() => handleGrowthSideToggle(side)}
-                          />
-                        }
-                        label={side.charAt(0).toUpperCase() + side.slice(1)}
-                      />
-                    ))}
-                  </FormGroup>
-                  <Typography variant="caption" color="text.secondary">
-                    When the template scales to more/fewer seats, only selected sides will change.
-                  </Typography>
-                </Paper>
-              </>
+                <Typography variant="subtitle2">Growth Sides (which sides expand when adding seats)</Typography>
+                <FormGroup row>
+                  <FormControlLabel
+                    control={<Checkbox checked={growthSides.top} onChange={(e) => setGrowthSides(prev => ({ ...prev, top: e.target.checked }))} />}
+                    label="Top"
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={growthSides.bottom} onChange={(e) => setGrowthSides(prev => ({ ...prev, bottom: e.target.checked }))} />}
+                    label="Bottom"
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={growthSides.left} onChange={(e) => setGrowthSides(prev => ({ ...prev, left: e.target.checked }))} />}
+                    label="Left"
+                  />
+                  <FormControlLabel
+                    control={<Checkbox checked={growthSides.right} onChange={(e) => setGrowthSides(prev => ({ ...prev, right: e.target.checked }))} />}
+                    label="Right"
+                  />
+                </FormGroup>
+              </Stack>
             )}
 
-            <Typography variant="body2" color="text.secondary">
-              Total Seats: <strong>{totalSeats}</strong>
+            {/* Scaling Limits */}
+            <Stack direction="row" spacing={2}>
+              <TextField
+                label="Min Seats"
+                type="number"
+                value={minSeats}
+                onChange={(e) => setMinSeats(Math.max(2, parseInt(e.target.value) || 2))}
+                inputProps={{ min: 2, max: baseSeatCount }}
+                size="small"
+                sx={{ width: 120 }}
+              />
+              <TextField
+                label="Max Seats"
+                type="number"
+                value={maxSeats}
+                onChange={(e) => setMaxSeats(Math.max(baseSeatCount, parseInt(e.target.value) || baseSeatCount))}
+                inputProps={{ min: baseSeatCount }}
+                size="small"
+                sx={{ width: 120 }}
+              />
+            </Stack>
+
+            <Typography variant="caption" color="text.secondary">
+              Total base seats: {baseSeatCount}
             </Typography>
           </Stack>
         )}
 
-        {/* ORDERING TAB */}
-        {activeTab === 'ordering' && (
+        {/* ============ ORDERING TAB ============ */}
+        {currentTab === 'ordering' && (
           <Stack spacing={3} sx={{ mt: 2 }}>
             <SeatOrderingControls
               direction={direction}
               orderingPattern={orderingPattern}
               startPosition={startPosition}
-              totalSeats={totalSeats}
+              totalSeats={baseSeatCount}
               onDirectionChange={setDirection}
               onPatternChange={setOrderingPattern}
-              onReset={handleResetOrdering}
+              showResetButton
               tableType={tableType}
             />
 
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
-                borderRadius: 1,
-              }}
-            >
+            {/* UPDATED: Scrollable preview container */}
+            <ScrollablePreviewContainer bgcolor="#fafafa" maxHeight={400}>
               <TablePreview
                 type={tableType}
-                roundSeats={roundSeats}
-                rectangleSeats={rectangleSeats}
+                roundSeats={tableType === 'round' ? roundSeatCount : undefined}
+                rectangleSeats={tableType === 'rectangle' ? rectangleSeats : undefined}
                 seatOrdering={seatOrdering}
                 seatModes={seatModes}
                 startPosition={startPosition}
-                onSeatClick={handleSeatClick}
+                onSeatClick={(_, index) => setStartPosition(index)}
                 interactionMode="ordering"
-                size="medium"
+                size="large"
               />
-            </Box>
+            </ScrollablePreviewContainer>
 
             <PatternPreview seatOrdering={seatOrdering} />
           </Stack>
         )}
 
-        {/* MODES TAB */}
-        {activeTab === 'modes' && (
-          <Stack spacing={3} sx={{ mt: 2 }}>
-            <SeatModeControls
-              onSetAllModes={handleSetAllModes}
-              onReset={() => setSeatModes(Array(totalSeats).fill('default'))}
-              modeCounts={modeCounts}
+        {/* ============ PATTERN TAB (NEW) ============ */}
+        {currentTab === 'pattern' && (
+          <Box sx={{ mt: 2 }}>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Configure the seat mode pattern. The system will intelligently scale this pattern when
+              the table size is adjusted between {minSeats} and {maxSeats} seats.
+            </Alert>
+
+            <PatternEditor
+              seatModes={seatModes}
+              tableType={tableType}
+              baseSeatCount={baseSeatCount}
+              rectangleSeats={tableType === 'rectangle' ? rectangleSeats : undefined}
+              seatOrdering={seatOrdering}
+              onModesChange={setSeatModes}
+              minSeats={minSeats}
+              maxSeats={maxSeats}
             />
-
-            <Box
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
-                borderRadius: 1,
-              }}
-            >
-              <TablePreview
-                type={tableType}
-                roundSeats={roundSeats}
-                rectangleSeats={rectangleSeats}
-                seatOrdering={seatOrdering}
-                seatModes={seatModes}
-                startPosition={startPosition}
-                onSeatClick={handleSeatClick}
-                interactionMode="modes"
-                size="medium"
-              />
-            </Box>
-
-            <SeatModeLegend modeCounts={modeCounts} />
-
-            <SeatModeMenu
-              anchorEl={modeMenuAnchor}
-              onClose={handleModeMenuClose}
-              onSelect={handleModeSelect}
-              currentMode={selectedSeatIndex !== null ? seatModes[selectedSeatIndex] : 'default'}
-            />
-          </Stack>
+          </Box>
         )}
 
-        {/* SCALING TAB */}
-        {activeTab === 'scaling' && (
+        {/* ============ PREVIEW TAB ============ */}
+        {currentTab === 'preview' && (
           <Stack spacing={3} sx={{ mt: 2 }}>
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0' }}>
-              <Typography variant="subtitle2" gutterBottom>
-                Scaling Limits
+            <Alert severity="success" icon={<Check />}>
+              Template configuration complete! Review your template below.
+            </Alert>
+
+            <Paper elevation={0} sx={{ p: 3, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                {name || 'Unnamed Template'}
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                When users create tables from this template, they can adjust the seat count within these limits.
-                The ordering pattern and seat mode pattern will scale automatically.
+              <Typography variant="body2" color="text.secondary" paragraph>
+                {description || 'No description'}
               </Typography>
+
+              <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                {selectedSessionTypes.map(type => (
+                  <Chip
+                    key={type}
+                    label={type}
+                    size="small"
+                    sx={{ bgcolor: SESSION_TYPE_COLORS[type], color: 'white' }}
+                  />
+                ))}
+              </Stack>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Stack spacing={1}>
+                <Typography variant="body2">
+                  <strong>Type:</strong> {tableType === 'round' ? 'Round' : 'Rectangle'} table
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Base seats:</strong> {baseSeatCount}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Scaling range:</strong> {minSeats} - {maxSeats} seats
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Direction:</strong> {direction}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Ordering:</strong> {orderingPattern}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Pattern:</strong> {detectedPattern.description}
+                </Typography>
+              </Stack>
             </Paper>
 
-            <Stack direction="row" spacing={4}>
-              <Box sx={{ flex: 1 }}>
-                <Typography gutterBottom>Minimum Seats: {minSeats}</Typography>
-                <Slider
-                  value={minSeats}
-                  onChange={(_, val) => setMinSeats(Math.min(val as number, maxSeats))}
-                  min={2}
-                  max={30}
-                  valueLabelDisplay="auto"
+            {/* Preview at base size - UPDATED: Scrollable container */}
+            <Paper elevation={0} sx={{ p: 3, bgcolor: '#e3f2fd', borderRadius: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Preview at {baseSeatCount} seats (base configuration):
+              </Typography>
+              <ScrollablePreviewContainer bgcolor="white" maxHeight={350}>
+                <TablePreview
+                  type={tableType}
+                  roundSeats={tableType === 'round' ? roundSeatCount : undefined}
+                  rectangleSeats={tableType === 'rectangle' ? rectangleSeats : undefined}
+                  seatOrdering={seatOrdering}
+                  seatModes={seatModes}
+                  size="large"
+                  showLabels
                 />
-              </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography gutterBottom>Maximum Seats: {maxSeats}</Typography>
-                <Slider
-                  value={maxSeats}
-                  onChange={(_, val) => setMaxSeats(Math.max(val as number, minSeats))}
-                  min={2}
-                  max={40}
-                  valueLabelDisplay="auto"
-                />
-              </Box>
-            </Stack>
+              </ScrollablePreviewContainer>
+            </Paper>
 
-            <Divider />
-
-            <Typography variant="subtitle2">Preview at Different Sizes:</Typography>
-            <Stack direction="row" spacing={3} justifyContent="center" flexWrap="wrap">
-              {[minSeats, Math.floor((minSeats + maxSeats) / 2), maxSeats].map((count) => {
-                // Scale the configuration
-                let scaledOrdering: number[];
-                let scaledModes: SeatMode[];
-                let displaySeats = rectangleSeats;
-
-                if (tableType === 'round') {
-                  scaledOrdering = generateOrdering(count, direction, orderingPattern, startPosition % count);
-                  scaledModes = generateSeatModes({
-                    type: 'specific',
-                    specificModes: seatModes.reduce((acc, mode, idx) => {
-                      if (mode !== 'default') acc[idx % count] = mode;
-                      return acc;
-                    }, {} as Record<number, SeatMode>),
-                    defaultMode: 'default',
-                  }, count);
-                } else {
-                  displaySeats = scaleRectangleSeats(rectangleSeats, growthSides, count);
-                  const scaledTotal = displaySeats.top + displaySeats.bottom + displaySeats.left + displaySeats.right;
-                  scaledOrdering = generateOrdering(scaledTotal, direction, orderingPattern, startPosition % scaledTotal, displaySeats);
-                  scaledModes = generateSeatModes({
-                    type: 'specific',
-                    specificModes: seatModes.reduce((acc, mode, idx) => {
-                      if (mode !== 'default') acc[idx % scaledTotal] = mode;
-                      return acc;
-                    }, {} as Record<number, SeatMode>),
-                    defaultMode: 'default',
-                  }, scaledTotal);
-                }
-
-                return (
-                  <Box key={count} sx={{ textAlign: 'center' }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {count} seats
-                    </Typography>
-                    <TablePreview
-                      type={tableType}
-                      roundSeats={tableType === 'round' ? count : undefined}
-                      rectangleSeats={tableType === 'rectangle' ? displaySeats : undefined}
-                      growthSides={tableType === 'rectangle' ? growthSides : undefined}
-                      seatOrdering={scaledOrdering}
-                      seatModes={scaledModes}
-                      size="small"
-                      showLabels={false}
-                    />
-                  </Box>
-                );
-              })}
-            </Stack>
+            {/* Preview at max size - UPDATED: Scrollable container */}
+            {maxSeats > baseSeatCount && (
+              <Paper elevation={0} sx={{ p: 3, bgcolor: '#fff3e0', borderRadius: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Preview at {maxSeats} seats (maximum):
+                </Typography>
+                <ScrollablePreviewContainer bgcolor="white" maxHeight={350}>
+                  {(() => {
+                    const scaledModes = scalePattern(detectedPattern, maxSeats);
+                    const scaledOrdering = generateOrdering(
+                      maxSeats,
+                      direction,
+                      orderingPattern,
+                      startPosition,
+                      tableType === 'rectangle' ? rectangleSeats : undefined
+                    );
+                    return (
+                      <TablePreview
+                        type={tableType}
+                        roundSeats={tableType === 'round' ? maxSeats : undefined}
+                        rectangleSeats={tableType === 'rectangle' ? rectangleSeats : undefined}
+                        seatOrdering={scaledOrdering}
+                        seatModes={scaledModes}
+                        size="large"
+                        showLabels
+                      />
+                    );
+                  })()}
+                </ScrollablePreviewContainer>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'center', mt: 1 }}>
+                  Pattern: {modesToString(scalePattern(detectedPattern, maxSeats))}
+                </Typography>
+              </Paper>
+            )}
           </Stack>
         )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={onClose} startIcon={<Close />}>
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSave}
-          variant="contained"
-          startIcon={<Save />}
-          disabled={!name.trim() || sessionTypes.length === 0}
-        >
-          {isEditMode ? 'Save Changes' : 'Create Template'}
-        </Button>
+        <Button onClick={handleClose}>Cancel</Button>
+        
+        {currentTab !== 'preview' && (
+          <Button
+            variant="outlined"
+            onClick={() => {
+              const tabs: TabValue[] = ['basic', 'ordering', 'pattern', 'preview'];
+              const currentIndex = tabs.indexOf(currentTab);
+              if (currentIndex < tabs.length - 1) {
+                setCurrentTab(tabs[currentIndex + 1]);
+              }
+            }}
+            disabled={currentTab === 'basic' && !isValid}
+          >
+            Next
+          </Button>
+        )}
+        
+        {currentTab === 'preview' && (
+          <Button variant="contained" onClick={handleSave} disabled={!isValid}>
+            {isEditing ? 'Save Changes' : 'Create Template'}
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

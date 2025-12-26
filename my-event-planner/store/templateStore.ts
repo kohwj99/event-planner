@@ -1,5 +1,5 @@
 // store/templateStore.ts
-// Zustand store for managing table templates
+// ENHANCED: Zustand store for managing table templates with intelligent pattern system
 
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
@@ -8,16 +8,53 @@ import {
   TableTemplate, 
   CreateTemplateInput, 
   UpdateTemplateInput,
-  SESSION_TYPE_COLORS 
+  SESSION_TYPE_COLORS,
+  EnhancedSeatModePattern,
 } from '@/types/Template';
 import { EventType } from '@/types/Event';
+import { SeatMode } from '@/types/Seat';
 
 // ============================================================================
-// BUILT-IN TEMPLATES
+// HELPER: Generate repeating pattern modes
+// ============================================================================
+
+function generateRepeatingModes(sequence: SeatMode[], count: number): SeatMode[] {
+  const modes: SeatMode[] = [];
+  for (let i = 0; i < count; i++) {
+    modes.push(sequence[i % sequence.length]);
+  }
+  return modes;
+}
+
+function generateAlternatingModes(mode1: SeatMode, mode2: SeatMode, count: number): SeatMode[] {
+  const modes: SeatMode[] = [];
+  for (let i = 0; i < count; i++) {
+    modes.push(i % 2 === 0 ? mode1 : mode2);
+  }
+  return modes;
+}
+
+function generateSpecificModes(
+  specificPositions: Record<number, SeatMode>,
+  defaultMode: SeatMode,
+  count: number
+): SeatMode[] {
+  const modes: SeatMode[] = Array(count).fill(defaultMode);
+  Object.entries(specificPositions).forEach(([pos, mode]) => {
+    const index = parseInt(pos, 10);
+    if (index >= 0 && index < count) {
+      modes[index] = mode;
+    }
+  });
+  return modes;
+}
+
+// ============================================================================
+// BUILT-IN TEMPLATES (with enhanced patterns)
 // ============================================================================
 
 const BUILT_IN_TEMPLATES: TableTemplate[] = [
-  // EXECUTIVE MEETING TEMPLATES
+  // ==================== EXECUTIVE MEETING TEMPLATES ====================
   {
     id: 'exec-round-10',
     name: 'Executive Round Table',
@@ -34,10 +71,10 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     orderingPattern: 'alternating',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 0: 'host-only', 1: 'host-only' },
+      strategy: 'custom',
+      baseModes: generateSpecificModes({ 0: 'host-only', 1: 'host-only' }, 'default', 10),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 6,
     maxSeats: 20,
     createdAt: new Date().toISOString(),
@@ -60,19 +97,19 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     orderingPattern: 'sequential',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 4: 'host-only', 9: 'host-only' }, // Left and right ends
+      strategy: 'custom',
+      baseModes: generateSpecificModes({ 4: 'host-only', 9: 'host-only' }, 'default', 10),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 6,
     maxSeats: 24,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
   {
-    id: 'exec-opposite-round',
-    name: 'Executive Face-Off',
-    description: 'Round table where VIP pairs face each other. Seat 1 faces Seat 2, Seat 3 faces Seat 4, etc.',
+    id: 'exec-alternating',
+    name: 'Executive Alternating',
+    description: 'Round table with alternating host and external seats for balanced discussion.',
     sessionTypes: ['Executive meeting'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -82,20 +119,21 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
       baseSeatCount: 8,
     },
     orderingDirection: 'counter-clockwise',
-    orderingPattern: 'opposite',
+    orderingPattern: 'alternating',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 0: 'host-only', 4: 'external-only' }, // VIP host faces VIP external
+      strategy: 'repeating-sequence',
+      baseModes: generateAlternatingModes('host-only', 'external-only', 8),
+      sequence: ['host-only', 'external-only'],
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 4,
     maxSeats: 16,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
 
-  // BILATERAL MEETING TEMPLATES
+  // ==================== BILATERAL MEETING TEMPLATES ====================
   {
     id: 'bilateral-small',
     name: 'Bilateral Discussion',
@@ -112,10 +150,11 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     orderingPattern: 'sequential',
     startPosition: 0,
     seatModePattern: {
-      type: 'alternating',
-      alternatingModes: ['host-only', 'external-only'],
+      strategy: 'repeating-sequence',
+      baseModes: generateAlternatingModes('host-only', 'external-only', 6),
+      sequence: ['host-only', 'external-only'],
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 4,
     maxSeats: 12,
     createdAt: new Date().toISOString(),
@@ -124,7 +163,7 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
   {
     id: 'bilateral-facing',
     name: 'Face-to-Face',
-    description: 'Rectangle table with host and external guests facing each other. Uses opposite ordering.',
+    description: 'Rectangle table with host side facing external side. Ideal for negotiations.',
     sessionTypes: ['Bilateral Meeting'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -135,49 +174,52 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
       growthSides: { top: true, bottom: true, left: false, right: false },
     },
     orderingDirection: 'clockwise',
-    orderingPattern: 'opposite', // Pairs face each other
+    orderingPattern: 'opposite',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 0: 'host-only', 1: 'host-only', 2: 'host-only' }, // Top row = host
-      defaultMode: 'external-only', // Bottom row = external
-    },
+      strategy: 'ratio-contiguous',
+      baseModes: ['host-only', 'host-only', 'host-only', 'external-only', 'external-only', 'external-only'],
+      ratios: { 'host-only': 0.5, 'external-only': 0.5, 'default': 0 },
+      blockOrder: ['host-only', 'external-only'],
+      defaultMode: 'default',
+    } as EnhancedSeatModePattern,
     minSeats: 4,
     maxSeats: 16,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
   {
-    id: 'bilateral-opposite-round',
+    id: 'bilateral-pairs',
     name: 'Paired Bilateral',
-    description: 'Round table optimized for 1-on-1 discussions. Each host faces their external counterpart.',
+    description: 'Round table with pairs of host/external seats. HH, EE repeating pattern.',
     sessionTypes: ['Bilateral Meeting'],
     isBuiltIn: true,
     isUserCreated: false,
     color: SESSION_TYPE_COLORS['Bilateral Meeting'],
     baseConfig: {
       type: 'round',
-      baseSeatCount: 6,
+      baseSeatCount: 8,
     },
     orderingDirection: 'counter-clockwise',
-    orderingPattern: 'opposite',
+    orderingPattern: 'sequential',
     startPosition: 0,
     seatModePattern: {
-      type: 'alternating',
-      alternatingModes: ['host-only', 'external-only'], // Odd seats host, even seats external
+      strategy: 'repeating-sequence',
+      baseModes: generateRepeatingModes(['host-only', 'host-only', 'external-only', 'external-only'], 8),
+      sequence: ['host-only', 'host-only', 'external-only', 'external-only'],
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 4,
-    maxSeats: 12,
+    maxSeats: 16,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
 
-  // MEAL TEMPLATES
+  // ==================== MEAL TEMPLATES ====================
   {
     id: 'meal-banquet-round',
     name: 'Banquet Round',
-    description: 'Classic banquet round table with VIP-priority seating. Alternating pattern for balanced mixing.',
+    description: 'Classic banquet round table. All default seats for flexible guest placement.',
     sessionTypes: ['Meal'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -190,10 +232,10 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     orderingPattern: 'alternating',
     startPosition: 0,
     seatModePattern: {
-      type: 'repeating',
-      pattern: ['default'],
+      strategy: 'uniform',
+      baseModes: Array(10).fill('default'),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 6,
     maxSeats: 14,
     createdAt: new Date().toISOString(),
@@ -202,7 +244,7 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
   {
     id: 'meal-long-table',
     name: 'Long Dining Table',
-    description: 'Long rectangle table for formal dining. Host at head, grows along the sides.',
+    description: 'Long rectangle table for formal dining. Host at head position.',
     sessionTypes: ['Meal'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -214,74 +256,49 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     },
     orderingDirection: 'clockwise',
     orderingPattern: 'alternating',
-    startPosition: 5, // Start at left head
+    startPosition: 5,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 5: 'host-only' }, // Left head = VIP host
+      strategy: 'custom',
+      baseModes: generateSpecificModes({ 5: 'host-only', 11: 'host-only' }, 'default', 12),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 8,
     maxSeats: 30,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
   {
-    id: 'meal-intimate',
-    name: 'Intimate Dinner',
-    description: 'Small round table for intimate dining experiences. Perfect for VIP dinners.',
+    id: 'meal-mixed-round',
+    name: 'Mixed Dining Round',
+    description: 'Round table with mixed seating pattern: HH, EE, DD repeating for diverse interaction.',
     sessionTypes: ['Meal'],
     isBuiltIn: true,
     isUserCreated: false,
     color: SESSION_TYPE_COLORS['Meal'],
     baseConfig: {
       type: 'round',
-      baseSeatCount: 6,
+      baseSeatCount: 12,
     },
     orderingDirection: 'counter-clockwise',
     orderingPattern: 'alternating',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 0: 'host-only' },
+      strategy: 'repeating-sequence',
+      baseModes: generateRepeatingModes(['host-only', 'host-only', 'external-only', 'external-only', 'default', 'default'], 12),
+      sequence: ['host-only', 'host-only', 'external-only', 'external-only', 'default', 'default'],
       defaultMode: 'default',
-    },
-    minSeats: 4,
-    maxSeats: 8,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'meal-opposite-dining',
-    name: 'Formal Dining Pairs',
-    description: 'Rectangle table where dining partners face each other across the table.',
-    sessionTypes: ['Meal'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS['Meal'],
-    baseConfig: {
-      type: 'rectangle',
-      baseSeats: { top: 4, bottom: 4, left: 0, right: 0 },
-      growthSides: { top: true, bottom: true, left: false, right: false },
-    },
-    orderingDirection: 'clockwise',
-    orderingPattern: 'opposite',
-    startPosition: 0,
-    seatModePattern: {
-      type: 'repeating',
-      pattern: ['default'],
-      defaultMode: 'default',
-    },
-    minSeats: 4,
-    maxSeats: 20,
+    } as EnhancedSeatModePattern,
+    minSeats: 6,
+    maxSeats: 18,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
 
-  // PHOTOTAKING TEMPLATES
+  // ==================== PHOTOTAKING TEMPLATES ====================
   {
     id: 'photo-semicircle',
     name: 'Photo Arc',
-    description: 'Round arrangement for group photos. VIPs in center positions.',
+    description: 'Round arrangement for group photos. VIPs (host+external) in center positions.',
     sessionTypes: ['Phototaking'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -294,10 +311,10 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     orderingPattern: 'alternating',
     startPosition: 0,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 0: 'host-only', 1: 'external-only' }, // VIPs at center
+      strategy: 'custom',
+      baseModes: generateSpecificModes({ 0: 'host-only', 1: 'external-only' }, 'default', 8),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 4,
     maxSeats: 16,
     createdAt: new Date().toISOString(),
@@ -306,7 +323,7 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
   {
     id: 'photo-line',
     name: 'Photo Line',
-    description: 'Single row arrangement for photos. VIPs in the center.',
+    description: 'Single row arrangement. VIPs in the center positions.',
     sessionTypes: ['Phototaking'],
     isBuiltIn: true,
     isUserCreated: false,
@@ -318,12 +335,12 @@ const BUILT_IN_TEMPLATES: TableTemplate[] = [
     },
     orderingDirection: 'counter-clockwise',
     orderingPattern: 'alternating',
-    startPosition: 4, // Center position
+    startPosition: 4,
     seatModePattern: {
-      type: 'specific',
-      specificModes: { 3: 'host-only', 4: 'external-only' },
+      strategy: 'custom',
+      baseModes: generateSpecificModes({ 3: 'host-only', 4: 'external-only' }, 'default', 8),
       defaultMode: 'default',
-    },
+    } as EnhancedSeatModePattern,
     minSeats: 4,
     maxSeats: 20,
     createdAt: new Date().toISOString(),
@@ -477,7 +494,7 @@ export const useTemplateStore = create<TemplateStoreState>()(
         },
       }),
       {
-        name: 'template-store',
+        name: 'template-store-v2', // New version to avoid conflicts with old data
         onRehydrateStorage: () => (state) => {
           state?.setHasHydrated(true);
           
@@ -490,6 +507,17 @@ export const useTemplateStore = create<TemplateStoreState>()(
             if (missingBuiltIns.length > 0) {
               state.templates = [...state.templates, ...missingBuiltIns];
             }
+            
+            // Update existing built-in templates with new pattern format
+            state.templates = state.templates.map(t => {
+              if (t.isBuiltIn) {
+                const builtIn = BUILT_IN_TEMPLATES.find(b => b.id === t.id);
+                if (builtIn) {
+                  return { ...t, seatModePattern: builtIn.seatModePattern };
+                }
+              }
+              return t;
+            });
           }
         },
       }

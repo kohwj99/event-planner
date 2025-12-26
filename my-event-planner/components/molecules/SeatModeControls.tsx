@@ -188,10 +188,10 @@ interface SeatModeLegendProps {
 export function SeatModeLegend({ modeCounts, compact = false }: SeatModeLegendProps) {
   const colorScheme = useColorScheme();
 
-  const modes: { mode: SeatMode; label: string }[] = [
-    { mode: 'default', label: 'Default' },
-    { mode: 'host-only', label: 'Host Only' },
-    { mode: 'external-only', label: 'External Only' },
+  const modes: { mode: SeatMode; label: string; strokeWidth: number }[] = [
+    { mode: 'default', label: 'Default', strokeWidth: 2 },
+    { mode: 'host-only', label: 'Host Only', strokeWidth: 3.5 },
+    { mode: 'external-only', label: 'External', strokeWidth: 2.5 },
   ];
 
   return (
@@ -204,17 +204,18 @@ export function SeatModeLegend({ modeCounts, compact = false }: SeatModeLegendPr
         flexWrap="wrap"
         useFlexGap
       >
-        {modes.map(({ mode, label }) => {
+        {modes.map(({ mode, label, strokeWidth }) => {
           const colors = getModeColorsFromScheme(mode, colorScheme);
           return (
             <Stack key={mode} direction="row" alignItems="center" spacing={0.5}>
               <Box
                 sx={{
-                  width: compact ? 12 : 16,
-                  height: compact ? 12 : 16,
+                  width: compact ? 14 : 18,
+                  height: compact ? 14 : 18,
                   borderRadius: '50%',
-                  bgcolor: colors.fill,
-                  border: `2px ${mode === 'external-only' ? 'dashed' : 'solid'} ${colors.stroke}`,
+                  bgcolor: '#ffffff', // Empty = white fill
+                  border: `${strokeWidth}px ${mode === 'external-only' ? 'dashed' : 'solid'} ${colors.stroke}`,
+                  boxSizing: 'border-box',
                 }}
               />
               <Typography variant="caption">

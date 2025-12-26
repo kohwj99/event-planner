@@ -1,6 +1,8 @@
 // components/organisms/PlaygroundCanvas.tsx
 // Main canvas for seat planning with D3-based SVG rendering
 // Uses centralized color configuration from colorConfig.ts via colorModeStore
+//
+// NEW: Added table visibility toggle to hide/show table shapes
 
 'use client';
 
@@ -20,6 +22,9 @@ import MenuItem from '@mui/material/MenuItem';
 import Restaurant from '@mui/icons-material/Restaurant';
 import Popover from '@mui/material/Popover';
 import Badge from '@mui/material/Badge';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Switch from '@mui/material/Switch';
+import TableRestaurant from '@mui/icons-material/TableRestaurant';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
@@ -57,6 +62,9 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   const gLayerRef = useRef<SVGGElement | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
+
+  // NEW: Table visibility toggle (default: true = show tables)
+  const [showTableBodies, setShowTableBodies] = useState<boolean>(true);
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
@@ -231,6 +239,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
   // ============================================================================
   // TABLES RENDERING (using tableSVGHelper with colorScheme)
+  // NEW: Table body visibility controlled by showTableBodies state
   // ============================================================================
 
   useEffect(() => {
@@ -251,13 +260,18 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       .style('cursor', 'grab');
 
     // Create table shapes on enter - using colorScheme
+    // NEW: Wrap in .table-body group for easy visibility toggle
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
       const isSelected = d.id === selectedTableId;
       const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
       
+      // Create a group for the table body (shape + label)
+      const bodyGroup = grp.append('g').attr('class', 'table-body');
+      
       if (d.shape === 'round') {
-        grp.append('circle')
+        bodyGroup.append('circle')
+          .attr('class', 'table-shape')
           .attr('r', d.radius)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke)
@@ -266,7 +280,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       } else {
         const width = d.width || 160;
         const height = d.height || 100;
-        grp.append('rect')
+        bodyGroup.append('rect')
+          .attr('class', 'table-shape')
           .attr('x', -width / 2)
           .attr('y', -height / 2)
           .attr('width', width)
@@ -278,16 +293,17 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           .attr('ry', 4)
           .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
       }
+      
+      // Table label - inside body group
+      bodyGroup.append('text')
+        .attr('class', 'table-label')
+        .attr('y', 5)
+        .attr('text-anchor', 'middle')
+        .attr('fill', colorScheme.table.tableText)
+        .attr('font-size', '14px')
+        .attr('font-weight', 'bold')
+        .text(d.label);
     });
-
-    // Table label - using colorScheme
-    enter.append('text')
-      .attr('y', 5)
-      .attr('text-anchor', 'middle')
-      .attr('fill', colorScheme.table.tableText)
-      .attr('font-size', '14px')
-      .attr('font-weight', 'bold')
-      .text((d) => d.label);
 
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
@@ -297,18 +313,23 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       const isSelected = d.id === selectedTableId;
       const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
       
+      const bodyGroup = grp.select('.table-body');
+      
       if (d.shape === 'round') {
-        grp.select('circle')
+        bodyGroup.select('circle.table-shape')
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       } else {
-        grp.select('rect')
+        bodyGroup.select('rect.table-shape')
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       }
       
-      grp.select('text')
+      bodyGroup.select('text.table-label')
         .attr('fill', colorScheme.table.tableText);
+      
+      // NEW: Update visibility based on showTableBodies state
+      bodyGroup.style('display', showTableBodies ? 'block' : 'none');
     });
 
     // Render table contents using helper functions with colorScheme
@@ -370,7 +391,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     tables, moveTable, selectSeat, lockSeat, clearSeat,
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
-    cleanupEmptyChunks, connectorGap, guestLookup, colorScheme
+    cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
+    showTableBodies // NEW: Re-render when visibility changes
   ]);
 
   // ============================================================================
@@ -486,7 +508,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         </Stack>
 
         {/* Zoom & Connector Gap Controls Card */}
-        <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 140, borderRadius: 2 }}>
+        <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 160, borderRadius: 2 }}>
           <Typography variant="caption" color="text.secondary">
             Zoom: {Math.round(zoomLevel * 100)}%
           </Typography>
@@ -502,9 +524,34 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
             />
           </Stack>
           
-          {/* Colorblind Toggle - Below Zoom/Gap, with hover legend */}
+          {/* Colorblind Toggle */}
           <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
             <ColorModeToggle size="small" showLabel />
+          </Box>
+          
+          {/* NEW: Table Visibility Toggle */}
+          <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Tooltip title="Toggle visibility of table shapes. Seats and guest info remain visible." placement="left">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={showTableBodies}
+                    onChange={(e) => setShowTableBodies(e.target.checked)}
+                    size="small"
+                    color="primary"
+                  />
+                }
+                label={
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <TableRestaurant fontSize="small" sx={{ color: showTableBodies ? 'primary.main' : 'text.disabled' }} />
+                    <Typography variant="caption" color={showTableBodies ? 'text.primary' : 'text.disabled'}>
+                      Tables
+                    </Typography>
+                  </Stack>
+                }
+                sx={{ m: 0 }}
+              />
+            </Tooltip>
           </Box>
         </Paper>
       </Box>

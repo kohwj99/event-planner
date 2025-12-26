@@ -19,7 +19,7 @@ import {
   Accessibility,
 } from '@mui/icons-material';
 import { useColorModeStore, useColorScheme } from '@/store/colorModeStore';
-import { PALETTE_INFO } from '@/utils/colorConfig';
+import { PALETTE_INFO, ColorScheme } from '@/utils/colorConfig';
 
 // ============================================================================
 // MAIN TOGGLE WITH HOVER LEGEND
@@ -137,51 +137,58 @@ export default function ColorModeToggle({
                   </Typography>
                 </Box>
 
-                {/* Seat Modes Legend */}
+                {/* Seat Modes Legend - STROKE shows mode */}
                 <Box>
                   <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                    Seat Modes
+                    Seat Modes (stroke = type)
                   </Typography>
                   <Stack spacing={0.5}>
-                    <LegendRow 
-                      fill={colorScheme.seats.defaultFill}
+                    <LegendRowWithWidth 
+                      fill="#ffffff"
                       stroke={colorScheme.seats.defaultStroke}
-                      label="Default (Any Guest)"
+                      strokeWidth={2}
+                      label="Default (any guest)"
                     />
-                    <LegendRow 
-                      fill={colorScheme.seats.hostOnlyFill}
+                    <LegendRowWithWidth 
+                      fill="#ffffff"
                       stroke={colorScheme.seats.hostOnlyStroke}
-                      label="Host Only"
+                      strokeWidth={3.5}
+                      label="Host Only (thick)"
                     />
-                    <LegendRow 
-                      fill={colorScheme.seats.externalOnlyFill}
+                    <LegendRowWithWidth 
+                      fill="#ffffff"
                       stroke={colorScheme.seats.externalOnlyStroke}
-                      label="External Only"
+                      strokeWidth={2.5}
+                      label="External Only (dashed)"
                       dashed
                     />
                   </Stack>
                 </Box>
 
-                {/* Seat States Legend */}
+                {/* Seat States Legend - FILL shows state */}
                 <Box>
                   <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                    Seat States
+                    Seat States (fill = status)
                   </Typography>
                   <Stack spacing={0.5}>
-                    <LegendRow 
-                      fill={colorScheme.seats.assignedFill}
-                      stroke={colorScheme.seats.assignedStroke}
-                      label="Assigned"
+                    <LegendRowWithWidth 
+                      fill="#ffffff"
+                      stroke={colorScheme.seats.defaultStroke}
+                      strokeWidth={2}
+                      label="Empty (white)"
                     />
-                    <LegendRow 
+                    <AssignedLegendRow colorScheme={colorScheme} />
+                    <LegendRowWithWidth 
                       fill={colorScheme.seats.selectedFill}
                       stroke={colorScheme.seats.selectedStroke}
-                      label="Selected"
+                      strokeWidth={2}
+                      label="Selected (yellow)"
                     />
-                    <LegendRow 
+                    <LegendRowWithWidth 
                       fill={colorScheme.seats.lockedFill}
                       stroke={colorScheme.seats.lockedStroke}
-                      label="Locked"
+                      strokeWidth={2}
+                      label="Locked (grey)"
                     />
                   </Stack>
                 </Box>
@@ -242,6 +249,83 @@ function LegendRow({ fill, stroke, label, dashed = false, isBox = false }: Legen
       />
       <Typography variant="caption" color="text.primary">
         {label}
+      </Typography>
+    </Stack>
+  );
+}
+
+// Legend row with configurable stroke width to show mode differences
+interface LegendRowWithWidthProps {
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  label: string;
+  dashed?: boolean;
+}
+
+function LegendRowWithWidth({ fill, stroke, strokeWidth, label, dashed = false }: LegendRowWithWidthProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Box
+        sx={{
+          width: 18,
+          height: 18,
+          borderRadius: '50%',
+          bgcolor: fill,
+          border: `${strokeWidth}px ${dashed ? 'dashed' : 'solid'} ${stroke}`,
+          flexShrink: 0,
+          boxSizing: 'border-box',
+        }}
+      />
+      <Typography variant="caption" color="text.primary">
+        {label}
+      </Typography>
+    </Stack>
+  );
+}
+
+// Special component to show assigned seats have colored fills matching mode
+interface AssignedLegendRowProps {
+  colorScheme: ColorScheme;
+}
+
+function AssignedLegendRow({ colorScheme }: AssignedLegendRowProps) {
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={0.25}>
+        {/* Assigned default: green fill + green stroke */}
+        <Box
+          sx={{
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            bgcolor: colorScheme.seats.defaultFill,
+            border: `2px solid ${colorScheme.seats.defaultStroke}`,
+          }}
+        />
+        {/* Assigned host-only: blue fill + blue thick stroke */}
+        <Box
+          sx={{
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            bgcolor: colorScheme.seats.hostOnlyFill,
+            border: `3px solid ${colorScheme.seats.hostOnlyStroke}`,
+          }}
+        />
+        {/* Assigned external-only: red fill + red dashed stroke */}
+        <Box
+          sx={{
+            width: 14,
+            height: 14,
+            borderRadius: '50%',
+            bgcolor: colorScheme.seats.externalOnlyFill,
+            border: `2.5px dashed ${colorScheme.seats.externalOnlyStroke}`,
+          }}
+        />
+      </Stack>
+      <Typography variant="caption" color="text.primary">
+        Assigned (colored fill)
       </Typography>
     </Stack>
   );

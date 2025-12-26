@@ -1,6 +1,7 @@
 // components/molecules/AddTableModal.tsx
-// ENHANCED WITH SUGGESTED TAB, TEMPLATES, AND REUSABLE COMPONENTS
+// ENHANCED WITH SUGGESTED TAB, TEMPLATES, REUSABLE COMPONENTS, AND MANUAL ORDERING
 // This modal now supports both template-based and custom table creation
+// NEW: Supports manual seat ordering mode alongside auto patterns
 
 'use client';
 
@@ -31,15 +32,16 @@ import {
   Slider,
   Alert,
   IconButton,
+  Tooltip,
 } from '@mui/material';
-import { Refresh, Person, Public, RadioButtonUnchecked, FilterList } from '@mui/icons-material';
+import { Refresh, Person, Public, RadioButtonUnchecked, FilterList, Undo } from '@mui/icons-material';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 import { EventType } from '@/types/Event';
 import { Direction, OrderingPattern, SESSION_TYPE_COLORS, TableTemplate } from '@/types/Template';
 import { useTemplateStore } from '@/store/templateStore';
 import { generateOrdering, getTemplateBaseSeatCount, scaleTemplate } from '@/utils/templateScaler';
 import { TemplateGrid } from './TemplateCard';
-import SeatOrderingControls, { PatternPreview } from './SeatOrderingControls';
+import SeatOrderingControls, { PatternPreview, OrderingMode } from './SeatOrderingControls';
 import SeatModeControls, { SeatModeLegend, SeatModeMenu } from './SeatModeControls';
 import CreateEditTemplateModal from './CreateEditTemplateModal';
 import TablePreview from '../atoms/TablePreview';
@@ -119,10 +121,18 @@ export default function AddTableModal({
     label: '',
   });
 
-  // Ordering configuration
+  // Ordering configuration - AUTO MODE
   const [direction, setDirection] = useState<Direction>('counter-clockwise');
   const [orderingPattern, setOrderingPattern] = useState<OrderingPattern>('sequential');
   const [startPosition, setStartPosition] = useState<number>(0);
+
+  // NEW: Ordering mode - 'auto' (pattern-based) or 'manual' (click-to-assign)
+  const [orderingMode, setOrderingMode] = useState<OrderingMode>('auto');
+
+  // NEW: Manual ordering state
+  const [manualAssignments, setManualAssignments] = useState<Map<number, number>>(new Map());
+  const [nextManualNumber, setNextManualNumber] = useState<number>(1);
+  const [manualHistory, setManualHistory] = useState<Map<number, number>[]>([]);
 
   // Seat modes
   const [seatModes, setSeatModes] = useState<SeatMode[]>([]);
@@ -144,13 +154,34 @@ export default function AddTableModal({
     return top + bottom + left + right;
   }, [tableConfig]);
 
-  // Generate ordering for custom tab
-  const seatOrdering = useMemo(() => {
+  // Generate auto ordering for custom tab (pattern-based)
+  const autoOrdering = useMemo(() => {
     const rectangleConfig = tableConfig.type === 'rectangle' 
       ? tableConfig.rectangleSeats 
       : undefined;
     return generateOrdering(totalSeats, direction, orderingPattern, startPosition, rectangleConfig);
   }, [totalSeats, direction, orderingPattern, startPosition, tableConfig]);
+
+  // NEW: Get current ordering based on mode (auto or manual)
+  const currentOrdering = useMemo(() => {
+    if (orderingMode === 'auto') {
+      return autoOrdering;
+    }
+    // Manual mode: convert map to array
+    const ordering = new Array(totalSeats).fill(0);
+    manualAssignments.forEach((seatNum, posIndex) => {
+      ordering[posIndex] = seatNum;
+    });
+    return ordering;
+  }, [orderingMode, autoOrdering, manualAssignments, totalSeats]);
+
+  // NEW: Check if manual ordering is complete
+  const isManualComplete = useMemo(() => {
+    return orderingMode === 'manual' && manualAssignments.size === totalSeats;
+  }, [orderingMode, manualAssignments, totalSeats]);
+
+  // For backward compatibility - seatOrdering now points to currentOrdering
+  const seatOrdering = currentOrdering;
 
   // Filter templates by session type
   const filteredTemplates = useMemo(() => {
@@ -199,6 +230,15 @@ export default function AddTableModal({
     }
   }, [totalSeats, startPosition]);
 
+  // NEW: Reset manual ordering state when seat count changes
+  useEffect(() => {
+    if (orderingMode === 'manual') {
+      setManualAssignments(new Map());
+      setNextManualNumber(1);
+      setManualHistory([]);
+    }
+  }, [totalSeats]);
+
   // Update template seat count when template changes
   useEffect(() => {
     if (selectedTemplate) {
@@ -220,6 +260,11 @@ export default function AddTableModal({
       setTemplateQuantity(1);
       setTemplateLabel('');
       setCustomTab('config');
+      // Reset manual ordering state
+      setOrderingMode('auto');
+      setManualAssignments(new Map());
+      setNextManualNumber(1);
+      setManualHistory([]);
     }
   }, [open]);
 
@@ -227,11 +272,17 @@ export default function AddTableModal({
   // HANDLERS - CUSTOM TAB
   // ============================================================================
 
-  const handleResetOrdering = () => {
+  const handleResetOrdering = useCallback(() => {
     setDirection('counter-clockwise');
     setOrderingPattern('sequential');
     setStartPosition(0);
-  };
+    // Also reset manual ordering if in manual mode
+    if (orderingMode === 'manual') {
+      setManualAssignments(new Map());
+      setNextManualNumber(1);
+      setManualHistory([]);
+    }
+  }, [orderingMode]);
 
   const handleResetModes = () => {
     setSeatModes(Array.from({ length: totalSeats }, () => 'default' as SeatMode));
@@ -249,14 +300,66 @@ export default function AddTableModal({
     setSeatModes(Array.from({ length: totalSeats }, () => mode));
   };
 
-  const handleSeatClick = (event: React.MouseEvent, index: number) => {
+  // NEW: Handler for ordering mode change
+  const handleOrderingModeChange = useCallback((mode: OrderingMode) => {
+    setOrderingMode(mode);
+    if (mode === 'manual') {
+      // Clear manual state when entering manual mode
+      setManualAssignments(new Map());
+      setNextManualNumber(1);
+      setManualHistory([]);
+    }
+  }, []);
+
+  // NEW: Handler for manual seat click
+  const handleManualSeatClick = useCallback((positionIndex: number) => {
+    if (manualAssignments.has(positionIndex)) {
+      // Already assigned - do nothing
+      return;
+    }
+
+    // Save history for undo
+    setManualHistory((prev) => [...prev, new Map(manualAssignments)]);
+
+    // Assign the next seat number to this position
+    const newMap = new Map(manualAssignments);
+    newMap.set(positionIndex, nextManualNumber);
+    setManualAssignments(newMap);
+    setNextManualNumber((prev) => prev + 1);
+  }, [manualAssignments, nextManualNumber]);
+
+  // NEW: Undo last manual assignment
+  const handleManualUndo = useCallback(() => {
+    if (manualHistory.length === 0) return;
+
+    const prevState = manualHistory[manualHistory.length - 1];
+    setManualHistory((prev) => prev.slice(0, -1));
+    setManualAssignments(prevState);
+    setNextManualNumber((prev) => Math.max(1, prev - 1));
+  }, [manualHistory]);
+
+  // NEW: Reset manual assignments
+  const handleManualReset = useCallback(() => {
+    setManualHistory([]);
+    setManualAssignments(new Map());
+    setNextManualNumber(1);
+  }, []);
+
+  // Updated seat click handler that works for both auto and manual modes
+  const handleSeatClick = useCallback((event: React.MouseEvent, index: number) => {
     if (customTab === 'modes') {
       setMenuAnchor(event.currentTarget as HTMLElement);
       setSelectedSeatIndex(index);
     } else if (customTab === 'ordering') {
-      setStartPosition(index);
+      if (orderingMode === 'auto') {
+        // Auto mode: set start position
+        setStartPosition(index);
+      } else {
+        // Manual mode: assign seat number
+        handleManualSeatClick(index);
+      }
     }
-  };
+  }, [customTab, orderingMode, handleManualSeatClick]);
 
   const handleMenuClose = () => {
     setMenuAnchor(null);
@@ -315,9 +418,27 @@ export default function AddTableModal({
   // ============================================================================
 
   const handleConfirmCustom = () => {
+    // Use currentOrdering which works for both auto and manual modes
+    // For manual mode, ensure ordering is complete or use what's assigned
+    let finalOrdering = currentOrdering;
+    
+    // If manual mode is incomplete, fill remaining positions sequentially
+    if (orderingMode === 'manual' && !isManualComplete) {
+      const assigned = new Set(manualAssignments.values());
+      let nextNum = nextManualNumber;
+      finalOrdering = currentOrdering.map((num) => {
+        if (num === 0) {
+          while (assigned.has(nextNum)) nextNum++;
+          assigned.add(nextNum);
+          return nextNum++;
+        }
+        return num;
+      });
+    }
+
     onConfirm({
       ...tableConfig,
-      seatOrdering,
+      seatOrdering: finalOrdering,
       seatModes,
     });
     handleClose();
@@ -348,6 +469,11 @@ export default function AddTableModal({
     setStartPosition(0);
     setSeatModes([]);
     setSelectedTemplate(null);
+    // Reset manual ordering state
+    setOrderingMode('auto');
+    setManualAssignments(new Map());
+    setNextManualNumber(1);
+    setManualHistory([]);
     onClose();
   };
 
@@ -704,20 +830,74 @@ export default function AddTableModal({
                 </Stack>
               )}
 
-              {/* ORDERING TAB */}
+              {/* ORDERING TAB - ENHANCED WITH MANUAL MODE */}
               {customTab === 'ordering' && (
                 <Stack spacing={3} sx={{ mt: 2 }}>
+                  {/* Ordering Controls with Manual Mode Toggle */}
                   <SeatOrderingControls
                     direction={direction}
                     orderingPattern={orderingPattern}
                     startPosition={startPosition}
                     totalSeats={totalSeats}
+                    currentOrdering={currentOrdering}
                     onDirectionChange={setDirection}
                     onPatternChange={setOrderingPattern}
+                    onStartPositionChange={setStartPosition}
+                    enableManualMode={true}
+                    orderingMode={orderingMode}
+                    onOrderingModeChange={handleOrderingModeChange}
+                    onReset={handleResetOrdering}
                     showResetButton={false}
                     tableType={tableConfig.type}
+                    seatModes={seatModes}
+                    rectangleSeats={tableConfig.rectangleSeats}
                   />
 
+                  {/* Manual Mode Progress and Controls */}
+                  {orderingMode === 'manual' && (
+                    <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0' }}>
+                      <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Chip
+                            label={`${manualAssignments.size} / ${totalSeats} assigned`}
+                            color={isManualComplete ? 'success' : 'warning'}
+                            size="small"
+                          />
+                          {isManualComplete && (
+                            <Chip label="Complete!" color="success" size="small" />
+                          )}
+                          {!isManualComplete && (
+                            <Typography variant="body2" color="text.secondary">
+                              Click seat to assign #{nextManualNumber}
+                            </Typography>
+                          )}
+                        </Stack>
+                        <Stack direction="row" spacing={1}>
+                          <Tooltip title="Undo last assignment">
+                            <span>
+                              <IconButton
+                                size="small"
+                                onClick={handleManualUndo}
+                                disabled={manualHistory.length === 0}
+                              >
+                                <Undo fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Button
+                            size="small"
+                            startIcon={<Refresh />}
+                            onClick={handleManualReset}
+                            variant="outlined"
+                          >
+                            Clear All
+                          </Button>
+                        </Stack>
+                      </Stack>
+                    </Paper>
+                  )}
+
+                  {/* Table Preview */}
                   <Box
                     sx={{
                       display: 'flex',
@@ -737,12 +917,26 @@ export default function AddTableModal({
                       seatModes={seatModes}
                       startPosition={startPosition}
                       onSeatClick={handleSeatClick}
-                      interactionMode="ordering"
+                      interactionMode={orderingMode === 'manual' ? 'manual-ordering' : 'ordering'}
                       size="medium"
+                      manualAssignments={manualAssignments}
+                      nextManualNumber={nextManualNumber}
                     />
                   </Box>
 
-                  <PatternPreview seatOrdering={seatOrdering} />
+                  {/* Pattern Preview (for auto mode) or Sequence Preview (for manual mode) */}
+                  {orderingMode === 'auto' ? (
+                    <PatternPreview seatOrdering={seatOrdering} />
+                  ) : (
+                    manualAssignments.size > 0 && (
+                      <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
+                        <Typography variant="caption" color="text.secondary">
+                          <strong>Manual Sequence:</strong>{' '}
+                          {currentOrdering.map((num) => (num > 0 ? num : '?')).join(' → ')}
+                        </Typography>
+                      </Paper>
+                    )
+                  )}
                 </Stack>
               )}
 
@@ -793,7 +987,11 @@ export default function AddTableModal({
 
             <DialogActions sx={{ px: 3, py: 2 }}>
               <Button onClick={handleClose}>Cancel</Button>
-              <Button variant="contained" onClick={handleConfirmCustom}>
+              <Button 
+                variant="contained" 
+                onClick={handleConfirmCustom}
+                disabled={orderingMode === 'manual' && manualAssignments.size === 0}
+              >
                 Add {tableConfig.quantity > 1 ? `${tableConfig.quantity} Tables` : 'Table'}
               </Button>
             </DialogActions>

@@ -391,8 +391,6 @@ export function renderSeats(
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
 ): void {
-  const strokeWidth = getSeatStrokeWidth(colorScheme.mode);
-
   const seatsSel = group
     .selectAll<SVGCircleElement, Seat>('circle.seat')
     .data(tableDatum.seats || [], (s) => s.id);
@@ -407,7 +405,10 @@ export function renderSeats(
     .attr('r', (s) => s.radius)
     .attr('fill', (s) => getSeatFillColor(s, colorScheme))
     .attr('stroke', (s) => getSeatStrokeColor(s, colorScheme))
-    .attr('stroke-width', strokeWidth)
+    .attr('stroke-width', (s) => {
+      const mode = (s.mode || 'default') as 'default' | 'host-only' | 'external-only';
+      return getSeatStrokeWidth(mode, colorScheme.mode);
+    })
     .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s, colorScheme))
     .style('cursor', 'pointer')
     .on('click', (event, s) => {

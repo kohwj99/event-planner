@@ -1,6 +1,10 @@
 // components/molecules/ModifyTableModal.tsx
 // Modal for modifying existing table - follows AddTableModal pattern
 // Includes seat modes tab for setting host-only/external-only restrictions
+//
+// FIX: Now uses stored rectangleSeats metadata if available
+// FIX: Improved position-based extraction as fallback
+// FIX: Preview shows seat modes correctly (green only for seat #1 in ordering tab)
 
 'use client';
 
@@ -31,7 +35,7 @@ import {
   Alert,
 } from '@mui/material';
 import { Refresh, Warning, RadioButtonUnchecked, Person, Public } from '@mui/icons-material';
-import { Table } from '@/types/Table';
+import { Table, RectangleSeatsConfig } from '@/types/Table';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 
@@ -119,13 +123,22 @@ const generateOrdering = (
 };
 
 /**
- * Extract rectangle seat counts from a table's seats
+ * Extract rectangle seat counts from a table
+ * 
+ * FIX: Now uses stored metadata if available, with improved fallback
  */
 function extractRectangleSeats(table: Table): { top: number; bottom: number; left: number; right: number } {
   if (table.shape !== 'rectangle') {
     return { top: 2, bottom: 2, left: 1, right: 1 };
   }
 
+  // FIX: Use stored metadata if available (set when table was created)
+  if (table.rectangleSeats) {
+    return { ...table.rectangleSeats };
+  }
+
+  // Fallback: Extract from seat positions
+  // This is less reliable but necessary for tables created before metadata was added
   const width = table.width || 160;
   const height = table.height || 100;
   const centerX = table.x;
@@ -133,23 +146,47 @@ function extractRectangleSeats(table: Table): { top: number; bottom: number; lef
 
   let top = 0, bottom = 0, left = 0, right = 0;
 
-  table.seats.forEach((seat) => {
-    const relX = seat.x - centerX;
-    const relY = seat.y - centerY;
+  // Calculate tolerance based on seat radius and offset
+  // Seats are placed at seatOffset (seatRadius * 2.5) from the edge
+  const seatRadius = 12;
+  const seatOffset = seatRadius * 2.5;
+  const tolerance = seatOffset + 15; // Allow some margin for positioning variance
 
-    if (Math.abs(relY + height / 2) < 30) {
+  table.seats.forEach((seat) => {
+    const relY = seat.y - centerY;
+    const relX = seat.x - centerX;
+
+    // Check if seat is above the table (top side)
+    if (relY < -height / 2 + tolerance && relY < 0) {
       top++;
-    } else if (Math.abs(relY - height / 2) < 30) {
+    }
+    // Check if seat is below the table (bottom side)
+    else if (relY > height / 2 - tolerance && relY > 0) {
       bottom++;
-    } else if (Math.abs(relX + width / 2) < 30) {
+    }
+    // Check if seat is to the left of the table
+    else if (relX < -width / 2 + tolerance && relX < 0) {
       left++;
-    } else if (Math.abs(relX - width / 2) < 30) {
+    }
+    // Check if seat is to the right of the table
+    else if (relX > width / 2 - tolerance && relX > 0) {
       right++;
     }
   });
 
-  if (top + bottom + left + right === 0) {
-    return { top: 2, bottom: 2, left: 1, right: 1 };
+  // Sanity check: if extraction failed, distribute seats evenly
+  const total = top + bottom + left + right;
+  if (total === 0 || total !== table.seats.length) {
+    // Fallback to reasonable distribution
+    const seatCount = table.seats.length;
+    const perSide = Math.floor(seatCount / 4);
+    const remainder = seatCount % 4;
+    return {
+      top: perSide + (remainder > 0 ? 1 : 0),
+      bottom: perSide + (remainder > 1 ? 1 : 0),
+      left: perSide + (remainder > 2 ? 1 : 0),
+      right: perSide,
+    };
   }
 
   return { top, bottom, left, right };
@@ -209,10 +246,12 @@ export default function ModifyTableModal({
           label: table.label,
         });
       } else {
+        // FIX: Use extractRectangleSeats which now uses stored metadata
+        const extractedSeats = extractRectangleSeats(table);
         setTableConfig({
           type: 'rectangle',
           roundSeats: 8,
-          rectangleSeats: extractRectangleSeats(table),
+          rectangleSeats: extractedSeats,
           label: table.label,
         });
       }
@@ -548,11 +587,8 @@ export default function ModifyTableModal({
               sx={{
                 flexGrow: 1,
                 display: 'flex',
-                alignItems: 'center',
                 justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
+                alignItems: 'center',
               }}
             >
               {tableConfig.type === 'round' ? (
@@ -578,65 +614,101 @@ export default function ModifyTableModal({
               )}
             </Box>
 
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
-              <Typography variant="caption" color="text.secondary">
-                💡 <strong>Full Sequence:</strong> {seatOrdering.join(', ')}
-              </Typography>
+            {/* Seat Sequence Preview */}
+            <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+              <Typography variant="subtitle2" gutterBottom>Seat Sequence:</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {seatOrdering.slice(0, 20).map((num, idx) => (
+                  <Chip
+                    key={idx}
+                    label={num}
+                    size="small"
+                    color={num === 1 ? 'success' : 'default'}
+                    sx={{ minWidth: 32 }}
+                  />
+                ))}
+                {seatOrdering.length > 20 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                    ... and {seatOrdering.length - 20} more
+                  </Typography>
+                )}
+              </Box>
             </Paper>
           </Stack>
         ) : (
           // Seat Modes Tab
           <Stack spacing={3} sx={{ height: '100%' }}>
-            <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
+            <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0' }}>
               <Stack spacing={2}>
-                <Typography variant="subtitle2">Quick Actions:</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap">
+                <Typography variant="subtitle2">Set All Seats:</Typography>
+                <Stack direction="row" spacing={1}>
                   <Button
-                    size="small"
                     variant="outlined"
-                    onClick={() => handleSetAllModes('default')}
+                    size="small"
                     startIcon={<RadioButtonUnchecked />}
+                    onClick={() => handleSetAllModes('default')}
+                    sx={{ borderColor: SEAT_MODE_CONFIGS['default'].strokeColor, color: SEAT_MODE_CONFIGS['default'].strokeColor }}
                   >
                     All Default
                   </Button>
                   <Button
-                    size="small"
                     variant="outlined"
-                    color="primary"
-                    onClick={() => handleSetAllModes('host-only')}
+                    size="small"
                     startIcon={<Person />}
+                    onClick={() => handleSetAllModes('host-only')}
+                    sx={{ borderColor: SEAT_MODE_CONFIGS['host-only'].strokeColor, color: SEAT_MODE_CONFIGS['host-only'].strokeColor }}
                   >
-                    All Host Only
+                    All Host-Only
                   </Button>
                   <Button
-                    size="small"
                     variant="outlined"
-                    color="error"
-                    onClick={() => handleSetAllModes('external-only')}
+                    size="small"
                     startIcon={<Public />}
+                    onClick={() => handleSetAllModes('external-only')}
+                    sx={{ borderColor: SEAT_MODE_CONFIGS['external-only'].strokeColor, color: SEAT_MODE_CONFIGS['external-only'].strokeColor }}
                   >
-                    All External Only
+                    All External-Only
                   </Button>
                 </Stack>
-
-                <Divider />
-
                 <Typography variant="caption" color="text.secondary">
-                  🎯 Click on a seat to cycle through modes: Default → Host Only → External Only
+                  🖱️ Click on a seat to cycle through modes: Default → Host-Only → External-Only
                 </Typography>
               </Stack>
             </Paper>
 
-            {/* Visual Preview with Mode Colors */}
+            {/* Mode Legend */}
+            <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+              <Stack direction="row" spacing={3}>
+                {(['default', 'host-only', 'external-only'] as SeatMode[]).map((mode) => {
+                  const modeConfig = SEAT_MODE_CONFIGS[mode];
+                  const count = Object.values(seatModes).filter((m) => m === mode).length;
+                  return (
+                    <Stack key={mode} direction="row" alignItems="center" spacing={1}>
+                      <Box
+                        sx={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: '50%',
+                          bgcolor: modeConfig.color,
+                          border: `2px solid ${modeConfig.strokeColor}`,
+                        }}
+                      />
+                      <Typography variant="body2">
+                        {modeConfig.shortLabel || 'D'}: {count}
+                      </Typography>
+                    </Stack>
+                  );
+                })}
+              </Stack>
+            </Paper>
+
+            {/* Visual Preview */}
             <Box
               sx={{
                 flexGrow: 1,
                 display: 'flex',
-                alignItems: 'center',
                 justifyContent: 'center',
-                bgcolor: '#fafafa',
-                minHeight: 300,
-                p: 2,
+                alignItems: 'center',
               }}
             >
               {tableConfig.type === 'round' ? (
@@ -661,24 +733,6 @@ export default function ModifyTableModal({
                 />
               )}
             </Box>
-
-            {/* Legend */}
-            <Paper elevation={0} sx={{ p: 1.5, bgcolor: '#f5f5f5' }}>
-              <Stack direction="row" spacing={3} alignItems="center" justifyContent="center">
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Box sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: SEAT_MODE_CONFIGS['default'].color, border: `2px solid ${SEAT_MODE_CONFIGS['default'].strokeColor}` }} />
-                  <Typography variant="caption">Default ({Object.values(seatModes).filter(m => !m || m === 'default').length})</Typography>
-                </Stack>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Box sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: SEAT_MODE_CONFIGS['host-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['host-only'].strokeColor}` }} />
-                  <Typography variant="caption">Host Only ({Object.values(seatModes).filter(m => m === 'host-only').length})</Typography>
-                </Stack>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Box sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: SEAT_MODE_CONFIGS['external-only'].color, border: `2px solid ${SEAT_MODE_CONFIGS['external-only'].strokeColor}` }} />
-                  <Typography variant="caption">External Only ({Object.values(seatModes).filter(m => m === 'external-only').length})</Typography>
-                </Stack>
-              </Stack>
-            </Paper>
           </Stack>
         )}
       </DialogContent>
@@ -698,6 +752,7 @@ export default function ModifyTableModal({
 }
 
 // --- Round Table Preview Component ---
+// FIX: Green highlight only in ordering tab
 interface RoundTablePreviewProps {
   seats: number[];
   seatModes: Record<number, SeatMode>;
@@ -727,18 +782,21 @@ function RoundTablePreview({ seats, seatModes, startPosition, onSeatClick, activ
           const mode = seatModes[index] || 'default';
           const modeConfig = SEAT_MODE_CONFIGS[mode];
 
-          // Determine fill color based on active tab
+          // FIX: Only show green for seat #1 in ordering tab
+          // In modes tab, always show the mode color
           let fillColor = modeConfig.color;
           let strokeColor = modeConfig.strokeColor;
-          if (activeTab === 'ordering' && isSeatOne) {
+          const showStartHighlight = activeTab === 'ordering' && isSeatOne;
+          
+          if (showStartHighlight) {
             fillColor = '#4caf50';
             strokeColor = '#2e7d32';
           }
 
           return (
             <g key={index} onClick={() => onSeatClick(index)} style={{ cursor: 'pointer' }}>
-              {/* Highlight ring for seat #1 in ordering tab */}
-              {activeTab === 'ordering' && isSeatOne && (
+              {/* Highlight ring for seat #1 in ordering tab only */}
+              {showStartHighlight && (
                 <circle cx={x} cy={y} r={seatRadius + 4} fill="none" stroke="#4caf50" strokeWidth="3" />
               )}
 
@@ -756,7 +814,7 @@ function RoundTablePreview({ seats, seatModes, startPosition, onSeatClick, activ
                 textAnchor="middle"
                 fontSize={seatRadius * 0.7}
                 fontWeight="bold"
-                fill={(activeTab === 'ordering' && isSeatOne) ? 'white' : '#0d47a1'}
+                fill={showStartHighlight ? 'white' : '#0d47a1'}
               >
                 {seatNumber}
               </text>
@@ -790,6 +848,7 @@ function RoundTablePreview({ seats, seatModes, startPosition, onSeatClick, activ
 }
 
 // --- Rectangle Table Preview Component ---
+// FIX: Green highlight only in ordering tab
 interface RectangleTablePreviewProps {
   top: number;
   bottom: number;
@@ -885,16 +944,19 @@ function RectangleTablePreview({
           const mode = seatModes[index] || 'default';
           const modeConfig = SEAT_MODE_CONFIGS[mode];
 
+          // FIX: Only show green for seat #1 in ordering tab
           let fillColor = modeConfig.color;
           let strokeColor = modeConfig.strokeColor;
-          if (activeTab === 'ordering' && isSeatOne) {
+          const showStartHighlight = activeTab === 'ordering' && isSeatOne;
+          
+          if (showStartHighlight) {
             fillColor = '#4caf50';
             strokeColor = '#2e7d32';
           }
 
           return (
             <g key={index} onClick={() => onSeatClick(index)} style={{ cursor: 'pointer' }}>
-              {activeTab === 'ordering' && isSeatOne && (
+              {showStartHighlight && (
                 <circle
                   cx={pos.x}
                   cy={pos.y}
@@ -919,7 +981,7 @@ function RectangleTablePreview({
                 textAnchor="middle"
                 fontSize={seatRadius * 0.7}
                 fontWeight="bold"
-                fill={(activeTab === 'ordering' && isSeatOne) ? 'white' : '#0d47a1'}
+                fill={showStartHighlight ? 'white' : '#0d47a1'}
               >
                 {seatNumber}
               </text>

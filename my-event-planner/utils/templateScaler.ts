@@ -1,5 +1,6 @@
 // utils/templateScaler.ts
-// Utility functions for scaling table templates to different seat counts
+// ENHANCED: Utility functions for scaling table templates with intelligent pattern recognition
+// Now uses rectangleModeScaler for proper rectangle table mode preservation
 
 import { 
   TableTemplate, 
@@ -8,18 +9,35 @@ import {
   RectangleGrowthConfig,
   Direction,
   OrderingPattern,
+  isEnhancedPattern,
+  convertToEnhancedPattern,
+  EnhancedSeatModePattern,
 } from '@/types/Template';
 import { SeatMode } from '@/types/Seat';
+import { 
+  detectPattern, 
+  DetectedPattern,
+  calculateRatios,
+  findRepeatingUnit,
+} from './patternDetector';
+import { 
+  scalePattern, 
+  detectAndScale,
+  modesToString,
+} from './patternScaler';
+import {
+  scaleRectangleModesWithGrowth,
+  calculateScaledRectangleSeats,
+  RectangleSeatsConfig,
+} from './rectangleModeScaler';
+
+// ============================================================================
+// SEAT ORDERING GENERATION
+// ============================================================================
 
 /**
  * Generate seat ordering based on direction, ordering pattern, and start position
  * This is a shared utility used by both templates and manual table creation
- * 
- * @param count - Total number of seats
- * @param direction - 'clockwise' or 'counter-clockwise'
- * @param pattern - 'sequential', 'alternating', or 'opposite'
- * @param startPosition - Index of the starting seat (seat #1)
- * @param rectangleConfig - Optional rectangle configuration for opposite pattern
  */
 export function generateOrdering(
   count: number,
@@ -31,7 +49,6 @@ export function generateOrdering(
   const result: number[] = new Array(count);
 
   if (pattern === 'sequential') {
-    // Simple sequential ordering
     if (direction === 'clockwise') {
       for (let i = 0; i < count; i++) {
         const position = (startPosition + i) % count;
@@ -44,7 +61,6 @@ export function generateOrdering(
       }
     }
   } else if (pattern === 'alternating') {
-    // Alternating pattern: Seat 1 at start, evens go one way, odds go the other
     result[startPosition] = 1;
 
     const odds: number[] = [];
@@ -78,7 +94,6 @@ export function generateOrdering(
       }
     }
   } else if (pattern === 'opposite') {
-    // Opposite pattern: Seat 1 faces Seat 2, Seat 3 next to Seat 1, Seat 4 opposite Seat 3, etc.
     if (rectangleConfig) {
       return generateOppositeOrderingRectangle(count, direction, startPosition, rectangleConfig);
     } else {
@@ -91,7 +106,6 @@ export function generateOrdering(
 
 /**
  * Generate opposite ordering for round tables
- * Seat 1 at start, Seat 2 directly opposite, then pairs alternate around
  */
 function generateOppositeOrderingRound(
   count: number,
@@ -104,14 +118,11 @@ function generateOppositeOrderingRound(
   let seatNumber = 1;
   const step = direction === 'clockwise' ? 1 : -1;
   
-  // Place pairs: odd seats on one side, even seats opposite
   for (let i = 0; i < Math.ceil(count / 2); i++) {
-    // Position for odd seat (1, 3, 5, ...)
     const oddPosition = (startPosition + step * i + count) % count;
     result[oddPosition] = seatNumber++;
     
     if (seatNumber <= count) {
-      // Position for even seat (2, 4, 6, ...) - directly opposite
       const evenPosition = (oddPosition + halfCount) % count;
       result[evenPosition] = seatNumber++;
     }
@@ -122,7 +133,6 @@ function generateOppositeOrderingRound(
 
 /**
  * Generate opposite ordering for rectangle tables
- * Pairs seats across the table: top↔bottom, left↔right
  */
 function generateOppositeOrderingRectangle(
   count: number,
@@ -133,7 +143,6 @@ function generateOppositeOrderingRectangle(
   const result: number[] = new Array(count).fill(0);
   const { top, bottom, left, right } = config;
   
-  // Build seat position map with side info
   interface SeatInfo {
     position: number;
     side: 'top' | 'bottom' | 'left' | 'right';
@@ -143,48 +152,39 @@ function generateOppositeOrderingRectangle(
   const seatInfos: SeatInfo[] = [];
   let pos = 0;
   
-  // Top seats (left to right)
   for (let i = 0; i < top; i++) {
     seatInfos.push({ position: pos++, side: 'top', indexOnSide: i });
   }
-  // Right seats (top to bottom)
   for (let i = 0; i < right; i++) {
     seatInfos.push({ position: pos++, side: 'right', indexOnSide: i });
   }
-  // Bottom seats (right to left)
   for (let i = 0; i < bottom; i++) {
     seatInfos.push({ position: pos++, side: 'bottom', indexOnSide: i });
   }
-  // Left seats (bottom to top)
   for (let i = 0; i < left; i++) {
     seatInfos.push({ position: pos++, side: 'left', indexOnSide: i });
   }
   
-  // Find the opposite position for a given seat
   const getOppositePosition = (seatInfo: SeatInfo): number | null => {
     const { side, indexOnSide } = seatInfo;
     
     if (side === 'top' && bottom > 0) {
-      // Opposite is bottom, seats are mirrored (left-to-right vs right-to-left)
       const oppositeIndex = top - 1 - indexOnSide;
       if (oppositeIndex >= 0 && oppositeIndex < bottom) {
         const bottomStart = top + right;
         return bottomStart + oppositeIndex;
       }
     } else if (side === 'bottom' && top > 0) {
-      // Opposite is top
       const oppositeIndex = bottom - 1 - indexOnSide;
       if (oppositeIndex >= 0 && oppositeIndex < top) {
         return oppositeIndex;
       }
     } else if (side === 'left' && right > 0) {
-      // Opposite is right, seats are mirrored
       const oppositeIndex = left - 1 - indexOnSide;
       if (oppositeIndex >= 0 && oppositeIndex < right) {
         return top + oppositeIndex;
       }
     } else if (side === 'right' && left > 0) {
-      // Opposite is left
       const oppositeIndex = right - 1 - indexOnSide;
       if (oppositeIndex >= 0 && oppositeIndex < left) {
         const leftStart = top + right + bottom;
@@ -195,10 +195,8 @@ function generateOppositeOrderingRectangle(
     return null;
   };
   
-  // Start from the start position and work around the table
   const startInfo = seatInfos.find(s => s.position === startPosition);
   if (!startInfo) {
-    // Fallback to sequential if invalid start position
     return generateOrdering(count, direction, 'sequential', 0);
   }
   
@@ -206,18 +204,15 @@ function generateOppositeOrderingRectangle(
   const visited = new Set<number>();
   const step = direction === 'clockwise' ? 1 : -1;
   
-  // Process seats in pairs (seat and its opposite)
   for (let i = 0; i < count && seatNumber <= count; i++) {
     const currentPos = (startPosition + step * i + count) % count;
     
     if (visited.has(currentPos)) continue;
     
-    // Assign seat number to current position
     result[currentPos] = seatNumber++;
     visited.add(currentPos);
     
     if (seatNumber <= count) {
-      // Find and assign opposite seat
       const currentInfo = seatInfos.find(s => s.position === currentPos);
       if (currentInfo) {
         const oppositePos = getOppositePosition(currentInfo);
@@ -229,7 +224,6 @@ function generateOppositeOrderingRectangle(
     }
   }
   
-  // Fill any remaining unvisited positions (edge cases)
   for (let i = 0; i < count; i++) {
     if (result[i] === 0) {
       result[i] = seatNumber++;
@@ -254,108 +248,137 @@ export function generatePatternPreview(
   return count > maxShow ? `${preview} ...` : preview;
 }
 
+// ============================================================================
+// ENHANCED SEAT MODE GENERATION
+// ============================================================================
+
 /**
- * Generate seat modes based on a pattern and seat count
+ * Generate seat modes for ROUND tables using the enhanced pattern detection system
  */
 export function generateSeatModes(
   pattern: SeatModePattern,
-  seatCount: number
+  targetSeatCount: number,
+  baseSeatCount?: number
 ): SeatMode[] {
-  const modes: SeatMode[] = new Array(seatCount).fill(pattern.defaultMode);
-
-  switch (pattern.type) {
-    case 'repeating':
-      if (pattern.pattern && pattern.pattern.length > 0) {
-        for (let i = 0; i < seatCount; i++) {
-          modes[i] = pattern.pattern[i % pattern.pattern.length];
-        }
-      }
-      break;
-
-    case 'alternating':
-      if (pattern.alternatingModes) {
-        for (let i = 0; i < seatCount; i++) {
-          modes[i] = pattern.alternatingModes[i % 2];
-        }
-      }
-      break;
-
-    case 'specific':
-      if (pattern.specificModes) {
-        Object.entries(pattern.specificModes).forEach(([pos, mode]) => {
-          const index = parseInt(pos, 10);
-          if (index >= 0 && index < seatCount) {
-            modes[index] = mode;
-          }
-        });
-      }
-      break;
+  // Handle enhanced patterns
+  if (isEnhancedPattern(pattern)) {
+    return generateEnhancedSeatModes(pattern, targetSeatCount);
   }
-
-  return modes;
+  
+  // Handle legacy patterns by converting first
+  const enhanced = convertToEnhancedPattern(pattern, baseSeatCount || targetSeatCount);
+  return generateEnhancedSeatModes(enhanced, targetSeatCount);
 }
 
 /**
+ * Generate seat modes from an enhanced pattern (for round tables)
+ */
+function generateEnhancedSeatModes(
+  pattern: EnhancedSeatModePattern,
+  targetSeatCount: number
+): SeatMode[] {
+  // If we have base modes, detect and scale them
+  if (pattern.baseModes && pattern.baseModes.length > 0) {
+    const detectedPattern = detectPattern(pattern.baseModes);
+    return scalePattern(detectedPattern, targetSeatCount);
+  }
+  
+  // If we have a sequence (for repeating patterns)
+  if (pattern.sequence && pattern.sequence.length > 0) {
+    const detectedPattern: DetectedPattern = {
+      strategy: 'repeating-sequence',
+      sequence: pattern.sequence,
+      confidence: 1,
+      description: `Repeating: ${modesToString(pattern.sequence)}`,
+    };
+    return scalePattern(detectedPattern, targetSeatCount);
+  }
+  
+  // If we have ratios
+  if (pattern.ratios) {
+    const detectedPattern: DetectedPattern = {
+      strategy: pattern.strategy === 'ratio-contiguous' ? 'ratio-contiguous' : 'ratio-interleaved',
+      ratios: pattern.ratios,
+      blockOrder: pattern.blockOrder,
+      confidence: 1,
+      description: 'Ratio-based pattern',
+    };
+    return scalePattern(detectedPattern, targetSeatCount);
+  }
+  
+  // Fallback to all default
+  return Array(targetSeatCount).fill(pattern.defaultMode);
+}
+
+/**
+ * Generate seat modes for RECTANGLE tables with proper growth-aware scaling
+ * This is the key function that ensures non-growing sides preserve their modes
+ */
+export function generateRectangleSeatModes(
+  pattern: SeatModePattern,
+  baseSeats: RectangleSeatsConfig,
+  targetSeats: RectangleSeatsConfig,
+  growthConfig: RectangleGrowthConfig
+): SeatMode[] {
+  // Get the base modes from the pattern
+  let baseModes: SeatMode[];
+  
+  if (isEnhancedPattern(pattern)) {
+    baseModes = pattern.baseModes || [];
+  } else {
+    // Convert legacy pattern to get base modes
+    const baseTotal = baseSeats.top + baseSeats.bottom + baseSeats.left + baseSeats.right;
+    const enhanced = convertToEnhancedPattern(pattern, baseTotal);
+    baseModes = enhanced.baseModes || [];
+  }
+  
+  // Ensure we have enough base modes
+  const baseTotal = baseSeats.top + baseSeats.bottom + baseSeats.left + baseSeats.right;
+  if (baseModes.length < baseTotal) {
+    // Extend with default mode
+    const defaultMode = isEnhancedPattern(pattern) ? pattern.defaultMode : pattern.defaultMode;
+    while (baseModes.length < baseTotal) {
+      baseModes.push(defaultMode);
+    }
+  } else if (baseModes.length > baseTotal) {
+    baseModes = baseModes.slice(0, baseTotal);
+  }
+  
+  // Use the rectangle-aware scaling
+  return scaleRectangleModesWithGrowth(baseModes, baseSeats, targetSeats, growthConfig);
+}
+
+/**
+ * Convenience function: Create scaled modes directly from a mode array
+ */
+export function scaleModesFromArray(
+  currentModes: SeatMode[],
+  targetSeatCount: number
+): SeatMode[] {
+  return detectAndScale(currentModes, targetSeatCount);
+}
+
+/**
+ * Get pattern information for display
+ */
+export function getPatternInfo(modes: SeatMode[]): DetectedPattern {
+  return detectPattern(modes);
+}
+
+// ============================================================================
+// RECTANGLE SEAT SCALING (Updated to use new helper)
+// ============================================================================
+
+/**
  * Scale rectangle seats based on growth configuration
- * Returns the new seat distribution for each side
+ * @deprecated Use calculateScaledRectangleSeats from rectangleModeScaler instead
  */
 export function scaleRectangleSeats(
   baseSeats: { top: number; bottom: number; left: number; right: number },
   growthSides: RectangleGrowthConfig,
   targetSeatCount: number
 ): { top: number; bottom: number; left: number; right: number } {
-  const baseTotal = baseSeats.top + baseSeats.bottom + baseSeats.left + baseSeats.right;
-  const difference = targetSeatCount - baseTotal;
-
-  if (difference === 0) {
-    return { ...baseSeats };
-  }
-
-  // Count how many sides can grow
-  const growableSides: Array<'top' | 'bottom' | 'left' | 'right'> = [];
-  if (growthSides.top) growableSides.push('top');
-  if (growthSides.bottom) growableSides.push('bottom');
-  if (growthSides.left) growableSides.push('left');
-  if (growthSides.right) growableSides.push('right');
-
-  if (growableSides.length === 0) {
-    // No sides can grow, return base (clamped)
-    console.warn('No growable sides defined, returning base configuration');
-    return { ...baseSeats };
-  }
-
-  const result = { ...baseSeats };
-
-  if (difference > 0) {
-    // Growing: distribute extra seats among growable sides
-    let remaining = difference;
-    let sideIndex = 0;
-
-    while (remaining > 0) {
-      const side = growableSides[sideIndex % growableSides.length];
-      result[side]++;
-      remaining--;
-      sideIndex++;
-    }
-  } else {
-    // Shrinking: remove seats from growable sides (but don't go below 0)
-    let toRemove = Math.abs(difference);
-    let sideIndex = 0;
-    let iterations = 0;
-    const maxIterations = toRemove * growableSides.length;
-
-    while (toRemove > 0 && iterations < maxIterations) {
-      const side = growableSides[sideIndex % growableSides.length];
-      if (result[side] > 0) {
-        result[side]--;
-        toRemove--;
-      }
-      sideIndex++;
-      iterations++;
-    }
-  }
-
-  return result;
+  return calculateScaledRectangleSeats(baseSeats, growthSides, targetSeatCount);
 }
 
 /**
@@ -367,8 +390,15 @@ export function calculateRectangleTotal(
   return seats.top + seats.bottom + seats.left + seats.right;
 }
 
+// ============================================================================
+// MAIN TEMPLATE SCALING FUNCTION
+// ============================================================================
+
 /**
  * Scale a template to a specific seat count
+ * This is the main entry point for template scaling
+ * 
+ * ENHANCED: Now properly handles rectangle tables with growth-aware mode scaling
  */
 export function scaleTemplate(
   template: TableTemplate,
@@ -380,10 +410,40 @@ export function scaleTemplate(
     Math.min(template.maxSeats, targetSeatCount)
   );
 
-  // Prepare rectangle config if applicable
-  let rectangleConfig: { top: number; bottom: number; left: number; right: number } | undefined;
-  
-  if (template.baseConfig.type === 'rectangle') {
+  // Get base seat count for pattern detection
+  const baseSeatCount = getTemplateBaseSeatCount(template);
+
+  // Handle round vs rectangle differently
+  if (template.baseConfig.type === 'round') {
+    // ROUND TABLE - Use standard pattern scaling
+    const seatOrdering = generateOrdering(
+      clampedCount,
+      template.orderingDirection,
+      template.orderingPattern,
+      template.startPosition
+    );
+
+    const seatModes = generateSeatModes(
+      template.seatModePattern, 
+      clampedCount, 
+      baseSeatCount
+    );
+    
+    const patternInfo = getPatternInfo(seatModes);
+
+    return {
+      type: 'round',
+      seatCount: clampedCount,
+      roundSeats: clampedCount,
+      seatOrdering,
+      seatModes,
+      patternInfo: {
+        strategy: patternInfo.strategy,
+        description: patternInfo.description,
+      },
+    };
+  } else {
+    // RECTANGLE TABLE - Use growth-aware scaling
     const baseSeats = template.baseConfig.baseSeats || {
       top: 2,
       bottom: 2,
@@ -398,39 +458,47 @@ export function scaleTemplate(
       right: false,
     };
 
-    rectangleConfig = scaleRectangleSeats(baseSeats, growthSides, clampedCount);
-  }
+    // Calculate target seat distribution
+    const targetSeats = calculateScaledRectangleSeats(baseSeats, growthSides, clampedCount);
+    const actualTotal = calculateRectangleTotal(targetSeats);
 
-  // Generate ordering with rectangle config for opposite pattern
-  const seatOrdering = generateOrdering(
-    clampedCount,
-    template.orderingDirection,
-    template.orderingPattern,
-    template.startPosition,
-    rectangleConfig
-  );
+    // Generate ordering with the actual seat configuration
+    const seatOrdering = generateOrdering(
+      actualTotal,
+      template.orderingDirection,
+      template.orderingPattern,
+      template.startPosition,
+      targetSeats
+    );
 
-  // Generate seat modes
-  const seatModes = generateSeatModes(template.seatModePattern, clampedCount);
+    // Generate seat modes with GROWTH-AWARE scaling
+    // This is the key change - non-growing sides will preserve their modes
+    const seatModes = generateRectangleSeatModes(
+      template.seatModePattern,
+      baseSeats,
+      targetSeats,
+      growthSides
+    );
+    
+    const patternInfo = getPatternInfo(seatModes);
 
-  if (template.baseConfig.type === 'round') {
-    return {
-      type: 'round',
-      seatCount: clampedCount,
-      roundSeats: clampedCount,
-      seatOrdering,
-      seatModes,
-    };
-  } else {
     return {
       type: 'rectangle',
-      seatCount: calculateRectangleTotal(rectangleConfig!),
-      rectangleSeats: rectangleConfig,
+      seatCount: actualTotal,
+      rectangleSeats: targetSeats,
       seatOrdering,
       seatModes,
+      patternInfo: {
+        strategy: patternInfo.strategy,
+        description: patternInfo.description,
+      },
     };
   }
 }
+
+// ============================================================================
+// TEMPLATE VALIDATION & HELPERS
+// ============================================================================
 
 /**
  * Validate a template configuration
@@ -500,10 +568,8 @@ export function getSuggestedSeatCounts(template: TableTemplate): number[] {
   const counts: number[] = [];
   const base = getTemplateBaseSeatCount(template);
   
-  // Add min, base, and max
   counts.push(template.minSeats);
   
-  // Add intermediate values
   for (let i = template.minSeats + 2; i < template.maxSeats; i += 2) {
     if (i !== base) {
       counts.push(i);
@@ -513,6 +579,53 @@ export function getSuggestedSeatCounts(template: TableTemplate): number[] {
   counts.push(base);
   counts.push(template.maxSeats);
   
-  // Sort and dedupe
   return [...new Set(counts)].sort((a, b) => a - b);
 }
+
+/**
+ * Create an enhanced pattern from user-configured modes
+ */
+export function createPatternFromModes(modes: SeatMode[]): EnhancedSeatModePattern {
+  const detected = detectPattern(modes);
+  const ratios = calculateRatios(modes);
+  
+  return {
+    strategy: detected.strategy,
+    baseModes: [...modes],
+    detectedPattern: detected,
+    sequence: detected.sequence,
+    ratios,
+    blockOrder: detected.blockOrder,
+    defaultMode: 'default',
+  };
+}
+
+// ============================================================================
+// EXPORTS SUMMARY
+// ============================================================================
+
+export default {
+  // Ordering
+  generateOrdering,
+  generatePatternPreview,
+  
+  // Mode generation (enhanced)
+  generateSeatModes,
+  generateRectangleSeatModes,
+  scaleModesFromArray,
+  getPatternInfo,
+  createPatternFromModes,
+  
+  // Rectangle helpers
+  scaleRectangleSeats,
+  calculateRectangleTotal,
+  
+  // Main scaling
+  scaleTemplate,
+  
+  // Validation & helpers
+  validateTemplate,
+  getTemplateBaseSeatCount,
+  isValidSeatCount,
+  getSuggestedSeatCounts,
+};
