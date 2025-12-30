@@ -1,6 +1,6 @@
 // types/Template.ts
 // Template type definitions for reusable table configurations
-// ENHANCED with intelligent pattern detection and scaling
+// ENHANCED with intelligent pattern detection, scaling, and CENTER-ANCHORED mode
 
 import { SeatMode } from './Seat';
 import { EventType } from './Event';
@@ -15,6 +15,27 @@ export type Direction = 'clockwise' | 'counter-clockwise';
  * - 'opposite': Seat 1 faces Seat 2 (across table), Seat 3 next to Seat 1, Seat 4 opposite Seat 3, etc.
  */
 export type OrderingPattern = 'sequential' | 'alternating' | 'opposite';
+
+/**
+ * Anchor mode for rectangle table scaling
+ * - 'edge': New seats added at edges, start position index stays fixed (default, existing behavior)
+ * - 'center': Seat 1 stays at its RELATIVE position (e.g., center), new seats added at edges
+ */
+export type AnchorMode = 'edge' | 'center';
+
+/**
+ * Anchor configuration for rectangle tables
+ * Defines where seat 1 is anchored and how it behaves during scaling
+ */
+export interface SeatAnchor {
+  // Which side the anchor is on
+  side: 'top' | 'bottom' | 'left' | 'right';
+  
+  // Relative position on the side
+  // 'start' = first seat on side, 'center' = middle, 'end' = last seat
+  // number = specific ratio (0-1) for precise positioning
+  relativePosition: 'start' | 'center' | 'end' | number;
+}
 
 /**
  * Growth configuration for rectangle tables
@@ -206,6 +227,13 @@ export interface TableTemplate {
   orderingPattern: OrderingPattern;
   startPosition: number; // 0 = top/first position
   
+  // NEW: Anchor mode for rectangle tables
+  // Determines how seat 1 behaves when scaling
+  anchorMode?: AnchorMode;
+  
+  // NEW: Explicit anchor configuration (auto-detected from startPosition if not set)
+  anchor?: SeatAnchor;
+  
   // Seat mode pattern (supports both legacy and enhanced)
   seatModePattern: SeatModePattern;
   
@@ -348,8 +376,6 @@ export const SESSION_TYPE_DESCRIPTIONS: Record<EventType, string> = {
  * Automatically detects the pattern type
  */
 export function createEnhancedPatternFromModes(modes: SeatMode[]): EnhancedSeatModePattern {
-  // Import dynamically to avoid circular dependencies
-  // In actual use, detectPattern will be imported from patternDetector
   const defaultMode: SeatMode = modes.length > 0 
     ? modes.reduce((acc, m) => {
         const counts: Record<SeatMode, number> = { 'host-only': 0, 'external-only': 0, 'default': 0 };
@@ -396,5 +422,18 @@ export function getPatternDescription(pattern: SeatModePattern): string {
       return 'Specific positions';
     default:
       return 'Custom pattern';
+  }
+}
+
+/**
+ * Get anchor mode description for display
+ */
+export function getAnchorModeDescription(anchorMode: AnchorMode): string {
+  switch (anchorMode) {
+    case 'center':
+      return 'Center-anchored: Seat 1 stays at relative position, new seats added at edges';
+    case 'edge':
+    default:
+      return 'Edge-based: Seats added/removed at edges, positions shift';
   }
 }

@@ -1,6 +1,6 @@
 // utils/templateScaler.ts
 // ENHANCED: Utility functions for scaling table templates with intelligent pattern recognition
-// Now uses rectangleModeScaler for proper rectangle table mode preservation
+// NOW SUPPORTS: Center-anchored scaling for rectangle tables (VIP seating at center)
 
 import { 
   TableTemplate, 
@@ -30,6 +30,11 @@ import {
   calculateScaledRectangleSeats,
   RectangleSeatsConfig,
 } from './rectangleModeScaler';
+import {
+  isAtCenter,
+  detectAnchor,
+  generateCenterAnchoredOrdering,
+} from './centerAnchoredScaler';
 
 // ============================================================================
 // SEAT ORDERING GENERATION
@@ -391,14 +396,15 @@ export function calculateRectangleTotal(
 }
 
 // ============================================================================
-// MAIN TEMPLATE SCALING FUNCTION
+// MAIN TEMPLATE SCALING FUNCTION WITH CENTER-ANCHORED SUPPORT
 // ============================================================================
 
 /**
  * Scale a template to a specific seat count
  * This is the main entry point for template scaling
  * 
- * ENHANCED: Now properly handles rectangle tables with growth-aware mode scaling
+ * ENHANCED: Now automatically detects and applies center-anchored scaling
+ * for rectangle tables where seat 1 is positioned at the center of a side
  */
 export function scaleTemplate(
   template: TableTemplate,
@@ -443,7 +449,7 @@ export function scaleTemplate(
       },
     };
   } else {
-    // RECTANGLE TABLE - Use growth-aware scaling
+    // RECTANGLE TABLE - Check for center-anchored scaling
     const baseSeats = template.baseConfig.baseSeats || {
       top: 2,
       bottom: 2,
@@ -462,17 +468,33 @@ export function scaleTemplate(
     const targetSeats = calculateScaledRectangleSeats(baseSeats, growthSides, clampedCount);
     const actualTotal = calculateRectangleTotal(targetSeats);
 
-    // Generate ordering with the actual seat configuration
-    const seatOrdering = generateOrdering(
-      actualTotal,
-      template.orderingDirection,
-      template.orderingPattern,
-      template.startPosition,
-      targetSeats
-    );
+    // ✨ NEW: Detect if this is a center-anchored template
+    const isCenterAnchored = isAtCenter(template.startPosition, baseSeats);
+    
+    let seatOrdering: number[];
+    
+    if (isCenterAnchored) {
+      // 🎯 Use center-anchored ordering generation
+      console.log('🎯 Center-anchored scaling detected - using smart center-outward ordering');
+      seatOrdering = generateCenterAnchoredOrdering(
+        baseSeats,
+        targetSeats,
+        template.startPosition,
+        template.orderingDirection,
+        template.orderingPattern
+      );
+    } else {
+      // Use standard ordering generation
+      seatOrdering = generateOrdering(
+        actualTotal,
+        template.orderingDirection,
+        template.orderingPattern,
+        template.startPosition,
+        targetSeats
+      );
+    }
 
     // Generate seat modes with GROWTH-AWARE scaling
-    // This is the key change - non-growing sides will preserve their modes
     const seatModes = generateRectangleSeatModes(
       template.seatModePattern,
       baseSeats,
@@ -620,7 +642,7 @@ export default {
   scaleRectangleSeats,
   calculateRectangleTotal,
   
-  // Main scaling
+  // Main scaling (now with center-anchored support)
   scaleTemplate,
   
   // Validation & helpers
