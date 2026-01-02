@@ -31,10 +31,11 @@ import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
 import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
 import GuestManagementModal from '@/components/molecules/GuestManagementModal';
 import ExportModal from '@/components/molecules/ExportModal';
-import AutoFillButton from '@/components/atoms/AutoFillButton';
 import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
+import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
+import SessionDetailLayout from './layout';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
@@ -160,91 +161,21 @@ export default function SessionDetailPage() {
   });
 
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Combined Header */}
-      <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          {/* LEFT SIDE - Session Info */}
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <IconButton onClick={handleBack}>
-              <ArrowBack />
-            </IconButton>
-            <Box>
-              <Typography variant="h5" fontWeight="bold">
-                {session.name}
-              </Typography>
-              <Stack direction="row" spacing={1} alignItems="center" mt={0.5}>
-                <Chip
-                  label={session.sessionType}
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                />
-                <Typography variant="body2" color="text.secondary">
-                  {formattedDate}
-                </Typography>
-              </Stack>
-            </Box>
-          </Stack>
-
-          {/* RIGHT SIDE - Action Buttons */}
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Divider orientation="vertical" flexItem />
-
-            {/* Manage Guests Button */}
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<Groups />}
-              onClick={() => setGuestModalOpen(true)}
-            >
-              Manage Guests
-            </Button>
-
-            {/* Auto Fill Button */}
-            <AutoFillButton />
-
-            {/* Export Button */}
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<FileDownload />}
-              onClick={() => setExportModalOpen(true)}
-            >
-              Export
-            </Button>
-
-            {/* Reset Button */}
-            <Button
-              variant="contained"
-              color="error"
-              startIcon={<RestartAlt />}
-              onClick={handleReset}
-            >
-              Reset
-            </Button>
-
-            <Divider orientation="vertical" flexItem />
-
-            {/* Save Button */}
-            <Button
-              variant="contained"
-              color="success"
-              startIcon={<Save />}
-              onClick={handleSave}
-              size="large"
-            >
-              Save
-            </Button>
-          </Stack>
-        </Stack>
-
-        {hasNoGuests && (
-          <Alert severity="warning" sx={{ mt: 2 }} icon={<Warning />}>
-            No attendees assigned to this session. Click "Manage Guests" → "Manage Attendees" tab to select guests from the master list.
-          </Alert>
-        )}
-      </Paper>
+    <SessionDetailLayout
+      header={
+        <PlaygroundTopControlPanel
+          sessionName={session.name}
+          sessionType={session.sessionType}
+          formattedDate={formattedDate}
+          hasNoGuests={hasNoGuests}
+          onBack={handleBack}
+          onSave={handleSave}
+          onReset={handleReset}
+          onManageGuests={() => setGuestModalOpen(true)}
+          onExport={() => setExportModalOpen(true)}
+        />
+      }
+    >
 
       {/* Main Content - Seat Planner */}
       {hasNoGuests ? (
@@ -277,11 +208,11 @@ export default function SessionDetailPage() {
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden" id="playground-canvas">
             <PlayGroundCanvas />
-            
+
             {/* Seating Stats Panel with Boss Adjacency */}
-            <SeatingStatsPanel 
-              eventId={eventId} 
-              sessionId={sessionId} 
+            <SeatingStatsPanel
+              eventId={eventId}
+              sessionId={sessionId}
             />
           </div>
 
@@ -309,6 +240,6 @@ export default function SessionDetailPage() {
         onExportPDF={handleExportPDF}
         onExportPPTX={handleExportPPTX}
       />
-    </Box>
+    </SessionDetailLayout>
   );
 }

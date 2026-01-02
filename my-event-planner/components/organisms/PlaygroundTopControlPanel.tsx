@@ -1,82 +1,128 @@
-// 'use client';
+'use client';
 
-// import AppBar from '@mui/material/AppBar';
-// import Toolbar from '@mui/material/Toolbar';
-// import Typography from '@mui/material/Typography';
-// import Button from '@mui/material/Button';
-// import Stack from '@mui/material/Stack';
-// import { useSeatStore } from '@/store/seatStore';
-// import { exportToPDF } from '@/utils/exportToPDF';
-// import { exportToPPTX } from '@/utils/exportToPPTX';
-// import { useState } from 'react';
-// import AutoFillButton from '../atoms/AutoFillButton';
-// import ExportModal from '../molecules/ExportModal';
+import {
+  Paper,
+  Stack,
+  Box,
+  Typography,
+  Button,
+  IconButton,
+  Chip,
+  Alert,
+  Divider,
+} from '@mui/material';
+import {
+  ArrowBack,
+  Save,
+  Groups,
+  Warning,
+  FileDownload,
+  RestartAlt,
+} from '@mui/icons-material';
+import AutoFillButton from '@/components/atoms/AutoFillButton';
 
-// interface PlaygroundTopControlPanelProps {
-//   onManageGuests?: () => void;
-// }
+interface PlaygroundTopControlPanelProps {
+  sessionName: string;
+  sessionType: string;
+  formattedDate: string;
+  hasNoGuests: boolean;
+  onBack: () => void;
+  onSave: () => void;
+  onReset: () => void;
+  onManageGuests: () => void;
+  onExport: () => void;
+}
 
-// export default function PlaygroundTopControlPanel({ onManageGuests }: PlaygroundTopControlPanelProps) {
-//   const { tables, resetTables } = useSeatStore();
-//   const [exportModalOpen, setExportModalOpen] = useState(false);
+export default function PlaygroundTopControlPanel({
+  sessionName,
+  sessionType,
+  formattedDate,
+  hasNoGuests,
+  onBack,
+  onSave,
+  onReset,
+  onManageGuests,
+  onExport,
+}: PlaygroundTopControlPanelProps) {
+  return (
+    <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center">
+        {/* LEFT */}
+        <Stack direction="row" alignItems="center" spacing={2}>
+          <IconButton onClick={onBack}>
+            <ArrowBack />
+          </IconButton>
 
-//   const handleReset = () => {
-//     if (confirm('Are you sure you want to reset all tables? This will clear all seating arrangements.')) {
-//       resetTables();
-//     }
-//   }
+          <Box>
+            <Typography variant="h5" fontWeight="bold">
+              {sessionName}
+            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" mt={0.5}>
+              <Chip
+                label={sessionType}
+                size="small"
+                color="primary"
+                variant="outlined"
+              />
+              <Typography variant="body2" color="text.secondary">
+                {formattedDate}
+              </Typography>
+            </Stack>
+          </Box>
+        </Stack>
 
-//   const handleExportPDF = () => {
-//     exportToPDF("playground-canvas");
-//   };
+        {/* RIGHT */}
+        <Stack direction="row" spacing={2} alignItems="center">
+          <Divider orientation="vertical" flexItem />
 
-//   const handleExportPPTX = () => {
-//     exportToPPTX(tables);
-//   };
+          <Button
+            variant="contained"
+            startIcon={<Groups />}
+            onClick={onManageGuests}
+          >
+            Manage Guests
+          </Button>
 
-//   return (
-//     <>
-//       <AppBar position="static" color="default" elevation={1}>
-//         <Toolbar sx={{ justifyContent: 'space-between', px: 3 }}>
-//           <Typography variant="h6" fontWeight="bold">
-//             Seat Planner
-//           </Typography>
+          <AutoFillButton />
 
-//           <Stack direction="row" spacing={2} p={2} bgcolor="#e3f2fd">
+          <Button
+            variant="contained"
+            color="secondary"
+            startIcon={<FileDownload />}
+            onClick={onExport}
+          >
+            Export
+          </Button>
 
-//             <Button variant="contained" color="primary" onClick={onManageGuests}>
-//               Manage Guests
-//             </Button>
+          <Button
+            variant="contained"
+            color="error"
+            startIcon={<RestartAlt />}
+            onClick={onReset}
+          >
+            Reset
+          </Button>
 
-//             <AutoFillButton/>
+          <Divider orientation="vertical" flexItem />
 
-//             <Button
-//               variant="contained"
-//               color="secondary"
-//               onClick={() => setExportModalOpen(true)}
-//             >
-//               Export
-//             </Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<Save />}
+            size="large"
+            onClick={onSave}
+          >
+            Save
+          </Button>
+        </Stack>
+      </Stack>
 
-//             <Button
-//               variant="contained"
-//               color="error"
-//               onClick={handleReset}
-//             >
-//               Reset
-//             </Button>
-
-//           </Stack>
-//         </Toolbar>
-//       </AppBar>
-
-//       {/* Export Modal */}
-//       <ExportModal
-//         open={exportModalOpen}
-//         onClose={() => setExportModalOpen(false)}
-//         onExportPDF={handleExportPDF}
-//         onExportPPTX={handleExportPPTX}
-//       />
-//     </>
-//   );
-// }
+      {hasNoGuests && (
+        <Alert severity="warning" sx={{ mt: 2 }} icon={<Warning />}>
+          No attendees assigned to this session. Click "Manage Guests" →
+          "Manage Attendees" tab to select guests from the master list.
+        </Alert>
+      )}
+    </Paper>
+  );
+}
