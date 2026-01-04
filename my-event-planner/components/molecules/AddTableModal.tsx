@@ -1,7 +1,6 @@
 // components/molecules/AddTableModal.tsx
-// REFACTORED: Uses SeatOrderingPanel and SeatModePanel reusable components
-// Following atomic design pattern - panels are reusable molecules
-// Features: Template selection, custom table creation with ordering & modes
+// V2 Template System - Opens TemplateCustomizationModal when a template is selected
+// Features: Template selection, custom table creation
 
 'use client';
 
@@ -25,18 +24,44 @@ import {
   Divider,
   Tabs,
   Tab,
-  Slider,
+  IconButton,
+  Tooltip,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
-import { FilterList } from '@mui/icons-material';
-import { SeatMode } from '@/types/Seat';
-import { EventType } from '@/types/Event';
-import { SESSION_TYPE_COLORS, TableTemplate } from '@/types/Template';
-import { useTemplateStore } from '@/store/templateStore';
-import { getTemplateBaseSeatCount, scaleTemplate } from '@/utils/templateScaler';
-import { TemplateGrid } from './TemplateCard';
-import CreateEditTemplateModal from './CreateEditTemplateModal';
+import {
+  FilterList,
+  Add,
+  Edit,
+  ContentCopy,
+  Delete,
+  Check,
+  Circle,
+  Rectangle,
+} from '@mui/icons-material';
 
-// Reusable panel components (atomic design)
+// V2 Types
+import {
+  TableTemplateV2,
+  CreateTemplateInputV2,
+  EventType,
+  SeatMode,
+  getTotalSeatCountV2,
+  SESSION_TYPE_COLORS_V2,
+  isCircleConfigV2,
+  isRectangleConfigV2,
+} from '@/types/TemplateV2';
+
+// V2 Store
+import {
+  useTemplateStoreV2,
+} from '@/store/templateStoreV2';
+
+// Modals
+import CreateEditTemplateModalV2 from './CreateEditTemplateModalV2';
+import TemplateCustomizationModal, { CustomizedTableConfig } from './TemplateCustomizationModal';
+
+// Reusable components
 import TablePreview from '../atoms/TablePreview';
 import ScrollablePreviewContainer from '../atoms/ScrollablePreviewContainer';
 import SeatOrderingPanel from './SeatOrderingPanel';
@@ -59,6 +84,7 @@ export interface TableConfig {
   label: string;
   seatOrdering?: number[];
   seatModes?: SeatMode[];
+  templateId?: string;
 }
 
 interface AddTableModalProps {
@@ -68,8 +94,157 @@ interface AddTableModalProps {
   sessionType?: EventType | null;
 }
 
-type TopLevelTab = 'suggested' | 'custom';
+type TopLevelTab = 'templates' | 'custom';
 type CustomTabValue = 'config' | 'ordering' | 'modes';
+
+// ============================================================================
+// TEMPLATE CARD COMPONENT
+// ============================================================================
+
+interface TemplateCardProps {
+  template: TableTemplateV2;
+  onSelect: () => void;
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}
+
+function TemplateCard({
+  template,
+  onSelect,
+  onEdit,
+  onDuplicate,
+  onDelete,
+}: TemplateCardProps) {
+  const seatCount = getTotalSeatCountV2(template.config);
+  const isCircle = isCircleConfigV2(template.config);
+
+  const previewData = useMemo(() => {
+    if (isCircleConfigV2(template.config)) {
+      return {
+        type: 'round' as const,
+        roundSeats: template.config.baseSeatCount,
+        rectangleSeats: undefined,
+      };
+    } else {
+      const sides = template.config.sides;
+      return {
+        type: 'rectangle' as const,
+        roundSeats: undefined,
+        rectangleSeats: {
+          top: sides.top.enabled ? sides.top.seatCount : 0,
+          right: sides.right.enabled ? sides.right.seatCount : 0,
+          bottom: sides.bottom.enabled ? sides.bottom.seatCount : 0,
+          left: sides.left.enabled ? sides.left.seatCount : 0,
+        },
+      };
+    }
+  }, [template.config]);
+
+  return (
+    <Paper
+      elevation={1}
+      sx={{
+        p: 2,
+        cursor: 'pointer',
+        border: '2px solid transparent',
+        transition: 'all 0.2s',
+        '&:hover': { 
+          bgcolor: '#e3f2fd', 
+          transform: 'translateY(-2px)',
+          borderColor: '#1976d2',
+          boxShadow: 3,
+        },
+        position: 'relative',
+        minHeight: 200,
+      }}
+      onClick={onSelect}
+    >
+      <Stack spacing={1}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          {isCircle ? <Circle fontSize="small" /> : <Rectangle fontSize="small" />}
+          <Typography variant="subtitle2" fontWeight="bold" noWrap sx={{ flex: 1 }}>
+            {template.name}
+          </Typography>
+          {template.isBuiltIn && (
+            <Chip label="Built-in" size="small" sx={{ height: 18, fontSize: 10 }} />
+          )}
+        </Stack>
+
+        {/* Table Preview */}
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            py: 1,
+            minHeight: 90,
+          }}
+        >
+          <TablePreview
+            type={previewData.type}
+            roundSeats={previewData.roundSeats}
+            rectangleSeats={previewData.rectangleSeats}
+            seatOrdering={Array(seatCount).fill(0).map((_, i) => i + 1)}
+            seatModes={Array(seatCount).fill('default' as SeatMode)}
+            size="small"
+            showLabels={false}
+          />
+        </Box>
+
+        <Stack direction="row" spacing={0.5} flexWrap="wrap">
+          {template.sessionTypes.slice(0, 2).map((type) => (
+            <Chip
+              key={type}
+              label={type}
+              size="small"
+              sx={{
+                bgcolor: SESSION_TYPE_COLORS_V2[type],
+                color: 'white',
+                fontSize: 9,
+                height: 18,
+              }}
+            />
+          ))}
+          {template.sessionTypes.length > 2 && (
+            <Chip label={`+${template.sessionTypes.length - 2}`} size="small" sx={{ height: 18, fontSize: 9 }} />
+          )}
+        </Stack>
+
+        <Typography variant="caption" color="text.secondary">
+          {seatCount} seats (base)
+        </Typography>
+
+        {/* Actions */}
+        <Stack
+          direction="row"
+          spacing={0.5}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {!template.isBuiltIn && (
+            <Tooltip title="Edit Template">
+              <IconButton size="small" onClick={onEdit}>
+                <Edit fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title="Duplicate Template">
+            <IconButton size="small" onClick={onDuplicate}>
+              <ContentCopy fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {!template.isBuiltIn && (
+            <Tooltip title="Delete Template">
+              <IconButton size="small" onClick={onDelete} color="error">
+                <Delete fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
 
 // ============================================================================
 // MAIN COMPONENT
@@ -84,144 +259,103 @@ export default function AddTableModal({
   // ============================================================================
   // TAB STATE
   // ============================================================================
-  
-  const [topTab, setTopTab] = useState<TopLevelTab>('suggested');
+
+  const [topTab, setTopTab] = useState<TopLevelTab>('templates');
   const [customTab, setCustomTab] = useState<CustomTabValue>('config');
 
   // ============================================================================
-  // TEMPLATE STATE
+  // V2 TEMPLATE STATE
   // ============================================================================
-  
-  const templates = useTemplateStore((s) => s.templates);
-  const createTemplate = useTemplateStore((s) => s.createTemplate);
-  const updateTemplate = useTemplateStore((s) => s.updateTemplate);
-  const deleteTemplate = useTemplateStore((s) => s.deleteTemplate);
-  const duplicateTemplate = useTemplateStore((s) => s.duplicateTemplate);
 
-  const [selectedTemplate, setSelectedTemplate] = useState<TableTemplate | null>(null);
-  const [templateSeatCount, setTemplateSeatCount] = useState<number>(8);
-  const [templateQuantity, setTemplateQuantity] = useState<number>(1);
-  const [templateLabel, setTemplateLabel] = useState<string>('');
-  const [templateModalOpen, setTemplateModalOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<TableTemplate | null>(null);
+  const templates = useTemplateStoreV2((s) => s.templates);
+  const createTemplate = useTemplateStoreV2((s) => s.createTemplate);
+  const updateTemplate = useTemplateStoreV2((s) => s.updateTemplate);
+  const deleteTemplate = useTemplateStoreV2((s) => s.deleteTemplate);
+  const duplicateTemplate = useTemplateStoreV2((s) => s.duplicateTemplate);
+
   const [filterSessionType, setFilterSessionType] = useState<EventType | null>(sessionType);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<TableTemplateV2 | null>(null);
+  
+  // Template customization modal
+  const [customizationModalOpen, setCustomizationModalOpen] = useState(false);
+  const [selectedTemplateForCustomization, setSelectedTemplateForCustomization] = useState<TableTemplateV2 | null>(null);
 
   // ============================================================================
   // CUSTOM TABLE STATE
   // ============================================================================
-  
-  const [tableConfig, setTableConfig] = useState<TableConfig>({
-    type: 'round',
-    roundSeats: 8,
-    rectangleSeats: { top: 2, bottom: 2, left: 1, right: 1 },
-    quantity: 1,
-    label: '',
+
+  const [customTableType, setCustomTableType] = useState<'round' | 'rectangle'>('round');
+  const [roundSeats, setRoundSeats] = useState(8);
+  const [rectangleSeats, setRectangleSeats] = useState({
+    top: 3, bottom: 3, left: 1, right: 1,
   });
-
-  // Reset key for panel components
-  const [resetKey, setResetKey] = useState(0);
-
-  // Ordering and modes (managed by panels, stored here for submission)
+  const [customQuantity, setCustomQuantity] = useState(1);
+  const [customLabel, setCustomLabel] = useState('');
   const [seatOrdering, setSeatOrdering] = useState<number[]>([]);
   const [seatModes, setSeatModes] = useState<SeatMode[]>([]);
+  const [resetKey, setResetKey] = useState(0);
 
   // ============================================================================
   // COMPUTED VALUES
   // ============================================================================
-
-  const totalSeats = useMemo(() => {
-    if (tableConfig.type === 'round') {
-      return tableConfig.roundSeats || 8;
-    }
-    const { top = 0, bottom = 0, left = 0, right = 0 } = tableConfig.rectangleSeats || {};
-    return top + bottom + left + right;
-  }, [tableConfig]);
 
   const filteredTemplates = useMemo(() => {
     if (!filterSessionType) return templates;
     return templates.filter((t) => t.sessionTypes.includes(filterSessionType));
   }, [templates, filterSessionType]);
 
-  const scaledTemplateResult = useMemo(() => {
-    if (!selectedTemplate) return null;
-    return scaleTemplate(selectedTemplate, templateSeatCount);
-  }, [selectedTemplate, templateSeatCount]);
+  const customSeatCount = useMemo(() => {
+    if (customTableType === 'round') return roundSeats;
+    return rectangleSeats.top + rectangleSeats.bottom + rectangleSeats.left + rectangleSeats.right;
+  }, [customTableType, roundSeats, rectangleSeats]);
+
+  const defaultOrdering = useMemo(() => 
+    Array(customSeatCount).fill(0).map((_, i) => i + 1),
+    [customSeatCount]
+  );
+
+  const defaultModes = useMemo(() => 
+    Array(customSeatCount).fill('default' as SeatMode),
+    [customSeatCount]
+  );
 
   // ============================================================================
   // EFFECTS
   // ============================================================================
 
-  // Initialize seat modes when seat count changes
-  useEffect(() => {
-    setSeatModes((prev) => {
-      if (prev.length === totalSeats) return prev;
-      if (totalSeats > prev.length) {
-        return [...prev, ...Array(totalSeats - prev.length).fill('default' as SeatMode)];
-      }
-      return prev.slice(0, totalSeats);
-    });
-  }, [totalSeats]);
-
-  // Update template seat count when template changes
-  useEffect(() => {
-    if (selectedTemplate) {
-      const baseSeatCount = getTemplateBaseSeatCount(selectedTemplate);
-      setTemplateSeatCount(baseSeatCount);
-    }
-  }, [selectedTemplate]);
-
-  // Update filter when sessionType prop changes
-  useEffect(() => {
-    setFilterSessionType(sessionType);
-  }, [sessionType]);
-
-  // Reset state when modal opens
   useEffect(() => {
     if (open) {
-      setSelectedTemplate(null);
-      setTemplateQuantity(1);
-      setTemplateLabel('');
+      setFilterSessionType(sessionType);
+      setTopTab('templates');
       setCustomTab('config');
-      setResetKey((prev) => prev + 1);
+      setCustomizationModalOpen(false);
+      setSelectedTemplateForCustomization(null);
     }
-  }, [open]);
+  }, [open, sessionType]);
 
   // ============================================================================
-  // HANDLERS - PANELS
+  // HANDLERS
   // ============================================================================
 
-  const handleOrderingChange = useCallback((ordering: number[]) => {
-    setSeatOrdering(ordering);
-  }, []);
-
-  const handleModesChange = useCallback((modes: SeatMode[]) => {
-    setSeatModes(modes);
-  }, []);
-
-  // ============================================================================
-  // HANDLERS - TEMPLATE TAB
-  // ============================================================================
-
-  const handleTemplateSelect = (template: TableTemplate) => {
-    setSelectedTemplate(template);
-    setTemplateSeatCount(getTemplateBaseSeatCount(template));
+  // Template handlers
+  const handleTemplateSelect = (template: TableTemplateV2) => {
+    setSelectedTemplateForCustomization(template);
+    setCustomizationModalOpen(true);
   };
 
-  const handleTemplateEdit = (template: TableTemplate) => {
+  const handleTemplateEdit = (template: TableTemplateV2) => {
     setEditingTemplate(template);
     setTemplateModalOpen(true);
   };
 
-  const handleTemplateDuplicate = (template: TableTemplate) => {
+  const handleTemplateDuplicate = (template: TableTemplateV2) => {
     duplicateTemplate(template.id);
   };
 
-  const handleTemplateDelete = (template: TableTemplate) => {
+  const handleTemplateDelete = (template: TableTemplateV2) => {
     if (confirm(`Are you sure you want to delete "${template.name}"?`)) {
       deleteTemplate(template.id);
-      if (selectedTemplate?.id === template.id) {
-        setSelectedTemplate(null);
-      }
     }
   };
 
@@ -230,38 +364,51 @@ export default function AddTableModal({
     setTemplateModalOpen(true);
   };
 
-  const handleTemplateSave = (templateInput: any) => {
-    if (editingTemplate) {
+  const handleTemplateSave = (templateInput: CreateTemplateInputV2) => {
+    if (editingTemplate && !editingTemplate.isBuiltIn) {
       updateTemplate(editingTemplate.id, templateInput);
     } else {
       createTemplate(templateInput);
     }
   };
 
-  // ============================================================================
-  // CONFIRM HANDLERS
-  // ============================================================================
+  // Customization modal confirm - creates the table(s)
+  const handleCustomizationConfirm = (customized: CustomizedTableConfig) => {
+    const config: TableConfig = {
+      type: customized.rectangleSeats ? 'rectangle' : 'round',
+      roundSeats: customized.rectangleSeats ? undefined : customized.seatCount,
+      rectangleSeats: customized.rectangleSeats,
+      quantity: customized.quantity,
+      label: '',
+      seatOrdering: customized.seatOrdering,
+      seatModes: customized.seatModes,
+      templateId: customized.templateId,
+    };
 
-  const handleConfirmCustom = () => {
-    onConfirm({
-      ...tableConfig,
-      seatOrdering,
-      seatModes,
-    });
-    handleClose();
+    onConfirm(config);
+    setCustomizationModalOpen(false);
+    setSelectedTemplateForCustomization(null);
+    onClose();
   };
 
-  const handleConfirmTemplate = () => {
-    if (!selectedTemplate || !scaledTemplateResult) return;
+  // Custom table handlers
+  const handleOrderingChange = useCallback((ordering: number[]) => {
+    setSeatOrdering(ordering);
+  }, []);
 
+  const handleModesChange = useCallback((modes: SeatMode[]) => {
+    setSeatModes(modes);
+  }, []);
+
+  const handleConfirmCustom = () => {
     const config: TableConfig = {
-      type: scaledTemplateResult.type,
-      roundSeats: scaledTemplateResult.roundSeats,
-      rectangleSeats: scaledTemplateResult.rectangleSeats,
-      quantity: templateQuantity,
-      label: templateLabel,
-      seatOrdering: scaledTemplateResult.seatOrdering,
-      seatModes: scaledTemplateResult.seatModes,
+      type: customTableType,
+      roundSeats: customTableType === 'round' ? roundSeats : undefined,
+      rectangleSeats: customTableType === 'rectangle' ? rectangleSeats : undefined,
+      quantity: customQuantity,
+      label: customLabel,
+      seatOrdering: seatOrdering.length === customSeatCount ? seatOrdering : defaultOrdering,
+      seatModes: seatModes.length === customSeatCount ? seatModes : defaultModes,
     };
 
     onConfirm(config);
@@ -272,7 +419,8 @@ export default function AddTableModal({
     setCustomTab('config');
     setSeatModes([]);
     setSeatOrdering([]);
-    setSelectedTemplate(null);
+    setCustomizationModalOpen(false);
+    setSelectedTemplateForCustomization(null);
     onClose();
   };
 
@@ -295,142 +443,277 @@ export default function AddTableModal({
           onChange={(_, v) => setTopTab(v)}
           sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
         >
-          <Tab label="Suggested Templates" value="suggested" />
+          <Tab label="From Template" value="templates" />
           <Tab label="Custom Table" value="custom" />
         </Tabs>
 
         {/* ================================================================== */}
-        {/* SUGGESTED TAB */}
+        {/* TEMPLATES TAB */}
         {/* ================================================================== */}
-        {topTab === 'suggested' && (
-          <>
-            <DialogContent sx={{ minHeight: 500 }}>
-              {/* Session Type Filter */}
-              <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: '#f5f5f5' }}>
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <FilterList color="action" />
-                  <Typography variant="subtitle2">Filter by Session Type:</Typography>
-                  <Stack direction="row" spacing={1}>
-                    <Chip
-                      label="All"
-                      onClick={() => setFilterSessionType(null)}
-                      color={filterSessionType === null ? 'primary' : 'default'}
-                      variant={filterSessionType === null ? 'filled' : 'outlined'}
-                    />
-                    {(['Executive meeting', 'Bilateral Meeting', 'Meal', 'Phototaking'] as EventType[]).map(
-                      (type) => (
-                        <Chip
-                          key={type}
-                          label={type}
-                          onClick={() => setFilterSessionType(type)}
-                          sx={{
-                            bgcolor:
-                              filterSessionType === type
-                                ? SESSION_TYPE_COLORS[type]
-                                : 'transparent',
-                            color: filterSessionType === type ? 'white' : 'text.primary',
-                            borderColor: SESSION_TYPE_COLORS[type],
-                          }}
-                          variant={filterSessionType === type ? 'filled' : 'outlined'}
-                        />
-                      )
-                    )}
-                  </Stack>
+        {topTab === 'templates' && (
+          <DialogContent sx={{ minHeight: 500 }}>
+            {/* Session Type Filter */}
+            <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: '#f5f5f5' }}>
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                <FilterList color="action" />
+                <Typography variant="subtitle2">Filter:</Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <Chip
+                    label="All"
+                    onClick={() => setFilterSessionType(null)}
+                    color={filterSessionType === null ? 'primary' : 'default'}
+                    variant={filterSessionType === null ? 'filled' : 'outlined'}
+                  />
+                  {(['Executive meeting', 'Bilateral Meeting', 'Meal', 'Phototaking'] as EventType[]).map(
+                    (type) => (
+                      <Chip
+                        key={type}
+                        label={type}
+                        onClick={() => setFilterSessionType(type)}
+                        sx={{
+                          bgcolor: filterSessionType === type ? SESSION_TYPE_COLORS_V2[type] : 'transparent',
+                          color: filterSessionType === type ? 'white' : 'text.primary',
+                          borderColor: SESSION_TYPE_COLORS_V2[type],
+                        }}
+                        variant={filterSessionType === type ? 'filled' : 'outlined'}
+                      />
+                    )
+                  )}
                 </Stack>
+              </Stack>
+            </Paper>
+
+            {/* Template Grid */}
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Click a template to customize and create tables
+            </Typography>
+            
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                gap: 2,
+                mt: 2,
+              }}
+            >
+              {/* Create New Card */}
+              <Paper
+                elevation={1}
+                sx={{
+                  p: 2,
+                  cursor: 'pointer',
+                  border: '2px dashed #ccc',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 200,
+                  transition: 'all 0.2s',
+                  '&:hover': { borderColor: '#1976d2', bgcolor: '#e3f2fd' },
+                }}
+                onClick={handleCreateNewTemplate}
+              >
+                <Add sx={{ fontSize: 40, color: '#1976d2', mb: 1 }} />
+                <Typography variant="subtitle2" color="primary">
+                  Create Template
+                </Typography>
               </Paper>
 
-              {/* Template Grid */}
-              <TemplateGrid
-                templates={filteredTemplates}
-                selectedTemplateId={selectedTemplate?.id}
-                onSelect={handleTemplateSelect}
-                onEdit={handleTemplateEdit}
-                onDuplicate={handleTemplateDuplicate}
-                onDelete={handleTemplateDelete}
-                onCreateNew={handleCreateNewTemplate}
-                showCreateCard={true}
-                emptyMessage="No templates found for this session type"
-              />
+              {/* Template Cards */}
+              {filteredTemplates.map((template) => (
+                <TemplateCard
+                  key={template.id}
+                  template={template}
+                  onSelect={() => handleTemplateSelect(template)}
+                  onEdit={() => handleTemplateEdit(template)}
+                  onDuplicate={() => handleTemplateDuplicate(template)}
+                  onDelete={() => handleTemplateDelete(template)}
+                />
+              ))}
 
-              {/* Selected Template Configuration */}
-              {selectedTemplate && scaledTemplateResult && (
-                <>
-                  <Divider sx={{ my: 3 }} />
-                  <Paper elevation={0} sx={{ p: 3, bgcolor: '#e3f2fd' }}>
-                    <Typography variant="h6" gutterBottom>
-                      Configure: {selectedTemplate.name}
-                    </Typography>
+              {filteredTemplates.length === 0 && (
+                <Paper sx={{ p: 3, gridColumn: 'span 2', textAlign: 'center' }}>
+                  <Typography color="text.secondary">
+                    No templates found. Create one to get started!
+                  </Typography>
+                </Paper>
+              )}
+            </Box>
+          </DialogContent>
+        )}
 
-                    <Stack direction="row" spacing={4} alignItems="flex-start">
-                      {/* Preview */}
-                      <Box
-                        sx={{
-                          bgcolor: 'white',
-                          p: 2,
-                          borderRadius: 2,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <TablePreview
-                          type={scaledTemplateResult.type}
-                          roundSeats={scaledTemplateResult.roundSeats}
-                          rectangleSeats={scaledTemplateResult.rectangleSeats}
-                          seatOrdering={scaledTemplateResult.seatOrdering}
-                          seatModes={scaledTemplateResult.seatModes}
-                          size="medium"
-                          showLabels={true}
-                        />
-                      </Box>
+        {/* ================================================================== */}
+        {/* CUSTOM TABLE TAB */}
+        {/* ================================================================== */}
+        {topTab === 'custom' && (
+          <>
+            <Tabs
+              value={customTab}
+              onChange={(_, v) => setCustomTab(v)}
+              sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
+            >
+              <Tab label="Configuration" value="config" />
+              <Tab label="Seat Order" value="ordering" />
+              <Tab label="Seat Modes" value="modes" />
+            </Tabs>
 
-                      {/* Configuration */}
-                      <Stack spacing={2} sx={{ flex: 1 }}>
-                        <Box>
-                          <Typography gutterBottom>
-                            Number of Seats: {templateSeatCount}
-                          </Typography>
-                          <Slider
-                            value={templateSeatCount}
-                            onChange={(_, val) => setTemplateSeatCount(val as number)}
-                            min={selectedTemplate.minSeats}
-                            max={selectedTemplate.maxSeats}
-                            marks={[
-                              { value: selectedTemplate.minSeats, label: `${selectedTemplate.minSeats}` },
-                              { value: selectedTemplate.maxSeats, label: `${selectedTemplate.maxSeats}` },
-                            ]}
-                            valueLabelDisplay="auto"
-                          />
-                        </Box>
+            <DialogContent>
+              {/* Configuration Tab */}
+              {customTab === 'config' && (
+                <Stack spacing={3}>
+                  {/* Table Type */}
+                  <Box>
+                    <Typography variant="subtitle2" gutterBottom>Table Shape</Typography>
+                    <ToggleButtonGroup
+                      value={customTableType}
+                      exclusive
+                      onChange={(_, v) => v && setCustomTableType(v)}
+                      size="large"
+                    >
+                      <ToggleButton value="round" sx={{ px: 4 }}>
+                        <Stack alignItems="center" spacing={0.5}>
+                          <Circle />
+                          <Typography variant="caption">Round</Typography>
+                        </Stack>
+                      </ToggleButton>
+                      <ToggleButton value="rectangle" sx={{ px: 4 }}>
+                        <Stack alignItems="center" spacing={0.5}>
+                          <Rectangle />
+                          <Typography variant="caption">Rectangle</Typography>
+                        </Stack>
+                      </ToggleButton>
+                    </ToggleButtonGroup>
+                  </Box>
 
+                  <Divider />
+
+                  {/* Round Configuration */}
+                  {customTableType === 'round' && (
+                    <TextField
+                      label="Number of Seats"
+                      type="number"
+                      value={roundSeats}
+                      onChange={(e) => setRoundSeats(Math.max(2, parseInt(e.target.value) || 2))}
+                      inputProps={{ min: 2, max: 30 }}
+                      sx={{ width: 150 }}
+                    />
+                  )}
+
+                  {/* Rectangle Configuration */}
+                  {customTableType === 'rectangle' && (
+                    <Stack spacing={2}>
+                      <Stack direction="row" spacing={2}>
                         <TextField
-                          label="Number of Tables"
+                          label="Top Seats"
                           type="number"
-                          value={templateQuantity}
-                          onChange={(e) =>
-                            setTemplateQuantity(Math.max(1, parseInt(e.target.value) || 1))
-                          }
-                          inputProps={{ min: 1, max: 50 }}
+                          value={rectangleSeats.top}
+                          onChange={(e) => setRectangleSeats(prev => ({
+                            ...prev,
+                            top: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          inputProps={{ min: 0, max: 15 }}
                           size="small"
-                          sx={{ width: 150 }}
                         />
-
                         <TextField
-                          label="Table Label (optional)"
-                          value={templateLabel}
-                          onChange={(e) => setTemplateLabel(e.target.value)}
-                          placeholder="e.g., VIP Table"
+                          label="Bottom Seats"
+                          type="number"
+                          value={rectangleSeats.bottom}
+                          onChange={(e) => setRectangleSeats(prev => ({
+                            ...prev,
+                            bottom: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          inputProps={{ min: 0, max: 15 }}
                           size="small"
-                          sx={{ width: 250 }}
                         />
-
-                        <Typography variant="body2" color="text.secondary">
-                          {selectedTemplate.orderingDirection}
-                        </Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={2}>
+                        <TextField
+                          label="Left Seats"
+                          type="number"
+                          value={rectangleSeats.left}
+                          onChange={(e) => setRectangleSeats(prev => ({
+                            ...prev,
+                            left: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          inputProps={{ min: 0, max: 15 }}
+                          size="small"
+                        />
+                        <TextField
+                          label="Right Seats"
+                          type="number"
+                          value={rectangleSeats.right}
+                          onChange={(e) => setRectangleSeats(prev => ({
+                            ...prev,
+                            right: Math.max(0, parseInt(e.target.value) || 0)
+                          }))}
+                          inputProps={{ min: 0, max: 15 }}
+                          size="small"
+                        />
                       </Stack>
                     </Stack>
+                  )}
+
+                  <Divider />
+
+                  {/* Quantity */}
+                  <TextField
+                    label="Number of Tables"
+                    type="number"
+                    value={customQuantity}
+                    onChange={(e) => setCustomQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                    inputProps={{ min: 1, max: 20 }}
+                    sx={{ width: 150 }}
+                  />
+
+                  {/* Preview */}
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: '#fafafa', borderRadius: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Preview ({customSeatCount} seats)
+                    </Typography>
+                    <ScrollablePreviewContainer maxHeight={280}>
+                      <TablePreview
+                        type={customTableType}
+                        roundSeats={customTableType === 'round' ? roundSeats : undefined}
+                        rectangleSeats={customTableType === 'rectangle' ? rectangleSeats : undefined}
+                        seatOrdering={seatOrdering.length === customSeatCount ? seatOrdering : defaultOrdering}
+                        seatModes={seatModes.length === customSeatCount ? seatModes : defaultModes}
+                        size="medium"
+                        showLabels
+                      />
+                    </ScrollablePreviewContainer>
                   </Paper>
-                </>
+                </Stack>
+              )}
+
+              {/* Ordering Tab */}
+              {customTab === 'ordering' && (
+                <SeatOrderingPanel
+                  tableType={customTableType}
+                  roundSeats={customTableType === 'round' ? roundSeats : undefined}
+                  rectangleSeats={customTableType === 'rectangle' ? rectangleSeats : undefined}
+                  seatModes={seatModes.length === customSeatCount ? seatModes : defaultModes}
+                  onOrderingChange={handleOrderingChange}
+                  previewSize="large"
+                  maxPreviewHeight={380}
+                  showModeToggle={true}
+                  resetKey={resetKey}
+                />
+              )}
+
+              {/* Modes Tab */}
+              {customTab === 'modes' && (
+                <SeatModePanel
+                  tableType={customTableType}
+                  roundSeats={customTableType === 'round' ? roundSeats : undefined}
+                  rectangleSeats={customTableType === 'rectangle' ? rectangleSeats : undefined}
+                  seatOrdering={seatOrdering.length === customSeatCount ? seatOrdering : defaultOrdering}
+                  seatModes={seatModes.length === customSeatCount ? seatModes : defaultModes}
+                  onModesChange={handleModesChange}
+                  previewSize="large"
+                  maxPreviewHeight={380}
+                  showResetButton={true}
+                  resetKey={resetKey}
+                />
               )}
             </DialogContent>
 
@@ -438,227 +721,25 @@ export default function AddTableModal({
               <Button onClick={handleClose}>Cancel</Button>
               <Button
                 variant="contained"
-                onClick={handleConfirmTemplate}
-                disabled={!selectedTemplate}
+                onClick={handleConfirmCustom}
+                disabled={customSeatCount < 2}
               >
-                Add {templateQuantity > 1 ? `${templateQuantity} Tables` : 'Table'}
+                Add {customQuantity > 1 ? `${customQuantity} Tables` : 'Table'}
               </Button>
             </DialogActions>
           </>
         )}
 
-        {/* ================================================================== */}
-        {/* CUSTOM TAB */}
-        {/* ================================================================== */}
-        {topTab === 'custom' && (
-          <>
-            {/* Sub-tabs for custom configuration */}
-            <Tabs
-              value={customTab}
-              onChange={(_, v) => setCustomTab(v)}
-              sx={{ borderBottom: 1, borderColor: 'divider', px: 3, bgcolor: '#fafafa' }}
-            >
-              <Tab label="Table Configuration" value="config" />
-              <Tab label="Seat Ordering" value="ordering" />
-              <Tab label="Seat Modes" value="modes" />
-            </Tabs>
-
-            <DialogContent sx={{ minHeight: 500 }}>
-              {/* CONFIG TAB */}
-              {customTab === 'config' && (
-                <Stack spacing={3} sx={{ mt: 2 }}>
-                  <FormControl fullWidth>
-                    <InputLabel>Table Type</InputLabel>
-                    <Select
-                      value={tableConfig.type}
-                      label="Table Type"
-                      onChange={(e) =>
-                        setTableConfig((prev) => ({
-                          ...prev,
-                          type: e.target.value as 'round' | 'rectangle',
-                        }))
-                      }
-                    >
-                      <MenuItem value="round">Round Table</MenuItem>
-                      <MenuItem value="rectangle">Rectangle Table</MenuItem>
-                    </Select>
-                  </FormControl>
-
-                  {tableConfig.type === 'round' ? (
-                    <Box>
-                      <Typography gutterBottom>
-                        Number of Seats: {tableConfig.roundSeats}
-                      </Typography>
-                      <Slider
-                        value={tableConfig.roundSeats || 8}
-                        onChange={(_, val) =>
-                          setTableConfig((prev) => ({ ...prev, roundSeats: val as number }))
-                        }
-                        min={4}
-                        max={20}
-                        marks
-                        valueLabelDisplay="auto"
-                      />
-                    </Box>
-                  ) : (
-                    <Stack direction="row" spacing={2}>
-                      <TextField
-                        label="Top"
-                        type="number"
-                        value={tableConfig.rectangleSeats?.top || 0}
-                        onChange={(e) =>
-                          setTableConfig((prev) => ({
-                            ...prev,
-                            rectangleSeats: {
-                              ...prev.rectangleSeats!,
-                              top: Math.max(0, parseInt(e.target.value) || 0),
-                            },
-                          }))
-                        }
-                        inputProps={{ min: 0, max: 10 }}
-                      />
-                      <TextField
-                        label="Bottom"
-                        type="number"
-                        value={tableConfig.rectangleSeats?.bottom || 0}
-                        onChange={(e) =>
-                          setTableConfig((prev) => ({
-                            ...prev,
-                            rectangleSeats: {
-                              ...prev.rectangleSeats!,
-                              bottom: Math.max(0, parseInt(e.target.value) || 0),
-                            },
-                          }))
-                        }
-                        inputProps={{ min: 0, max: 10 }}
-                      />
-                      <TextField
-                        label="Left"
-                        type="number"
-                        value={tableConfig.rectangleSeats?.left || 0}
-                        onChange={(e) =>
-                          setTableConfig((prev) => ({
-                            ...prev,
-                            rectangleSeats: {
-                              ...prev.rectangleSeats!,
-                              left: Math.max(0, parseInt(e.target.value) || 0),
-                            },
-                          }))
-                        }
-                        inputProps={{ min: 0, max: 5 }}
-                      />
-                      <TextField
-                        label="Right"
-                        type="number"
-                        value={tableConfig.rectangleSeats?.right || 0}
-                        onChange={(e) =>
-                          setTableConfig((prev) => ({
-                            ...prev,
-                            rectangleSeats: {
-                              ...prev.rectangleSeats!,
-                              right: Math.max(0, parseInt(e.target.value) || 0),
-                            },
-                          }))
-                        }
-                        inputProps={{ min: 0, max: 5 }}
-                      />
-                    </Stack>
-                  )}
-
-                  <Divider />
-
-                  <Stack direction="row" spacing={2}>
-                    <TextField
-                      label="Number of Tables"
-                      type="number"
-                      value={tableConfig.quantity}
-                      onChange={(e) =>
-                        setTableConfig((prev) => ({
-                          ...prev,
-                          quantity: Math.max(1, parseInt(e.target.value) || 1),
-                        }))
-                      }
-                      inputProps={{ min: 1, max: 50 }}
-                      sx={{ width: 150 }}
-                    />
-                    <TextField
-                      label="Table Label (optional)"
-                      value={tableConfig.label}
-                      onChange={(e) =>
-                        setTableConfig((prev) => ({ ...prev, label: e.target.value }))
-                      }
-                      placeholder="e.g., VIP Table"
-                      sx={{ flex: 1 }}
-                    />
-                  </Stack>
-
-                  {/* Preview */}
-                  <Paper elevation={0} sx={{ p: 2, bgcolor: '#fafafa' }}>
-                    <Typography variant="subtitle2" gutterBottom>
-                      Preview ({totalSeats} seats)
-                    </Typography>
-                    <ScrollablePreviewContainer maxHeight={300} minHeight={200}>
-                      <TablePreview
-                        type={tableConfig.type}
-                        roundSeats={tableConfig.roundSeats}
-                        rectangleSeats={tableConfig.rectangleSeats}
-                        seatOrdering={seatOrdering}
-                        seatModes={seatModes}
-                        size="medium"
-                      />
-                    </ScrollablePreviewContainer>
-                  </Paper>
-                </Stack>
-              )}
-
-              {/* ORDERING TAB - Uses SeatOrderingPanel */}
-              {customTab === 'ordering' && (
-                <Box sx={{ mt: 2 }}>
-                  <SeatOrderingPanel
-                    tableType={tableConfig.type}
-                    roundSeats={tableConfig.roundSeats}
-                    rectangleSeats={tableConfig.rectangleSeats}
-                    seatModes={seatModes}
-                    onOrderingChange={handleOrderingChange}
-                    previewSize="large"
-                    maxPreviewHeight={400}
-                    showModeToggle={true}
-                    resetKey={resetKey}
-                  />
-                </Box>
-              )}
-
-              {/* MODES TAB - Uses SeatModePanel */}
-              {customTab === 'modes' && (
-                <Box sx={{ mt: 2 }}>
-                  <SeatModePanel
-                    tableType={tableConfig.type}
-                    roundSeats={tableConfig.roundSeats}
-                    rectangleSeats={tableConfig.rectangleSeats}
-                    seatOrdering={seatOrdering}
-                    seatModes={seatModes}
-                    onModesChange={handleModesChange}
-                    previewSize="large"
-                    maxPreviewHeight={400}
-                    showResetButton={true}
-                    resetKey={resetKey}
-                  />
-                </Box>
-              )}
-            </DialogContent>
-
-            <DialogActions sx={{ px: 3, py: 2 }}>
-              <Button onClick={handleClose}>Cancel</Button>
-              <Button variant="contained" onClick={handleConfirmCustom}>
-                Add {tableConfig.quantity > 1 ? `${tableConfig.quantity} Tables` : 'Table'}
-              </Button>
-            </DialogActions>
-          </>
+        {/* Templates tab has no footer actions - clicking template opens customization modal */}
+        {topTab === 'templates' && (
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button onClick={handleClose}>Cancel</Button>
+          </DialogActions>
         )}
       </Dialog>
 
       {/* Template CRUD Modal */}
-      <CreateEditTemplateModal
+      <CreateEditTemplateModalV2
         open={templateModalOpen}
         onClose={() => {
           setTemplateModalOpen(false);
@@ -667,6 +748,17 @@ export default function AddTableModal({
         onSave={handleTemplateSave}
         editTemplate={editingTemplate}
         initialSessionType={filterSessionType}
+      />
+
+      {/* Template Customization Modal */}
+      <TemplateCustomizationModal
+        open={customizationModalOpen}
+        onClose={() => {
+          setCustomizationModalOpen(false);
+          setSelectedTemplateForCustomization(null);
+        }}
+        onConfirm={handleCustomizationConfirm}
+        template={selectedTemplateForCustomization}
       />
     </>
   );
