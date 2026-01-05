@@ -2,9 +2,10 @@
 // Helper functions for generating table SVG elements in PlaygroundCanvas
 // Uses centralized color configuration from colorConfig.ts
 //
-// IMPORTANT: This file contains the RADIAL CONFIGURATION for guest text boxes
-// around BOTH round AND rectangle tables. This creates an "oval" formation
-// instead of a grid-like layout for rectangles.
+// FIXED: Uniform circular placement for guest boxes
+// - All boxes placed at same base distance (no vertical ellipse)
+// - Smart collision resolution with tangential sliding
+// - Compact layout with minimal connector lengths
 
 import * as d3 from 'd3';
 import { Table } from '@/types/Table';
@@ -41,7 +42,8 @@ export interface GuestBoxData {
   y: number;   // Current Y position (relative to table center)
   relX: number;  // Seat X relative to table center
   relY: number;  // Seat Y relative to table center
-  minRadialDist: number;
+  angle: number; // Angle from table center (radians)
+  baseDist: number; // Base distance from seat (uniform for all)
   mealPlanText: string;
   hasStars: boolean;
   hasMealPlan: boolean;
@@ -78,25 +80,45 @@ export function rectsOverlap(a: BoxRect, b: BoxRect, padding = 6): boolean {
   );
 }
 
+/**
+ * Calculate overlap depth between two rectangles
+ * Returns penetration depth on each axis
+ */
+function getOverlapDepth(a: BoxRect, b: BoxRect, padding = 6): { dx: number; dy: number } | null {
+  const overlapX = Math.min(a.x2 + padding, b.x2 + padding) - Math.max(a.x1 - padding, b.x1 - padding);
+  const overlapY = Math.min(a.y2 + padding, b.y2 + padding) - Math.max(a.y1 - padding, b.y1 - padding);
+
+  if (overlapX <= 0 || overlapY <= 0) {
+    return null;
+  }
+
+  // Return the overlap depths
+  return { dx: overlapX, dy: overlapY };
+}
+
+/**
+ * Calculate distance between two points
+ */
+function distance(x1: number, y1: number, x2: number, y2: number): number {
+  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+}
+
 // ============================================================================
 // RADIAL DIRECTION CALCULATION
 // ============================================================================
 
 /**
  * Calculate the radial outward direction vector from table center to seat
- * 
- * IMPORTANT: This uses RADIAL vectors for BOTH round AND rectangle tables.
- * This ensures rectangular tables get an "oval" formation of guests
- * instead of a grid-like layout.
  */
 export function calculateRadialNormal(
   relX: number,
   relY: number
-): { nx: number; ny: number } {
+): { nx: number; ny: number; angle: number } {
   const len = Math.sqrt(relX * relX + relY * relY) || 1;
   const nx = relX / len;
   const ny = relY / len;
-  return { nx, ny };
+  const angle = Math.atan2(relY, relX);
+  return { nx, ny, angle };
 }
 
 // ============================================================================
@@ -179,10 +201,19 @@ export function getGuestBoxColors(
 // ============================================================================
 
 /**
- * Generate initial guest box data with RADIAL positioning
- * 
- * This creates an oval/radial formation around the table for ALL table types.
- * Rectangle tables will have guests positioned radially outward from center.
+ * Calculate the minimum clearance distance for a box at any angle
+ * Uses the DIAGONAL of the box to ensure clearance at all angles
+ * This creates UNIFORM circular placement
+ */
+function getUniformRadialSize(width: number, height: number): number {
+  // Use the larger dimension to ensure boxes don't clip the seat
+  // at any angle. This creates a circular arrangement.
+  return Math.max(width, height) / 2;
+}
+
+/**
+ * Generate initial guest box data with UNIFORM CIRCULAR placement
+ * All boxes start at the same distance from their seats
  */
 export function generateGuestBoxData(
   tableDatum: Table,
@@ -192,29 +223,23 @@ export function generateGuestBoxData(
 ): GuestBoxData[] {
   const boxData: GuestBoxData[] = [];
 
+  // First pass: calculate all box dimensions to find the maximum
+  const boxDimensions: { width: number; height: number; seat: Seat; guest: Guest }[] = [];
+  
   (tableDatum.seats || []).forEach((s) => {
     const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
     if (!guest) return;
 
-    const relX = s.x - tableDatum.x;
-    const relY = s.y - tableDatum.y;
-
-    // RADIAL direction vector (same for round and rectangle)
-    const { nx, ny } = calculateRadialNormal(relX, relY);
-
-    // Build text content
     const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
     const stars = getRankStars(guest.ranking);
     const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
 
-    // Get meal plan for display
     let mealPlanText = '';
     if (selectedMealPlanIndex !== null) {
       const mealPlan = guest.mealPlans?.[selectedMealPlanIndex];
       mealPlanText = mealPlan && mealPlan.trim() ? mealPlan : 'None';
     }
 
-    // Calculate box dimensions with proper spacing for all elements
     const charPx = 7;
     const nameWidth = name.length * charPx;
     const starsWidth = stars.length * 10;
@@ -223,7 +248,6 @@ export function generateGuestBoxData(
     const estTextWidth = Math.max(nameWidth, starsWidth, line2Width, mealPlanWidth);
     const width = Math.min(Math.max(80, estTextWidth + 24), 300);
 
-    // Height calculation
     const hasStars = stars.length > 0;
     const hasMealPlan = selectedMealPlanIndex !== null;
     const starsHeight = hasStars ? 14 : 0;
@@ -232,19 +256,42 @@ export function generateGuestBoxData(
     const padding = 12;
     const height = padding + starsHeight + contentHeight + mealPlanHeight;
 
+    boxDimensions.push({ width, height, seat: s, guest });
+  });
+
+  // Find the maximum radial size needed for uniform placement
+  let maxRadialSize = 0;
+  boxDimensions.forEach(({ width, height }) => {
+    const radialSize = getUniformRadialSize(width, height);
+    if (radialSize > maxRadialSize) {
+      maxRadialSize = radialSize;
+    }
+  });
+
+  // Second pass: create box data with uniform distance
+  boxDimensions.forEach(({ width, height, seat: s, guest }) => {
+    const relX = s.x - tableDatum.x;
+    const relY = s.y - tableDatum.y;
+    const { nx, ny, angle } = calculateRadialNormal(relX, relY);
+
+    const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+    const stars = getRankStars(guest.ranking);
+    const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
+
+    let mealPlanText = '';
+    if (selectedMealPlanIndex !== null) {
+      const mealPlan = guest.mealPlans?.[selectedMealPlanIndex];
+      mealPlanText = mealPlan && mealPlan.trim() ? mealPlan : 'None';
+    }
+
+    const hasStars = stars.length > 0;
+    const hasMealPlan = selectedMealPlanIndex !== null;
+
     const seatR = s.radius ?? 8;
 
-    // Orientation-aware radial sizing
-    const verticalBias = Math.abs(ny);
-    const horizontalBias = Math.abs(nx);
-    const radialSize = (verticalBias * height) + (horizontalBias * width);
-
-    let dist = seatR + connectorGap + radialSize / 2;
-
-    // Pull top/bottom boxes slightly closer
-    if (Math.abs(ny) > 0.85) {
-      dist *= 0.75;
-    }
+    // UNIFORM distance: use the same radial size for ALL boxes
+    // This creates a circular arrangement instead of an ellipse
+    const baseDist = seatR + connectorGap + maxRadialSize;
 
     boxData.push({
       s,
@@ -253,11 +300,12 @@ export function generateGuestBoxData(
       ny,
       width,
       height,
-      x: relX + nx * dist,
-      y: relY + ny * dist,
+      x: relX + nx * baseDist,
+      y: relY + ny * baseDist,
       relX,
       relY,
-      minRadialDist: dist,
+      angle,
+      baseDist,
       mealPlanText,
       hasStars,
       hasMealPlan,
@@ -271,40 +319,165 @@ export function generateGuestBoxData(
 }
 
 // ============================================================================
-// RADIAL RELAXATION ALGORITHM
+// SMART COLLISION RESOLUTION
 // ============================================================================
 
 /**
- * Perform radial outward relaxation to prevent guest box overlap
+ * Try to resolve overlap by sliding boxes tangentially (around the circle)
+ * Returns true if overlap was resolved
+ */
+function tryTangentialSlide(
+  boxA: GuestBoxData,
+  boxB: GuestBoxData,
+  padding: number
+): boolean {
+  const aRect = boxRectFromCenter(boxA);
+  const bRect = boxRectFromCenter(boxB);
+  
+  const overlap = getOverlapDepth(aRect, bRect, padding);
+  if (!overlap) return true; // No overlap
+  
+  // Calculate tangent directions (perpendicular to radial)
+  const tangentAx = -boxA.ny;
+  const tangentAy = boxA.nx;
+  const tangentBx = -boxB.ny;
+  const tangentBy = boxB.nx;
+  
+  // Determine which direction to slide based on relative angles
+  const angleDiff = boxB.angle - boxA.angle;
+  const normalizedAngleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+  
+  // Slide amount based on overlap (use smaller axis for efficiency)
+  const slideAmount = Math.min(overlap.dx, overlap.dy) / 2 + 1;
+  
+  if (normalizedAngleDiff > 0) {
+    // B is counterclockwise from A: slide A clockwise, B counterclockwise
+    boxA.x -= tangentAx * slideAmount;
+    boxA.y -= tangentAy * slideAmount;
+    boxB.x += tangentBx * slideAmount;
+    boxB.y += tangentBy * slideAmount;
+  } else {
+    // B is clockwise from A: slide A counterclockwise, B clockwise
+    boxA.x += tangentAx * slideAmount;
+    boxA.y += tangentAy * slideAmount;
+    boxB.x -= tangentBx * slideAmount;
+    boxB.y -= tangentBy * slideAmount;
+  }
+  
+  // Update angles after sliding
+  boxA.angle = Math.atan2(boxA.y - boxA.relY, boxA.x - boxA.relX);
+  boxB.angle = Math.atan2(boxB.y - boxB.relY, boxB.x - boxB.relX);
+  
+  // Check if overlap is resolved
+  const newARect = boxRectFromCenter(boxA);
+  const newBRect = boxRectFromCenter(boxB);
+  return !rectsOverlap(newARect, newBRect, padding);
+}
+
+/**
+ * Resolve overlap by pushing ONLY the outer box further out
+ * (The box that's already further from center moves more)
+ */
+function radialPushOuter(
+  boxA: GuestBoxData,
+  boxB: GuestBoxData,
+  padding: number
+): void {
+  const aRect = boxRectFromCenter(boxA);
+  const bRect = boxRectFromCenter(boxB);
+  
+  const overlap = getOverlapDepth(aRect, bRect, padding);
+  if (!overlap) return;
+  
+  // Calculate current distances from table center (origin)
+  const distA = Math.sqrt(boxA.x * boxA.x + boxA.y * boxA.y);
+  const distB = Math.sqrt(boxB.x * boxB.x + boxB.y * boxB.y);
+  
+  // Push the outer box further out (preserves compact inner arrangement)
+  // Use the overlap on the axis that requires less movement
+  const pushDist = Math.min(overlap.dx, overlap.dy) + 2;
+  
+  if (distA >= distB) {
+    // A is outer, push A out
+    boxA.x += boxA.nx * pushDist;
+    boxA.y += boxA.ny * pushDist;
+  } else {
+    // B is outer, push B out
+    boxB.x += boxB.nx * pushDist;
+    boxB.y += boxB.ny * pushDist;
+  }
+}
+
+/**
+ * Smart collision resolution algorithm
+ * 1. First tries tangential sliding (preserves compact circular shape)
+ * 2. Falls back to radial push only when necessary
  */
 export function relaxGuestBoxPositions(
   boxData: GuestBoxData[],
-  maxIterations = 150,
-  step = 2,
+  maxIterations = 100,
   padding = 6
 ): void {
+  if (boxData.length <= 1) return;
+
+  // Phase 1: Tangential sliding to resolve most overlaps
   for (let iter = 0; iter < maxIterations; iter++) {
-    let moved = false;
+    let hasOverlap = false;
 
     for (let i = 0; i < boxData.length; i++) {
-      const a = boxData[i];
-      const aRect = boxRectFromCenter(a);
-
       for (let j = i + 1; j < boxData.length; j++) {
-        const b = boxData[j];
-        const bRect = boxRectFromCenter(b);
-
+        const boxA = boxData[i];
+        const boxB = boxData[j];
+        
+        const aRect = boxRectFromCenter(boxA);
+        const bRect = boxRectFromCenter(boxB);
+        
         if (rectsOverlap(aRect, bRect, padding)) {
-          a.x += a.nx * step;
-          a.y += a.ny * step;
-          b.x += b.nx * step;
-          b.y += b.ny * step;
-          moved = true;
+          hasOverlap = true;
+          
+          // Try tangential sliding first
+          const resolved = tryTangentialSlide(boxA, boxB, padding);
+          
+          // If tangential didn't fully resolve, apply small radial push
+          if (!resolved) {
+            radialPushOuter(boxA, boxB, padding);
+          }
         }
       }
     }
 
-    if (!moved) break;
+    if (!hasOverlap) break;
+  }
+
+  // Phase 2: Final cleanup - resolve any remaining overlaps with direct radial push
+  for (let iter = 0; iter < 50; iter++) {
+    let hasOverlap = false;
+
+    for (let i = 0; i < boxData.length; i++) {
+      for (let j = i + 1; j < boxData.length; j++) {
+        const boxA = boxData[i];
+        const boxB = boxData[j];
+        
+        const aRect = boxRectFromCenter(boxA);
+        const bRect = boxRectFromCenter(boxB);
+        
+        if (rectsOverlap(aRect, bRect, padding)) {
+          hasOverlap = true;
+          
+          // Direct radial push both boxes
+          const overlap = getOverlapDepth(aRect, bRect, padding);
+          if (overlap) {
+            const pushDist = Math.min(overlap.dx, overlap.dy) / 2 + 1;
+            boxA.x += boxA.nx * pushDist;
+            boxA.y += boxA.ny * pushDist;
+            boxB.x += boxB.nx * pushDist;
+            boxB.y += boxB.ny * pushDist;
+          }
+        }
+      }
+    }
+
+    if (!hasOverlap) break;
   }
 }
 
@@ -605,9 +778,11 @@ export function renderTableGuestDisplay(
 ): void {
   const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
 
-  // Generate and relax guest box positions
+  // Generate guest box positions with UNIFORM circular placement
   const boxData = generateGuestBoxData(tableDatum, guestLookup, connectorGap, selectedMealPlanIndex);
-  relaxGuestBoxPositions(boxData, 150, 2, 6);
+  
+  // Apply smart collision resolution
+  relaxGuestBoxPositions(boxData, 100, 6);
 
   // Render connectors
   renderConnectors(group, seatsWithGuest, tableDatum, boxData, colorScheme);
@@ -620,16 +795,21 @@ export function renderTableGuestDisplay(
 // EXPORTS SUMMARY
 // ============================================================================
 // 
-// All rendering functions now accept ColorScheme parameter for centralized colors.
+// FIXED: Uniform circular placement (no more vertical ellipse)
+//
+// Key changes:
+// 1. getUniformRadialSize() - Uses max(width,height) for all boxes
+// 2. generateGuestBoxData() - Places all boxes at same base distance
+// 3. relaxGuestBoxPositions() - Smart collision with tangential sliding
 //
 // Geometry:
 //   - boxRectFromCenter(box) - Convert center coords to bounding rect
 //   - rectsOverlap(a, b, padding) - Check rectangle overlap
-//   - calculateRadialNormal(relX, relY) - RADIAL direction
+//   - calculateRadialNormal(relX, relY) - RADIAL direction with angle
 //
 // Guest Box Data:
-//   - generateGuestBoxData(...) - Create initial RADIAL box positions
-//   - relaxGuestBoxPositions(boxData, ...) - Prevent overlap via radial push
+//   - generateGuestBoxData(...) - Create UNIFORM circular box positions
+//   - relaxGuestBoxPositions(...) - Smart collision resolution
 //
 // Seat Appearance:
 //   - getSeatFillColor(seat, colorScheme) - Color based on state/mode

@@ -2,6 +2,8 @@ import pptxgen from "pptxgenjs";
 import { useSeatStore } from "@/store/seatStore";
 import { CHUNK_WIDTH, CHUNK_HEIGHT } from "@/types/Chunk";
 
+// --- HELPERS ---
+
 // Helper to convert RGB string to Hex
 const rgbToHex = (color: string) => {
   if (!color || color === "none" || color === "transparent") return null;
@@ -45,8 +47,9 @@ const getAccumulatedTransform = (element: Element, stopAtClass: string): { tx: n
   return { tx, ty };
 };
 
-// Updated signature to match the call in page.tsx
-export const exportToPPTX = async (tables: any[]) => {
+// --- MAIN EXPORT FUNCTION ---
+
+export const exportToPPTX = async () => {
   const pptx = new pptxgen();
   
   // Configure Slide Layout (16:9 is default, approx 10 x 5.625 inches)
@@ -55,7 +58,6 @@ export const exportToPPTX = async (tables: any[]) => {
   const SLIDE_HEIGHT_IN = 5.625;
 
   // Calculate global scale to fit one Chunk (2000x1200) into the slide
-  // We use the smaller scale factor to ensure it fits completely
   const scaleX = SLIDE_WIDTH_IN / CHUNK_WIDTH;
   const scaleY = SLIDE_HEIGHT_IN / CHUNK_HEIGHT;
   const scale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
@@ -66,8 +68,7 @@ export const exportToPPTX = async (tables: any[]) => {
   const marginX = (SLIDE_WIDTH_IN - contentW) / 2;
   const marginY = (SLIDE_HEIGHT_IN - contentH) / 2;
 
-  // Access the DOM SVG directly to read computed styles and transforms
-  // We target the svg inside the #playground-canvas container
+  // Access the DOM SVG directly
   const svg = document.querySelector("#playground-canvas svg") as SVGSVGElement;
   if (!svg) {
     console.error("SVG element not found in #playground-canvas");
@@ -75,10 +76,10 @@ export const exportToPPTX = async (tables: any[]) => {
     return;
   }
 
-  // We get the chunks from the store because the requirement is "Each chunk should be a slide"
+  // Get store data
   const store = useSeatStore.getState();
   const allChunks = store.chunks;
-  const allTables = store.tables; // We use the store's full table list for data lookup
+  const allTables = store.tables; 
 
   // Identify which chunks actually have tables
   const chunkIdsToExport = Object.values(allChunks)
@@ -91,11 +92,9 @@ export const exportToPPTX = async (tables: any[]) => {
   }
 
   // Map Table IDs to their DOM elements for style extraction
-  // The PlaygroundCanvas renders tables with class .table-group
   const tableGroups = Array.from(svg.querySelectorAll(".table-group"));
   const tableDomMap = new Map<string, Element>();
   tableGroups.forEach((group) => {
-    // D3 stores data on the DOM element in __data__
     const data = (group as any).__data__;
     if (data && data.id) {
       tableDomMap.set(data.id, group);
@@ -109,7 +108,7 @@ export const exportToPPTX = async (tables: any[]) => {
     const slide = pptx.addSlide();
     
     // Add a discreet label for the chunk
-    slide.addText(`Chunk R${chunk.row}C${chunk.col}`, {
+    slide.addText(`Chunk R${chunk.row + 1}C${chunk.col + 1}`, {
       x: 0.2,
       y: 0.1,
       w: 3,
@@ -150,8 +149,6 @@ export const exportToPPTX = async (tables: any[]) => {
         const strokeHex = rgbToHex(style.stroke);
         const strokeWidthPx = parseFloat(style.strokeWidth) || 0;
         
-        // Convert styles for PPT
-        // We scale the stroke width by our global scale to keep it proportional
         const strokePt = Math.max(0.5, strokeWidthPx * scale * 72); 
 
         // Prepare Fill object
@@ -173,10 +170,10 @@ export const exportToPPTX = async (tables: any[]) => {
         // Skip non-visual or structural elements
         if (["g", "defs", "clippath", "style", "script", "title", "desc"].includes(tag)) return;
 
-        // Get accumulated transform from parent groups (e.g., g.seat-mode-badge, g.guest-box)
+        // Get accumulated transform
         const accumulated = getAccumulatedTransform(child, "table-group");
 
-        // Get Bounding Box (in local coordinate space)
+        // Get Bounding Box
         let bbox: DOMRect;
         try {
           bbox = (child as SVGGraphicsElement).getBBox();
@@ -184,53 +181,39 @@ export const exportToPPTX = async (tables: any[]) => {
           return;
         }
 
-        // Map Coordinates: Local + Accumulated Transform -> Relative to Chunk -> Scaled to Slide
+        // Map Coordinates
         const finalX = (relTx + accumulated.tx + bbox.x) * scale + marginX;
         const finalY = (relTy + accumulated.ty + bbox.y) * scale + marginY;
         const finalW = bbox.width * scale;
         const finalH = bbox.height * scale;
 
-        // --- SHAPE GENERATION ---
+        // --- SHAPE GENERATION (Add directly to slide) ---
 
         if (tag === "circle" || tag === "ellipse") {
-          // Skip circles/ellipses with zero dimensions
           if (finalW < 0.001 || finalH < 0.001) return;
           
           slide.addShape(pptx.ShapeType.ellipse, {
-            x: finalX,
-            y: finalY,
-            w: finalW,
-            h: finalH,
+            x: finalX, y: finalY, w: finalW, h: finalH,
             fill: pptFill,
             line: pptLine,
           });
         } 
         
         else if (tag === "rect") {
-          // Skip rects with zero dimensions
           if (finalW < 0.001 || finalH < 0.001) return;
           
           const rx = parseFloat(child.getAttribute("rx") || "0");
-          const ry = parseFloat(child.getAttribute("ry") || "0");
           const rectWidth = parseFloat(child.getAttribute("width") || "0");
           const rectHeight = parseFloat(child.getAttribute("height") || "0");
           
-          // Calculate proper rectRadius as a proportion
-          // pptxgenjs rectRadius is relative to the shorter side of the rectangle
-          // We need to convert SVG's absolute rx/ry to a proportion
           let rectRadius = 0;
           if (rx > 0 && rectWidth > 0 && rectHeight > 0) {
             const shorterSide = Math.min(rectWidth, rectHeight);
-            // Calculate the proportion, but cap it to prevent oval shapes
-            // SVG rx=8 on a 100px wide box should be subtle, not oval
-            rectRadius = Math.min((rx / shorterSide) * 0.5, 0.1); // Cap at 0.1 for subtle corners
+            rectRadius = Math.min((rx / shorterSide) * 0.5, 0.1);
           }
           
           slide.addShape(rx > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
-            x: finalX,
-            y: finalY,
-            w: finalW,
-            h: finalH,
+            x: finalX, y: finalY, w: finalW, h: finalH,
             fill: pptFill,
             line: pptLine,
             rectRadius: rectRadius,
@@ -238,24 +221,18 @@ export const exportToPPTX = async (tables: any[]) => {
         } 
         
         else if (tag === "line") {
-            // Line needs special handling for direction
-            // Lines can have zero width (vertical) or zero height (horizontal)
             const x1 = parseFloat(child.getAttribute("x1") || "0");
             const y1 = parseFloat(child.getAttribute("y1") || "0");
             const x2 = parseFloat(child.getAttribute("x2") || "0");
             const y2 = parseFloat(child.getAttribute("y2") || "0");
 
-            // Apply accumulated transform to line endpoints
             let sx = (relTx + accumulated.tx + x1) * scale + marginX;
             let sy = (relTy + accumulated.ty + y1) * scale + marginY;
             let ex = (relTx + accumulated.tx + x2) * scale + marginX;
             let ey = (relTy + accumulated.ty + y2) * scale + marginY;
 
-            // Normalize
-            if (sx > ex) {
-                [sx, ex] = [ex, sx];
-                [sy, ey] = [ey, sy];
-            }
+            // Ensure sx < ex for correct width/height calc (Line direction handled by flip)
+            if (sx > ex) { [sx, ex] = [ex, sx]; [sy, ey] = [ey, sy]; }
 
             const lx = sx;
             const ly = Math.min(sy, ey); 
@@ -264,10 +241,7 @@ export const exportToPPTX = async (tables: any[]) => {
             const flipV = sy > ey;
 
             slide.addShape(pptx.ShapeType.line, {
-                x: lx,
-                y: ly,
-                w: lw,
-                h: lh,
+                x: lx, y: ly, w: lw, h: lh,
                 line: pptLine,
                 flipV: flipV
             });
@@ -287,41 +261,30 @@ export const exportToPPTX = async (tables: any[]) => {
           if (anchor === "middle") align = "center";
           if (anchor === "end") align = "right";
 
-          // Use style.fill for text color
           const textColor = fillHex || "000000";
-
-          // --- FIX FOR SQUISHED TEXT ---
-          // 1. Add a width buffer because PPT text rendering differs from SVG.
-          // 2. Adjust X position based on alignment so the text visually stays in place.
-          // 3. Remove default margins (margin: 0) which destroy layout on small text boxes.
-          // 4. Disable wrapping (wrap: false) to match SVG single-line behavior.
-
-          const widthBuffer = finalW * 0.35; // 35% wider to be safe
+          
+          const widthBuffer = finalW * 0.35;
           let adjX = finalX;
           let adjW = finalW + widthBuffer;
 
-          // Shift x to preserve visual center/start point
           if (align === "center") {
             adjX = finalX - (widthBuffer / 2);
           } else if (align === "right") {
             adjX = finalX - widthBuffer;
           }
-          // if left align, expanding width to the right is correct, no x adjustment needed.
 
+          // In v4, we use addText directly
           slide.addText(textContent, {
-            x: adjX,
-            y: finalY,
-            w: adjW,
-            h: finalH,
-            fontSize: pptFontSize,
-            color: textColor,
-            bold: isBold,
-            align: align,
-            valign: "middle", 
-            fill: { type: "none" },
-            line: { type: "none" },
-            margin: 0,   // KEY FIX: No internal padding
-            wrap: false, // KEY FIX: No auto-wrapping
+              x: adjX, y: finalY, w: adjW, h: finalH,
+              fontSize: pptFontSize,
+              color: textColor,
+              bold: isBold,
+              align: align,
+              valign: "middle", 
+              margin: 0, 
+              // Transparent background for text
+              fill: { type: "none" },
+              line: { type: "none" }
           });
         }
       });
