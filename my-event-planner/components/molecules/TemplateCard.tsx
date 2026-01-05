@@ -31,8 +31,13 @@ import {
   Circle,
 } from '@mui/icons-material';
 import { useState } from 'react';
-import { TableTemplate, SESSION_TYPE_COLORS } from '@/types/Template';
-import { scaleTemplate, getTemplateBaseSeatCount } from '@/utils/templateScaler';
+import { 
+  TableTemplateV2, 
+  SESSION_TYPE_COLORS,
+  isCircleConfigV2,
+  getTotalSeatCountV2,
+} from '@/types/TemplateV2';
+import { scaleTemplateV2 } from '@/utils/templateScalerV2';
 import { useColorScheme } from '@/store/colorModeStore';
 import TablePreview from '../atoms/TablePreview';
 
@@ -41,11 +46,11 @@ import TablePreview from '../atoms/TablePreview';
 // ============================================================================
 
 interface TemplateCardProps {
-  template: TableTemplate;
-  onSelect: (template: TableTemplate) => void;
-  onEdit?: (template: TableTemplate) => void;
-  onDuplicate?: (template: TableTemplate) => void;
-  onDelete?: (template: TableTemplate) => void;
+  template: TableTemplateV2;
+  onSelect: (template: TableTemplateV2) => void;
+  onEdit?: (template: TableTemplateV2) => void;
+  onDuplicate?: (template: TableTemplateV2) => void;
+  onDelete?: (template: TableTemplateV2) => void;
   selected?: boolean;
   showActions?: boolean;
 }
@@ -62,8 +67,8 @@ export function TemplateCard({
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const colorScheme = useColorScheme();
 
-  const baseSeatCount = getTemplateBaseSeatCount(template);
-  const scaledResult = scaleTemplate(template, baseSeatCount);
+  const baseSeatCount = getTotalSeatCountV2(template.config);
+  const scaledResult = scaleTemplateV2(template, { targetSeatCount: baseSeatCount });
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     event.stopPropagation();
@@ -124,9 +129,14 @@ export function TemplateCard({
           }}
         >
           <TablePreview
-            type={template.baseConfig.type}
-            roundSeats={template.baseConfig.type === 'round' ? baseSeatCount : undefined}
-            rectangleSeats={template.baseConfig.type === 'rectangle' ? template.baseConfig.baseSeats : undefined}
+            type={isCircleConfigV2(template.config) ? 'round' : 'rectangle'}
+            roundSeats={isCircleConfigV2(template.config) ? baseSeatCount : undefined}
+            rectangleSeats={!isCircleConfigV2(template.config) ? {
+              top: template.config.sides.top.enabled ? template.config.sides.top.seatCount : 0,
+              bottom: template.config.sides.bottom.enabled ? template.config.sides.bottom.seatCount : 0,
+              left: template.config.sides.left.enabled ? template.config.sides.left.seatCount : 0,
+              right: template.config.sides.right.enabled ? template.config.sides.right.seatCount : 0,
+            } : undefined}
             seatOrdering={scaledResult.seatOrdering}
             seatModes={scaledResult.seatModes}
             size="small"
@@ -135,7 +145,7 @@ export function TemplateCard({
           />
 
           {/* Built-in indicator */}
-          {template.isBuiltIn && (
+          {!template.isUserCreated && (
             <Tooltip title="Built-in template">
               <Lock
                 sx={{
@@ -204,11 +214,11 @@ export function TemplateCard({
           <Stack direction="row" spacing={1} mt={1} alignItems="center">
             <TableRestaurant sx={{ fontSize: 14, color: 'text.secondary' }} />
             <Typography variant="caption" color="text.secondary">
-              {template.minSeats}-{template.maxSeats} seats
+              {baseSeatCount} seats
             </Typography>
             <Circle sx={{ fontSize: 4, color: 'text.disabled' }} />
             <Typography variant="caption" color="text.secondary">
-              {template.baseConfig.type}
+              {isCircleConfigV2(template.config) ? 'round' : 'rectangle'}
             </Typography>
           </Stack>
         </CardContent>
@@ -226,7 +236,7 @@ export function TemplateCard({
             open={Boolean(menuAnchor)}
             onClose={handleMenuClose}
           >
-            {!template.isBuiltIn && onEdit && (
+            {template.isUserCreated && onEdit && (
               <MenuItem onClick={handleEdit}>
                 <ListItemIcon>
                   <Edit fontSize="small" />
@@ -242,7 +252,7 @@ export function TemplateCard({
                 <ListItemText>Duplicate</ListItemText>
               </MenuItem>
             )}
-            {!template.isBuiltIn && onDelete && (
+            {template.isUserCreated && onDelete && (
               <MenuItem onClick={handleDelete} sx={{ color: 'error.main' }}>
                 <ListItemIcon>
                   <Delete fontSize="small" color="error" />
@@ -305,12 +315,12 @@ export function CreateTemplateCard({ onClick }: CreateTemplateCardProps) {
 // ============================================================================
 
 interface TemplateGridProps {
-  templates: TableTemplate[];
+  templates: TableTemplateV2[];
   selectedTemplateId?: string | null;
-  onSelect: (template: TableTemplate) => void;
-  onEdit?: (template: TableTemplate) => void;
-  onDuplicate?: (template: TableTemplate) => void;
-  onDelete?: (template: TableTemplate) => void;
+  onSelect: (template: TableTemplateV2) => void;
+  onEdit?: (template: TableTemplateV2) => void;
+  onDuplicate?: (template: TableTemplateV2) => void;
+  onDelete?: (template: TableTemplateV2) => void;
   onCreateNew?: () => void;
   showCreateCard?: boolean;
   emptyMessage?: string;

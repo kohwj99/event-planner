@@ -30,8 +30,8 @@ import {
   HelpOutline,
 } from '@mui/icons-material';
 import { SeatMode } from '@/types/Seat';
-import { Direction, OrderingPattern } from '@/types/Template';
-import { generateOrdering } from '@/utils/templateScaler';
+import { Direction, OrderingPattern } from '@/types/TemplateV2';
+import { generateOrdering } from '@/utils/templateScalerV2';
 import TablePreview from '../atoms/TablePreview';
 import ScrollablePreviewContainer from '../atoms/ScrollablePreviewContainer';
 
@@ -154,11 +154,11 @@ function getPatternDescription(
       return `Simple ${direction} (1, 2, 3, ...)`;
     case 'alternating':
       return direction === 'clockwise'
-        ? `Alternating: Seat 1 → Evens → / Odds ←`
-        : `Alternating: Seat 1 → Evens ← / Odds →`;
+        ? `Alternating: Seat 1 â†’ Evens â†’ / Odds â†`
+        : `Alternating: Seat 1 â†’ Evens â† / Odds â†’`;
     case 'opposite':
       if (tableType === 'round') {
-        return `Opposite: 1↔2 face each other, 3↔4, 5↔6...`;
+        return `Opposite: 1â†”2 face each other, 3â†”4, 5â†”6...`;
       }
       return `Opposite: Seat pairs face across table`;
     default:
@@ -439,8 +439,8 @@ export default function SeatOrderingPanel({
                     onChange={(_, v) => v && setDirection(v)}
                     size="small"
                   >
-                    <ToggleButton value="clockwise">Clockwise ↻</ToggleButton>
-                    <ToggleButton value="counter-clockwise">Counter ↺</ToggleButton>
+                    <ToggleButton value="clockwise">Clockwise â†»</ToggleButton>
+                    <ToggleButton value="counter-clockwise">Counter â†º</ToggleButton>
                   </ToggleButtonGroup>
                 </Stack>
 
@@ -469,7 +469,7 @@ export default function SeatOrderingPanel({
               </Typography>
 
               <Typography variant="caption" color="text.secondary">
-                🎯 Click on a seat in the preview to set Seat #1 position
+                ðŸŽ¯ Click on a seat in the preview to set Seat #1 position
               </Typography>
             </>
           )}
@@ -477,7 +477,7 @@ export default function SeatOrderingPanel({
           {/* Manual Mode Info */}
           {orderingMode === 'manual' && (
             <Typography variant="caption" color="text.secondary">
-              🖱️ Click seats in the order you want them numbered (1, 2, 3, ...)
+              ðŸ–±ï¸ Click seats in the order you want them numbered (1, 2, 3, ...)
             </Typography>
           )}
         </Stack>

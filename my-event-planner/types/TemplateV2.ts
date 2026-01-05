@@ -608,6 +608,11 @@ export const SESSION_TYPE_COLORS_V2: Record<EventType, string> = {
   'Phototaking': '#f57c00',
 };
 
+// Backward-compatible aliases for easier V1 → V2 migration
+export const SESSION_TYPE_COLORS = SESSION_TYPE_COLORS_V2;
+export type Direction = DirectionV2;
+export type OrderingPattern = OrderingPatternTypeV2;
+
 export const ORDERING_PRESETS_V2 = {
   sequentialClockwise: { type: 'sequential' as const, direction: 'clockwise' as const },
   sequentialCounterClockwise: { type: 'sequential' as const, direction: 'counter-clockwise' as const },

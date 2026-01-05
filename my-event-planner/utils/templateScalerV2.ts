@@ -700,3 +700,215 @@ export function getScaleRangeV2(template: TableTemplateV2): { min: number; max: 
   
   return { min: 2, max: 30 };
 }
+
+// ============================================================================
+// ORDERING GENERATION (for SeatOrderingPanel compatibility)
+// ============================================================================
+
+type Direction = 'clockwise' | 'counter-clockwise';
+type OrderingPattern = 'sequential' | 'alternating' | 'opposite' | 'center-outward' | 'manual';
+
+/**
+ * Generate seat ordering based on direction, ordering pattern, and start position
+ * This is a shared utility used by SeatOrderingPanel for pattern-based ordering
+ */
+export function generateOrdering(
+  count: number,
+  direction: Direction,
+  pattern: OrderingPattern,
+  startPosition: number,
+  rectangleConfig?: { top: number; bottom: number; left: number; right: number }
+): number[] {
+  const result: number[] = new Array(count);
+
+  if (pattern === 'sequential') {
+    if (direction === 'clockwise') {
+      for (let i = 0; i < count; i++) {
+        const position = (startPosition + i) % count;
+        result[position] = i + 1;
+      }
+    } else {
+      for (let i = 0; i < count; i++) {
+        const position = (startPosition - i + count) % count;
+        result[position] = i + 1;
+      }
+    }
+  } else if (pattern === 'alternating') {
+    result[startPosition] = 1;
+
+    const odds: number[] = [];
+    const evens: number[] = [];
+
+    for (let i = 2; i <= count; i++) {
+      if (i % 2 === 0) {
+        evens.push(i);
+      } else {
+        odds.push(i);
+      }
+    }
+
+    if (direction === 'clockwise') {
+      for (let i = 0; i < evens.length; i++) {
+        const position = (startPosition + 1 + i) % count;
+        result[position] = evens[i];
+      }
+      for (let i = 0; i < odds.length; i++) {
+        const position = (startPosition - 1 - i + count) % count;
+        result[position] = odds[i];
+      }
+    } else {
+      for (let i = 0; i < evens.length; i++) {
+        const position = (startPosition - 1 - i + count) % count;
+        result[position] = evens[i];
+      }
+      for (let i = 0; i < odds.length; i++) {
+        const position = (startPosition + 1 + i) % count;
+        result[position] = odds[i];
+      }
+    }
+  } else if (pattern === 'opposite') {
+    if (rectangleConfig) {
+      return generateOppositeOrderingRectangle(count, direction, startPosition, rectangleConfig);
+    } else {
+      return generateOppositeOrderingRound(count, direction, startPosition);
+    }
+  } else {
+    // For 'center-outward' or 'manual', fall back to sequential
+    for (let i = 0; i < count; i++) {
+      const position = (startPosition + i) % count;
+      result[position] = i + 1;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Generate opposite ordering for round tables
+ */
+function generateOppositeOrderingRound(
+  count: number,
+  direction: Direction,
+  startPosition: number
+): number[] {
+  const result: number[] = new Array(count).fill(0);
+  const halfCount = Math.floor(count / 2);
+  
+  let seatNumber = 1;
+  const step = direction === 'clockwise' ? 1 : -1;
+  
+  for (let i = 0; i < Math.ceil(count / 2); i++) {
+    const oddPosition = (startPosition + step * i + count) % count;
+    result[oddPosition] = seatNumber++;
+    
+    if (seatNumber <= count) {
+      const evenPosition = (oddPosition + halfCount) % count;
+      result[evenPosition] = seatNumber++;
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Generate opposite ordering for rectangle tables
+ */
+function generateOppositeOrderingRectangle(
+  count: number,
+  direction: Direction,
+  startPosition: number,
+  config: { top: number; bottom: number; left: number; right: number }
+): number[] {
+  const result: number[] = new Array(count).fill(0);
+  const { top, bottom, left, right } = config;
+  
+  interface SeatInfo {
+    position: number;
+    side: 'top' | 'bottom' | 'left' | 'right';
+    indexOnSide: number;
+  }
+  
+  const seatInfos: SeatInfo[] = [];
+  let pos = 0;
+  
+  for (let i = 0; i < top; i++) {
+    seatInfos.push({ position: pos++, side: 'top', indexOnSide: i });
+  }
+  for (let i = 0; i < right; i++) {
+    seatInfos.push({ position: pos++, side: 'right', indexOnSide: i });
+  }
+  for (let i = 0; i < bottom; i++) {
+    seatInfos.push({ position: pos++, side: 'bottom', indexOnSide: i });
+  }
+  for (let i = 0; i < left; i++) {
+    seatInfos.push({ position: pos++, side: 'left', indexOnSide: i });
+  }
+  
+  const getOppositePosition = (seatInfo: SeatInfo): number | null => {
+    const { side, indexOnSide } = seatInfo;
+    
+    if (side === 'top' && bottom > 0) {
+      const oppositeIndex = top - 1 - indexOnSide;
+      if (oppositeIndex >= 0 && oppositeIndex < bottom) {
+        const bottomStart = top + right;
+        return bottomStart + oppositeIndex;
+      }
+    } else if (side === 'bottom' && top > 0) {
+      const oppositeIndex = bottom - 1 - indexOnSide;
+      if (oppositeIndex >= 0 && oppositeIndex < top) {
+        return oppositeIndex;
+      }
+    } else if (side === 'left' && right > 0) {
+      const oppositeIndex = left - 1 - indexOnSide;
+      if (oppositeIndex >= 0 && oppositeIndex < right) {
+        return top + oppositeIndex;
+      }
+    } else if (side === 'right' && left > 0) {
+      const oppositeIndex = right - 1 - indexOnSide;
+      if (oppositeIndex >= 0 && oppositeIndex < left) {
+        const leftStart = top + right + bottom;
+        return leftStart + oppositeIndex;
+      }
+    }
+    
+    return null;
+  };
+  
+  const startInfo = seatInfos.find(s => s.position === startPosition);
+  if (!startInfo) {
+    return generateOrdering(count, direction, 'sequential', 0);
+  }
+  
+  let seatNumber = 1;
+  const visited = new Set<number>();
+  const step = direction === 'clockwise' ? 1 : -1;
+  
+  for (let i = 0; i < count && seatNumber <= count; i++) {
+    const currentPos = (startPosition + step * i + count) % count;
+    
+    if (visited.has(currentPos)) continue;
+    
+    result[currentPos] = seatNumber++;
+    visited.add(currentPos);
+    
+    if (seatNumber <= count) {
+      const currentInfo = seatInfos.find(s => s.position === currentPos);
+      if (currentInfo) {
+        const oppositePos = getOppositePosition(currentInfo);
+        if (oppositePos !== null && !visited.has(oppositePos)) {
+          result[oppositePos] = seatNumber++;
+          visited.add(oppositePos);
+        }
+      }
+    }
+  }
+  
+  // Fill any remaining zeros (shouldn't happen, but safety)
+  for (let i = 0; i < count; i++) {
+    if (result[i] === 0) {
+      result[i] = seatNumber++;
+    }
+  }
+  
+  return result;
+}
