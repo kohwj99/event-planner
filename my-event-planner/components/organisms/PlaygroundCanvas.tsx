@@ -2,7 +2,8 @@
 // Main canvas for seat planning with D3-based SVG rendering
 // Uses centralized color configuration from colorConfig.ts via colorModeStore
 //
-// NEW: Added table visibility toggle to hide/show table shapes
+// NEW: Photography Mode Toggle
+// - Toggles between standard view (circles + floating boxes) and Photo view (unified square cards)
 
 'use client';
 
@@ -25,6 +26,7 @@ import Badge from '@mui/material/Badge';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
+import CameraAlt from '@mui/icons-material/CameraAlt'; // Icon for Photo Mode
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
@@ -62,8 +64,11 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
 
-  // NEW: Table visibility toggle (default: true = show tables)
+  // Table visibility toggle (default: true = show tables)
   const [showTableBodies, setShowTableBodies] = useState<boolean>(true);
+
+  // NEW: Photography Mode State
+  const [isPhotoMode, setIsPhotoMode] = useState<boolean>(false);
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
@@ -181,7 +186,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 4])
+      .scaleExtent([0.1, 4]) // Allow slightly more zoom out for large photo layouts
       .on('zoom', (event) => {
         if (gLayerRef.current)
           gLayerRef.current.setAttribute('transform', event.transform.toString());
@@ -237,8 +242,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   }, [chunks]);
 
   // ============================================================================
-  // TABLES RENDERING (using tableSVGHelper with colorScheme)
-  // NEW: Table body visibility controlled by showTableBodies state
+  // TABLES RENDERING
   // ============================================================================
 
   useEffect(() => {
@@ -259,32 +263,24 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       .style('cursor', 'grab');
 
     // Create table shapes on enter - using colorScheme
-    // NEW: Wrap in .table-body group for easy visibility toggle
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
       const isSelected = d.id === selectedTableId;
       const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
       
-      // Create a group for the table body (shape + label)
       const bodyGroup = grp.append('g').attr('class', 'table-body');
       
+      // Initial creation - dimensions will be updated in merge
       if (d.shape === 'round') {
         bodyGroup.append('circle')
           .attr('class', 'table-shape')
-          .attr('r', d.radius)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke)
           .attr('stroke-width', 2)
           .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
       } else {
-        const width = d.width || 160;
-        const height = d.height || 100;
         bodyGroup.append('rect')
           .attr('class', 'table-shape')
-          .attr('x', -width / 2)
-          .attr('y', -height / 2)
-          .attr('width', width)
-          .attr('height', height)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke)
           .attr('stroke-width', 2)
@@ -293,7 +289,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
       }
       
-      // Table label - inside body group
       bodyGroup.append('text')
         .attr('class', 'table-label')
         .attr('y', 5)
@@ -306,7 +301,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Update table colors when selection changes
+    // Update table colors and SIZES when mode/selection changes
     merged.each(function (d) {
       const grp = d3.select(this);
       const isSelected = d.id === selectedTableId;
@@ -314,12 +309,24 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       
       const bodyGroup = grp.select('.table-body');
       
+      // Determine Dimensions based on Photo Mode
+      // In Photo Mode, we enlarge the table slightly to anchor the larger seat boxes
+      // or keep it proportionate.
+      const photoScale = isPhotoMode ? 1.4 : 1; 
+
       if (d.shape === 'round') {
         bodyGroup.select('circle.table-shape')
+          .attr('r', d.radius * photoScale) // Scale up radius in photo mode
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       } else {
+        const width = (d.width || 160) * photoScale;
+        const height = (d.height || 100) * photoScale;
         bodyGroup.select('rect.table-shape')
+          .attr('x', -width / 2)
+          .attr('y', -height / 2)
+          .attr('width', width)
+          .attr('height', height)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       }
@@ -327,32 +334,35 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       bodyGroup.select('text.table-label')
         .attr('fill', colorScheme.table.tableText);
       
-      // NEW: Update visibility based on showTableBodies state
       bodyGroup.style('display', showTableBodies ? 'block' : 'none');
     });
 
-    // Render table contents using helper functions with colorScheme
+    // Render table contents using helper functions
     merged.each(function (tableDatum) {
       const group = d3.select(this);
 
-      // Render seats with mode-based colors (using helper with colorScheme)
+      // Render seats (Handles both Standard Circles and Photo Mode Squares)
       renderSeats(
         group as any,
         tableDatum,
         colorScheme,
+        guestLookup, // NEW: Needed for Photo Mode content inside seat
+        selectedMealPlanIndex, // NEW: Needed for Photo Mode
+        isPhotoMode, // NEW: Toggle mode
         selectSeat,
         lockSeat,
         clearSeat
       );
 
-      // Render guest display (connectors + boxes with centered text + meal plan)
+      // Render guest display (Only for Standard Mode)
       renderTableGuestDisplay(
         group as any,
         tableDatum,
         guestLookup,
         connectorGap,
         selectedMealPlanIndex,
-        colorScheme
+        colorScheme,
+        isPhotoMode // NEW: If true, this effectively clears the display
       );
     });
 
@@ -391,7 +401,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    showTableBodies // NEW: Re-render when visibility changes
+    showTableBodies, isPhotoMode // NEW: Re-render on mode change
   ]);
 
   // ============================================================================
@@ -477,9 +487,9 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           gap: 2,
         }}
       >
-        {/* FAB Buttons - VERTICAL Stack (Meal Plan on top, Add Table below) */}
+        {/* FAB Buttons - VERTICAL Stack */}
         <Stack direction="column" spacing={1} alignItems="center">
-          {/* Meal Plan FAB - Only show if there are meal plans */}
+          {/* Meal Plan FAB */}
           {maxMealPlanCount > 0 && (
             <Tooltip title="Select Meal Plan to Display" placement="left">
               <Badge
@@ -498,7 +508,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
             </Tooltip>
           )}
 
-          {/* Add Table FAB - Below Meal Plan */}
+          {/* Add Table FAB */}
           <Tooltip title="Add Table" placement="left">
             <Fab color="primary" size="medium" onClick={handleAddTableClick}>
               <AddIcon />
@@ -506,7 +516,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           </Tooltip>
         </Stack>
 
-        {/* Zoom & Connector Gap Controls Card */}
+        {/* Controls Card */}
         <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 160, borderRadius: 2 }}>
           <Typography variant="caption" color="text.secondary">
             Zoom: {Math.round(zoomLevel * 100)}%
@@ -528,9 +538,9 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
             <ColorModeToggle size="small" showLabel />
           </Box>
           
-          {/* NEW: Table Visibility Toggle */}
+          {/* Table Visibility Toggle */}
           <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Toggle visibility of table shapes. Seats and guest info remain visible." placement="left">
+            <Tooltip title="Toggle visibility of table shapes" placement="left">
               <FormControlLabel
                 control={
                   <Switch
@@ -545,6 +555,31 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
                     <TableRestaurant fontSize="small" sx={{ color: showTableBodies ? 'primary.main' : 'text.disabled' }} />
                     <Typography variant="caption" color={showTableBodies ? 'text.primary' : 'text.disabled'}>
                       Tables
+                    </Typography>
+                  </Stack>
+                }
+                sx={{ m: 0 }}
+              />
+            </Tooltip>
+          </Box>
+
+          {/* NEW: Photography Mode Toggle */}
+          <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Tooltip title="Toggle Photography Mode (Unified Square Boxes)" placement="left">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={isPhotoMode}
+                    onChange={(e) => setIsPhotoMode(e.target.checked)}
+                    size="small"
+                    color="secondary" // Distinct color
+                  />
+                }
+                label={
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <CameraAlt fontSize="small" sx={{ color: isPhotoMode ? 'secondary.main' : 'text.disabled' }} />
+                    <Typography variant="caption" color={isPhotoMode ? 'text.primary' : 'text.disabled'}>
+                      Photo Mode
                     </Typography>
                   </Stack>
                 }
@@ -589,11 +624,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
               ))}
             </Select>
           </FormControl>
-          {selectedMealPlanIndex !== null && (
-            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-              Showing meal plan on guest boxes
-            </Typography>
-          )}
         </Paper>
       </Popover>
 

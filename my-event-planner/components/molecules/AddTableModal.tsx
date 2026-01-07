@@ -1,6 +1,7 @@
 // components/molecules/AddTableModal.tsx
 // V2 Template System - Opens TemplateCustomizationModal when a template is selected
 // Features: Template selection, custom table creation
+// FIXED: Passes currentOrdering to preserve user's selections across tab switches
 
 'use client';
 
@@ -392,7 +393,6 @@ export default function AddTableModal({
   };
 
   const handleOrderingChange = useCallback((ordering: number[]) => {
-    console.log('handleOrderingChange called with ModifyTableModal:', ordering);
     setSeatOrdering(ordering);
   }, []);
 
@@ -692,6 +692,7 @@ export default function AddTableModal({
                   roundSeats={customTableType === 'round' ? roundSeats : undefined}
                   rectangleSeats={customTableType === 'rectangle' ? rectangleSeats : undefined}
                   seatModes={seatModes.length === customSeatCount ? seatModes : defaultModes}
+                  currentOrdering={seatOrdering.length === customSeatCount ? seatOrdering : undefined}
                   onOrderingChange={handleOrderingChange}
                   previewSize="large"
                   maxPreviewHeight={380}

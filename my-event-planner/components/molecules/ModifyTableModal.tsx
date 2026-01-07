@@ -2,6 +2,7 @@
 // Modal for modifying existing table
 // REFACTORED: Uses SeatOrderingPanel and SeatModePanel reusable components
 // Features: Full table configuration, ordering with auto/manual modes, seat modes
+// FIXED: Passes currentOrdering to preserve user's selections across tab switches
 
 'use client';
 
@@ -170,7 +171,7 @@ export default function ModifyTableModal({
   // Seat modes (managed by SeatModePanel)
   const [seatModes, setSeatModes] = useState<SeatMode[]>([]);
 
-  // Initial ordering for edit mode
+  // Initial ordering for edit mode (original from table, for Reset functionality)
   const [initialOrdering, setInitialOrdering] = useState<number[] | undefined>(undefined);
 
   // ============================================================================
@@ -250,7 +251,6 @@ export default function ModifyTableModal({
   // ============================================================================
 
   const handleOrderingChange = useCallback((ordering: number[]) => {
-    console.log('handleOrderingChange called with ModifyTableModal:', ordering);
     setSeatOrdering(ordering);
   }, []);
 
@@ -477,6 +477,7 @@ export default function ModifyTableModal({
               rectangleSeats={tableConfig.rectangleSeats}
               seatModes={seatModes}
               initialOrdering={initialOrdering}
+              currentOrdering={seatOrdering.length === totalSeats ? seatOrdering : undefined}
               onOrderingChange={handleOrderingChange}
               previewSize="large"
               maxPreviewHeight={400}

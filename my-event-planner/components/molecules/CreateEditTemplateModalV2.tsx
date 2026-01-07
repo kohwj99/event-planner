@@ -3,6 +3,7 @@
 // - Uses reusable SeatOrderingPanel and SeatModePanel
 // - Uses reusable TablePreview component
 // - New ScalingInsertionOrderEditor for defining scaling behavior
+// FIXED: Passes currentOrdering to preserve user's selections across tab switches
 
 'use client';
 
@@ -310,16 +311,13 @@ export default function CreateEditTemplateModalV2({
   }, []);
 
   const handleOrderingChange = useCallback((ordering: number[]) => {
-    console.log('CALLING CETEMPLATEMODAL')
     setSeatOrdering(prev => {
       if (
         prev.length === ordering.length &&
         prev.every((v, i) => v === ordering[i])
       ) {
-        console.log('No change in ordering detected, skipping state update.');
-        return prev; // 🚫 no state change → no re-render → loop broken
+        return prev; // No state change → no re-render → loop broken
       }
-      console.log('Ordering changed:', ordering);
       return ordering;
     });
   }, []);
@@ -660,6 +658,7 @@ export default function CreateEditTemplateModalV2({
             roundSeats={circleSeatCount}
             rectangleSeats={rectangleSeatsForPreview}
             seatModes={seatModes.length === baseSeatCount ? seatModes : defaultModes}
+            currentOrdering={seatOrdering.length === baseSeatCount ? seatOrdering : undefined}
             onOrderingChange={handleOrderingChange}
             previewSize="large"
             maxPreviewHeight={380}

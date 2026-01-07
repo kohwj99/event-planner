@@ -170,7 +170,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   useEffect(() => {
     // CRITICAL: Don't do anything until mounted and stores are hydrated
     if (!isReady) {
-      console.log('Ã¢ÂÂ³ Waiting for store hydration before loading session...');
+      console.log('Waiting for store hydration before loading session...');
       return;
     }
 

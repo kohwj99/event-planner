@@ -2,14 +2,16 @@
 // Helper functions for generating table SVG elements in PlaygroundCanvas
 // Uses centralized color configuration from colorConfig.ts
 //
-// FIXED: Uniform circular placement for guest boxes
-// - All boxes placed at same base distance (no vertical ellipse)
-// - Smart collision resolution with tangential sliding
-// - Compact layout with minimal connector lengths
+// ENHANCED: Photography Mode Support
+// - Full preservation of original "Standard Mode" logic.
+// - NEW "Photo Mode" with Smart Layout Engine:
+//   - Automatically calculates non-overlapping grids for Rectangular tables.
+//   - Automatically expands orbit radius for Round tables to fit boxes.
+//   - Uniform Square Cards (90x90px) containing full guest details.
 
 import * as d3 from 'd3';
 import { Table } from '@/types/Table';
-import { Seat, SeatMode } from '@/types/Seat';
+import { Seat } from '@/types/Seat';
 import { Guest } from '@/store/guestStore';
 import {
   ColorScheme,
@@ -19,6 +21,13 @@ import {
   getSeatStrokeDashArray as getConfigStrokeDashArray,
   getSeatStrokeWidth,
 } from '@/utils/colorConfig';
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+export const PHOTO_BOX_SIZE = 90; // Fixed size for Photo Mode squares
+export const PHOTO_BOX_GAP = 8;   // Gap between boxes in Photo Mode
 
 // ============================================================================
 // TYPES
@@ -131,10 +140,10 @@ export function calculateRadialNormal(
 export function getRankStars(ranking: number | string | undefined): string {
   if (ranking === undefined || ranking === null) return '';
   const r = Number(ranking) || Infinity;
-  if (r <= 1) return ' ⭐⭐⭐⭐';
-  if (r <= 2) return ' ⭐⭐⭐';
-  if (r <= 3) return ' ⭐⭐';
-  if (r <= 4) return ' ⭐';
+  if (r <= 1) return '⭐⭐⭐⭐';
+  if (r <= 2) return '⭐⭐⭐';
+  if (r <= 3) return '⭐⭐';
+  if (r <= 4) return '⭐';
   return '';
 }
 
@@ -197,7 +206,7 @@ export function getGuestBoxColors(
 }
 
 // ============================================================================
-// GUEST BOX DATA GENERATION
+// GUEST BOX DATA GENERATION (STANDARD MODE)
 // ============================================================================
 
 /**
@@ -206,8 +215,6 @@ export function getGuestBoxColors(
  * This creates UNIFORM circular placement
  */
 function getUniformRadialSize(width: number, height: number): number {
-  // Use the larger dimension to ensure boxes don't clip the seat
-  // at any angle. This creates a circular arrangement.
   return Math.max(width, height) / 2;
 }
 
@@ -290,7 +297,6 @@ export function generateGuestBoxData(
     const seatR = s.radius ?? 8;
 
     // UNIFORM distance: use the same radial size for ALL boxes
-    // This creates a circular arrangement instead of an ellipse
     const baseDist = seatR + connectorGap + maxRadialSize;
 
     boxData.push({
@@ -319,7 +325,7 @@ export function generateGuestBoxData(
 }
 
 // ============================================================================
-// SMART COLLISION RESOLUTION
+// SMART COLLISION RESOLUTION (STANDARD MODE)
 // ============================================================================
 
 /**
@@ -482,7 +488,7 @@ export function relaxGuestBoxPositions(
 }
 
 // ============================================================================
-// CONNECTOR LINE HELPERS
+// CONNECTOR LINE HELPERS (STANDARD MODE)
 // ============================================================================
 
 /**
@@ -508,7 +514,7 @@ export function getConnectorEndpoint(
 }
 
 // ============================================================================
-// MAIN RENDERING FUNCTIONS (using centralized colors)
+// MAIN RENDERING FUNCTIONS (STANDARD MODE)
 // ============================================================================
 
 /**
@@ -554,74 +560,7 @@ export function renderConnectors(
 }
 
 /**
- * Render seats with mode-based colors
- */
-export function renderSeats(
-  group: d3.Selection<SVGGElement, any, any, any>,
-  tableDatum: Table,
-  colorScheme: ColorScheme,
-  onSeatClick: (tableId: string, seatId: string) => void,
-  onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
-  onSeatDoubleClick: (tableId: string, seatId: string) => void
-): void {
-  const seatsSel = group
-    .selectAll<SVGCircleElement, Seat>('circle.seat')
-    .data(tableDatum.seats || [], (s) => s.id);
-
-  seatsSel.exit().remove();
-
-  const seatsEnter = seatsSel.enter().append('circle').attr('class', 'seat');
-
-  seatsEnter.merge(seatsSel as any)
-    .attr('cx', (s) => s.x - tableDatum.x)
-    .attr('cy', (s) => s.y - tableDatum.y)
-    .attr('r', (s) => s.radius)
-    .attr('fill', (s) => getSeatFillColor(s, colorScheme))
-    .attr('stroke', (s) => getSeatStrokeColor(s, colorScheme))
-    .attr('stroke-width', (s) => {
-      const mode = (s.mode || 'default') as 'default' | 'host-only' | 'external-only';
-      return getSeatStrokeWidth(mode, colorScheme.mode);
-    })
-    .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s, colorScheme))
-    .style('cursor', 'pointer')
-    .on('click', (event, s) => {
-      event.stopPropagation();
-      onSeatClick(tableDatum.id, s.id);
-    })
-    .on('contextmenu', (event, s) => {
-      event.preventDefault();
-      onSeatRightClick(tableDatum.id, s.id, !s.locked);
-    })
-    .on('dblclick', (event, s) => {
-      onSeatDoubleClick(tableDatum.id, s.id);
-    });
-
-  // Seat number labels
-  const seatLabels = group
-    .selectAll<SVGTextElement, Seat>('text.seat-number')
-    .data(tableDatum.seats || [], (s) => s.id);
-
-  seatLabels.exit().remove();
-
-  const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
-
-  seatLabelsEnter.merge(seatLabels as any)
-    .attr('x', (s) => s.x - tableDatum.x)
-    .attr('y', (s) => s.y - tableDatum.y + 3)
-    .attr('text-anchor', 'middle')
-    .attr('fill', colorScheme.table.tableStroke)
-    .attr('font-size', '10px')
-    .attr('font-weight', 'bold')
-    .text((s) => s.seatNumber);
-}
-
-/**
- * Render guest boxes with proper layout:
- * - Stars at TOP (if VIP, within box)
- * - Name + Meta CENTERED in the middle area
- * - Meal plan at BOTTOM (if selected, within box)
- * 
- * Box height adjusts to fit all elements without overlap.
+ * Render guest boxes (Standard Mode)
  */
 export function renderGuestBoxes(
   group: d3.Selection<SVGGElement, any, any, any>,
@@ -650,32 +589,11 @@ export function renderGuestBoxes(
     .attr('ry', 8)
     .attr('stroke-width', 1.5);
 
-  // Stars text (top, centered)
-  guestBoxesEnter
-    .append('text')
-    .attr('class', 'guest-stars')
-    .attr('font-size', 10)
-    .style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
-
-  // Name text (centered)
-  guestBoxesEnter
-    .append('text')
-    .attr('class', 'guest-name')
-    .attr('font-size', 11)
-    .attr('font-weight', 'bold');
-
-  // Meta text (country | company, centered)
-  guestBoxesEnter
-    .append('text')
-    .attr('class', 'guest-meta')
-    .attr('font-size', 10);
-
-  // Meal plan text (bottom, centered)
-  guestBoxesEnter
-    .append('text')
-    .attr('class', 'guest-meal-plan')
-    .attr('font-size', 9)
-    .style('font-family', `Segoe UI Emoji, "Apple Color Emoji", "Noto Color Emoji", sans-serif`);
+  // Text elements
+  guestBoxesEnter.append('text').attr('class', 'guest-stars').attr('font-size', 10);
+  guestBoxesEnter.append('text').attr('class', 'guest-name').attr('font-size', 11).attr('font-weight', 'bold');
+  guestBoxesEnter.append('text').attr('class', 'guest-meta').attr('font-size', 10);
+  guestBoxesEnter.append('text').attr('class', 'guest-meal-plan').attr('font-size', 9);
 
   // Render each guest box with proper layout
   boxData.forEach((b) => {
@@ -701,61 +619,25 @@ export function renderGuestBoxes(
 
     // Layout calculation
     const topPadding = 6;
-    const starsRowHeight = hasStars ? 14 : 0;
-    const mealPlanRowHeight = hasMealPlan ? 14 : 0;
-
     let currentY = rectY + topPadding;
+    
+    const starsY = currentY + (hasStars ? 14 : 0) / 2;
+    if (hasStars) currentY += 14;
 
-    // Stars at top (if VIP)
-    const starsY = currentY + starsRowHeight / 2;
-    currentY += starsRowHeight;
-
-    // Name and Meta centered in middle area
     const nameY = currentY + 14 / 2 + 3;
     currentY += 14;
     const metaY = currentY + 14 / 2 + 2;
     currentY += 14;
 
-    // Meal plan at bottom (if selected)
-    const mealPlanY = currentY + mealPlanRowHeight / 2 + 2;
+    const mealPlanY = currentY + (hasMealPlan ? 14 : 0) / 2 + 2;
 
-    // Update stars text (top, centered) - using UI stars color
-    gbox.select('text.guest-stars')
-      .attr('x', b.x)
-      .attr('y', starsY)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .attr('fill', colorScheme.ui.starsColor)
-      .text(hasStars ? starsText.trim() : '');
+    // Update Text
+    gbox.select('text.guest-stars').attr('x', b.x).attr('y', starsY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.starsColor).text(hasStars ? starsText.trim() : '');
+    gbox.select('text.guest-name').attr('x', b.x).attr('y', nameY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colors.text).text(nameText);
+    gbox.select('text.guest-meta').attr('x', b.x).attr('y', metaY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.metaText).text(metaText);
+    gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `🍽 ${mealPlanText}` : '');
 
-    // Update name text (centered) - using guest text color
-    gbox.select('text.guest-name')
-      .attr('x', b.x)
-      .attr('y', nameY)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .attr('fill', colors.text)
-      .text(nameText);
-
-    // Update meta text (centered, below name) - using meta text color
-    gbox.select('text.guest-meta')
-      .attr('x', b.x)
-      .attr('y', metaY)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .attr('fill', colorScheme.ui.metaText)
-      .text(metaText);
-
-    // Update meal plan text (bottom, centered) - using meal plan color
-    gbox.select('text.guest-meal-plan')
-      .attr('x', b.x)
-      .attr('y', mealPlanY)
-      .attr('text-anchor', 'middle')
-      .attr('dominant-baseline', 'middle')
-      .attr('fill', colorScheme.ui.mealPlanText)
-      .text(hasMealPlan ? `🍽 ${mealPlanText}` : '');
-
-    // Update connector endpoint
+    // Update connector
     group
       .selectAll<SVGLineElement, any>('line.connector-line')
       .filter((d) => d.id === s.id)
@@ -764,65 +646,362 @@ export function renderGuestBoxes(
   });
 }
 
+// ============================================================================
+// PHOTOGRAPHY MODE - SMART LAYOUT ENGINE
+// ============================================================================
+
 /**
- * Main entry point: Render all guest display elements for a table
- * (connectors, guest boxes with centered text and meal plan)
+ * Calculates optimized, non-overlapping positions for large Square Boxes.
+ * Uses redistribution logic rather than simple projection to ensure spacing.
  */
+function calculateSmartPhotoPositions(
+  tableDatum: Table,
+  boxSize: number,
+  gap: number
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  const seats = tableDatum.seats || [];
+  if (seats.length === 0) return positions;
+
+  if (tableDatum.shape === 'round') {
+    // === ROUND TABLE STRATEGY ===
+    // 1. Sort seats by angle to maintain order
+    const seatsWithAngles = seats.map(s => {
+      const relX = s.x - tableDatum.x;
+      const relY = s.y - tableDatum.y;
+      return { s, angle: Math.atan2(relY, relX) };
+    }).sort((a, b) => a.angle - b.angle);
+
+    // 2. Calculate minimum radius needed to fit all boxes without overlap
+    // Circumference = numSeats * (boxSize * diagonalFactor + gap)
+    // We use a safe width estimate (boxSize)
+    const minCircumference = seats.length * (boxSize + gap);
+    const minRadius = minCircumference / (2 * Math.PI);
+    
+    // 3. Ensure radius is at least larger than table + box
+    const baseRadius = (tableDatum.radius || 60) + (boxSize / 2) + 10;
+    const finalRadius = Math.max(baseRadius, minRadius);
+
+    // 4. Distribute evenly at this new radius based on sorted order
+    // This ignores original minor angle differences to guarantee spacing
+    const angleStep = (2 * Math.PI) / seats.length;
+    
+    // Align first seat to its approximate original angle to keep orientation?
+    // Or just align to nearest cardinal? Let's use the first seat's actual angle as start anchor
+    const startAngle = seatsWithAngles[0].angle;
+
+    seatsWithAngles.forEach((item, i) => {
+      const angle = startAngle + (i * angleStep);
+      const px = Math.cos(angle) * finalRadius;
+      const py = Math.sin(angle) * finalRadius;
+      positions.set(item.s.id, { x: px, y: py });
+    });
+
+  } else {
+    // === RECTANGLE TABLE STRATEGY ===
+    // 1. Group seats by Side (Top, Bottom, Left, Right)
+    // We use a tolerance relative to table dimensions
+    const w = (tableDatum.width || 160);
+    const h = (tableDatum.height || 100);
+    const halfW = w / 2;
+    const halfH = h / 2;
+    const eps = 20; // Tolerance for "on the edge"
+
+    interface SeatGroup { side: 'top'|'bottom'|'left'|'right'; items: {s: Seat, sortKey: number}[]; }
+    const groups: Record<string, SeatGroup> = {
+      top: { side: 'top', items: [] },
+      bottom: { side: 'bottom', items: [] },
+      left: { side: 'left', items: [] },
+      right: { side: 'right', items: [] },
+    };
+
+    seats.forEach(s => {
+      const relX = s.x - tableDatum.x;
+      const relY = s.y - tableDatum.y;
+      
+      // Determine side based on proximity to edges
+      const dTop = Math.abs(relY - (-halfH));
+      const dBottom = Math.abs(relY - halfH);
+      const dLeft = Math.abs(relX - (-halfW));
+      const dRight = Math.abs(relX - halfW);
+      
+      const minD = Math.min(dTop, dBottom, dLeft, dRight);
+      
+      if (minD === dTop) groups.top.items.push({ s, sortKey: relX });
+      else if (minD === dBottom) groups.bottom.items.push({ s, sortKey: relX });
+      else if (minD === dLeft) groups.left.items.push({ s, sortKey: relY });
+      else groups.right.items.push({ s, sortKey: relY });
+    });
+
+    // 2. Process each side
+    Object.values(groups).forEach(group => {
+      if (group.items.length === 0) return;
+
+      // Sort items along the edge (Left->Right for T/B, Top->Bottom for L/R)
+      group.items.sort((a, b) => a.sortKey - b.sortKey);
+
+      // Calculate total span of boxes
+      const count = group.items.length;
+      const totalSpan = (count * boxSize) + ((count - 1) * gap);
+      const startOffset = -(totalSpan / 2) + (boxSize / 2); // Center around 0
+
+      // Distance from center to box center
+      const distFromCenter = (group.side === 'top' || group.side === 'bottom' ? halfH : halfW) + (boxSize / 2) + gap;
+
+      group.items.forEach((item, index) => {
+        const offset = startOffset + (index * (boxSize + gap));
+        let px = 0, py = 0;
+
+        switch (group.side) {
+          case 'top':
+            px = offset;
+            py = -distFromCenter;
+            break;
+          case 'bottom':
+            px = offset;
+            py = distFromCenter;
+            break;
+          case 'left':
+            px = -distFromCenter;
+            py = offset;
+            break;
+          case 'right':
+            px = distFromCenter;
+            py = offset;
+            break;
+        }
+        positions.set(item.s.id, { x: px, y: py });
+      });
+    });
+  }
+
+  return positions;
+}
+
+/**
+ * Render the unified Square Boxes for Photography Mode.
+ */
+function renderPhotoSeats(
+  group: d3.Selection<SVGGElement, any, any, any>,
+  tableDatum: Table,
+  colorScheme: ColorScheme,
+  guestLookup: Record<string, Guest>,
+  selectedMealPlanIndex: number | null,
+  onSeatClick: (tableId: string, seatId: string) => void,
+  onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
+  onSeatDoubleClick: (tableId: string, seatId: string) => void
+): void {
+  // 1. Calculate smart, non-overlapping positions
+  const smartPositions = calculateSmartPhotoPositions(tableDatum, PHOTO_BOX_SIZE, PHOTO_BOX_GAP);
+
+  const seatGroups = group
+    .selectAll<SVGGElement, Seat>('g.photo-seat-group')
+    .data(tableDatum.seats || [], (s) => s.id);
+
+  seatGroups.exit().remove();
+
+  const enter = seatGroups.enter().append('g')
+    .attr('class', 'photo-seat-group')
+    .style('cursor', 'pointer');
+
+  // Box Shape
+  enter.append('rect')
+    .attr('class', 'seat') 
+    .attr('width', PHOTO_BOX_SIZE)
+    .attr('height', PHOTO_BOX_SIZE)
+    .attr('rx', 6).attr('ry', 6);
+
+  // Content Text
+  enter.append('text').attr('class', 'photo-name').attr('text-anchor', 'middle').attr('font-size', 10).attr('font-weight', 'bold');
+  enter.append('text').attr('class', 'photo-meta').attr('text-anchor', 'middle').attr('font-size', 9);
+  enter.append('text').attr('class', 'photo-stars').attr('text-anchor', 'middle').attr('font-size', 9);
+  enter.append('text').attr('class', 'photo-meal').attr('text-anchor', 'middle').attr('font-size', 9);
+  
+  // Seat Number (small, corner)
+  enter.append('text').attr('class', 'photo-num').attr('text-anchor', 'start').attr('font-size', 9).attr('fill', '#999');
+
+  const merged = enter.merge(seatGroups as any);
+
+  merged.each(function(s: Seat) {
+    const grp = d3.select(this);
+    
+    // Get position from Smart Layout Engine
+    const pos = smartPositions.get(s.id) || { x: s.x - tableDatum.x, y: s.y - tableDatum.y };
+    
+    // Position Group centered
+    grp.attr('transform', `translate(${pos.x - PHOTO_BOX_SIZE/2}, ${pos.y - PHOTO_BOX_SIZE/2})`);
+    
+    // Box Styling (Reuse Seat Colors)
+    grp.select('rect.seat')
+      .attr('fill', getSeatFillColor(s, colorScheme))
+      .attr('stroke', getSeatStrokeColor(s, colorScheme))
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', getSeatStrokeDashArray(s, colorScheme));
+
+    // Content
+    const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
+    const cx = PHOTO_BOX_SIZE / 2;
+    
+    // Seat Number
+    grp.select('text.photo-num').attr('x', 5).attr('y', 14).text(s.seatNumber);
+
+    if (guest) {
+      const isHost = !!guest.fromHost;
+      const boxColors = getGuestBoxColors(isHost, colorScheme);
+      
+      const stars = getRankStars(guest.ranking);
+      let mealPlan = '';
+      if (selectedMealPlanIndex !== null) {
+        mealPlan = guest.mealPlans?.[selectedMealPlanIndex] || '';
+      }
+
+      // Name (Center - slightly up)
+      grp.select('text.photo-name')
+        .attr('x', cx).attr('y', PHOTO_BOX_SIZE/2 - 5)
+        .attr('fill', boxColors.text)
+        .text(`${guest.salutation || ''} ${guest.name || ''}`.trim());
+
+      // Meta (Center - slightly down)
+      grp.select('text.photo-meta')
+        .attr('x', cx).attr('y', PHOTO_BOX_SIZE/2 + 8)
+        .attr('fill', colorScheme.ui.metaText)
+        .text(guest.company || guest.country || '');
+        
+      // Stars (Top Center)
+      grp.select('text.photo-stars')
+        .attr('x', cx).attr('y', 14)
+        .attr('fill', colorScheme.ui.starsColor)
+        .text(stars);
+
+      // Meal Plan (Bottom Center)
+      grp.select('text.photo-meal')
+        .attr('x', cx).attr('y', PHOTO_BOX_SIZE - 8)
+        .attr('fill', colorScheme.ui.mealPlanText)
+        .text(mealPlan ? `🍽 ${mealPlan}` : '');
+
+    } else {
+      // Empty Seat State
+      grp.select('text.photo-name').text('Empty').attr('fill', '#999').attr('y', PHOTO_BOX_SIZE/2);
+      grp.select('text.photo-meta').text('');
+      grp.select('text.photo-stars').text('');
+      grp.select('text.photo-meal').text('');
+    }
+
+    // Events
+    grp
+      .on('click', (event) => {
+        event.stopPropagation();
+        onSeatClick(tableDatum.id, s.id);
+      })
+      .on('contextmenu', (event) => {
+        event.preventDefault();
+        onSeatRightClick(tableDatum.id, s.id, !s.locked);
+      })
+      .on('dblclick', () => {
+        onSeatDoubleClick(tableDatum.id, s.id);
+      });
+  });
+}
+
+// ============================================================================
+// MAIN EXPORTS (TOGGLE AWARE)
+// ============================================================================
+
+export function renderSeats(
+  group: d3.Selection<SVGGElement, any, any, any>,
+  tableDatum: Table,
+  colorScheme: ColorScheme,
+  guestLookup: Record<string, Guest>,
+  selectedMealPlanIndex: number | null,
+  isPhotoMode: boolean,
+  onSeatClick: (tableId: string, seatId: string) => void,
+  onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
+  onSeatDoubleClick: (tableId: string, seatId: string) => void
+): void {
+  if (isPhotoMode) {
+    // Clean up Standard Elements
+    group.selectAll('circle.seat').remove();
+    group.selectAll('text.seat-number').remove();
+    
+    // Render Photo Mode
+    renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, onSeatClick, onSeatRightClick, onSeatDoubleClick);
+  } else {
+    // Clean up Photo Elements
+    group.selectAll('g.photo-seat-group').remove();
+    
+    // Render Standard Elements (Circles)
+    const seatsSel = group
+      .selectAll<SVGCircleElement, Seat>('circle.seat')
+      .data(tableDatum.seats || [], (s) => s.id);
+
+    seatsSel.exit().remove();
+
+    const seatsEnter = seatsSel.enter().append('circle').attr('class', 'seat');
+
+    seatsEnter.merge(seatsSel as any)
+      .attr('cx', (s) => s.x - tableDatum.x)
+      .attr('cy', (s) => s.y - tableDatum.y)
+      .attr('r', (s) => s.radius)
+      .attr('fill', (s) => getSeatFillColor(s, colorScheme))
+      .attr('stroke', (s) => getSeatStrokeColor(s, colorScheme))
+      .attr('stroke-width', (s) => {
+        const mode = (s.mode || 'default') as 'default' | 'host-only' | 'external-only';
+        return getSeatStrokeWidth(mode, colorScheme.mode);
+      })
+      .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s, colorScheme))
+      .style('cursor', 'pointer')
+      .on('click', (event, s) => {
+        event.stopPropagation();
+        onSeatClick(tableDatum.id, s.id);
+      })
+      .on('contextmenu', (event, s) => {
+        event.preventDefault();
+        onSeatRightClick(tableDatum.id, s.id, !s.locked);
+      })
+      .on('dblclick', (event, s) => {
+        onSeatDoubleClick(tableDatum.id, s.id);
+      });
+
+    // Seat Numbers
+    const seatLabels = group
+      .selectAll<SVGTextElement, Seat>('text.seat-number')
+      .data(tableDatum.seats || [], (s) => s.id);
+
+    seatLabels.exit().remove();
+
+    const seatLabelsEnter = seatLabels.enter().append('text').attr('class', 'seat-number');
+
+    seatLabelsEnter.merge(seatLabels as any)
+      .attr('x', (s) => s.x - tableDatum.x)
+      .attr('y', (s) => s.y - tableDatum.y + 3)
+      .attr('text-anchor', 'middle')
+      .attr('fill', colorScheme.table.tableStroke)
+      .attr('font-size', '10px')
+      .attr('font-weight', 'bold')
+      .text((s) => s.seatNumber);
+  }
+}
+
 export function renderTableGuestDisplay(
   group: d3.Selection<SVGGElement, any, any, any>,
   tableDatum: Table,
   guestLookup: Record<string, Guest>,
   connectorGap: number,
   selectedMealPlanIndex: number | null,
-  colorScheme: ColorScheme
+  colorScheme: ColorScheme,
+  isPhotoMode: boolean
 ): void {
+  // If in Photo Mode, hide standard display
+  if (isPhotoMode) {
+    group.select('g.connectors-layer').remove();
+    group.selectAll('g.guest-box').remove();
+    return;
+  }
+
+  // Standard Logic
   const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
-
-  // Generate guest box positions with UNIFORM circular placement
   const boxData = generateGuestBoxData(tableDatum, guestLookup, connectorGap, selectedMealPlanIndex);
-  
-  // Apply smart collision resolution
   relaxGuestBoxPositions(boxData, 100, 6);
-
-  // Render connectors
   renderConnectors(group, seatsWithGuest, tableDatum, boxData, colorScheme);
-
-  // Render guest boxes with centered text
   renderGuestBoxes(group, seatsWithGuest, boxData, selectedMealPlanIndex, colorScheme);
 }
-
-// ============================================================================
-// EXPORTS SUMMARY
-// ============================================================================
-// 
-// FIXED: Uniform circular placement (no more vertical ellipse)
-//
-// Key changes:
-// 1. getUniformRadialSize() - Uses max(width,height) for all boxes
-// 2. generateGuestBoxData() - Places all boxes at same base distance
-// 3. relaxGuestBoxPositions() - Smart collision with tangential sliding
-//
-// Geometry:
-//   - boxRectFromCenter(box) - Convert center coords to bounding rect
-//   - rectsOverlap(a, b, padding) - Check rectangle overlap
-//   - calculateRadialNormal(relX, relY) - RADIAL direction with angle
-//
-// Guest Box Data:
-//   - generateGuestBoxData(...) - Create UNIFORM circular box positions
-//   - relaxGuestBoxPositions(...) - Smart collision resolution
-//
-// Seat Appearance:
-//   - getSeatFillColor(seat, colorScheme) - Color based on state/mode
-//   - getSeatStrokeColor(seat, colorScheme) - Stroke based on mode
-//   - getSeatStrokeDashArray(seat, colorScheme) - Dashed for external-only
-//   - getRankStars(ranking) - VIP star indicators
-//
-// Colors:
-//   - getGuestBoxColors(isHost, colorScheme) - Host vs external colors
-//
-// Rendering:
-//   - renderConnectors(..., colorScheme) - Draw connector lines
-//   - renderSeats(..., colorScheme) - Draw seats with mode colors
-//   - renderGuestBoxes(..., colorScheme) - Draw guest boxes
-//   - renderTableGuestDisplay(..., colorScheme) - Main entry point
-//

@@ -17,16 +17,16 @@ import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
 
 interface EventStoreState {
-  /* -------------------- ðŸ“¦ State -------------------- */
+  /* -------------------- State -------------------- */
   events: Event[];
   activeEventId: string | null;
   activeSessionId: string | null;
   _hasHydrated: boolean;
 
-  /* -------------------- ðŸ”„ Hydration -------------------- */
+  /* -------------------- Hydration -------------------- */
   setHasHydrated: (state: boolean) => void;
 
-  /* -------------------- ðŸ“ Event CRUD -------------------- */
+  /* -------------------- Event CRUD -------------------- */
   createEvent: (
     name: string,
     description: string,
@@ -39,10 +39,10 @@ interface EventStoreState {
   setActiveEvent: (id: string | null) => void;
   setActiveSession: (sessionId: string | null) => void;
 
-  /* -------------------- ðŸ“‡ Master Guest List -------------------- */
+  /* -------------------- Master Guest List -------------------- */
   addMasterGuest: (eventId: string, guest: Guest) => void;
 
-  /* -------------------- ðŸ“… Day & Session Management -------------------- */
+  /* -------------------- Day & Session Management -------------------- */
   addDay: (eventId: string, date: string) => void;
   deleteDay: (eventId: string, dayId: string) => void;
 
@@ -66,7 +66,7 @@ interface EventStoreState {
 
   deleteSession: (eventId: string, dayId: string, sessionId: string) => void;
 
-  /* -------------------- ðŸ‘¥ Session Guest Management -------------------- */
+  /* -------------------- Session Guest Management -------------------- */
   setSessionGuests: (
     eventId: string,
     dayId: string,
@@ -83,7 +83,7 @@ interface EventStoreState {
   getEventIdForSession: (sessionId: string) => string | null;
   getSessionById: (sessionId: string) => { session: Session; dayId: string; eventId: string } | null;
 
-  /* -------------------- ðŸ§  Seat Plan Snapshot -------------------- */
+  /* --------------------  Seat Plan Snapshot -------------------- */
   saveSessionSeatPlan: (
     eventId: string,
     dayId: string,
@@ -98,32 +98,32 @@ interface EventStoreState {
     selectedMealPlanIndex?: number | null;
   } | null;
 
-  /* -------------------- ðŸ“Š Statistics & Audit -------------------- */
+  /* -------------------- Statistics & Audit -------------------- */
   getPriorStats: (eventId: string, currentSessionId: string) => AdjacencyMap;
   checkSessionAuditStatus: (eventId: string, sessionId: string) => "clean" | "review_required";
   acknowledgeSessionWarnings: (eventId: string, sessionId: string) => void;
 
-  /* -------------------- ðŸ’¾ Import / Export -------------------- */
+  /* -------------------- Import / Export -------------------- */
   exportEventJSON: (eventId: string) => string;
   importEventJSON: (jsonString: string) => boolean;
 
-  /* ==================== ðŸŽ¯ CONSOLIDATED TRACKING ==================== */
+  /* ==================== CONSOLIDATED TRACKING ==================== */
 
-  /* -------------------- ðŸ‘¤ Guest Tracking -------------------- */
+  /* -------------------- Guest Tracking -------------------- */
   toggleGuestTracking: (eventId: string, guestId: string) => void;
   isGuestTracked: (eventId: string, guestId: string) => boolean;
   getTrackedGuests: (eventId: string) => string[];
   setTrackedGuests: (eventId: string, guestIds: string[]) => void;
   clearEventGuestTracking: (eventId: string) => void;
 
-  /* -------------------- ðŸ“‹ Session Tracking -------------------- */
+  /* -------------------- Session Tracking -------------------- */
   toggleSessionTracking: (eventId: string, sessionId: string) => void;
   setSessionTracking: (eventId: string, sessionId: string, tracked: boolean) => void;
   isSessionTracked: (eventId: string, sessionId: string) => boolean;
   getTrackedSessions: (eventId: string) => string[];
   clearEventSessionTracking: (eventId: string) => void;
 
-  /* -------------------- ðŸ“ˆ Planning Order Management -------------------- */
+  /* -------------------- Planning Order Management -------------------- */
   getSessionPlanningOrder: (eventId: string, sessionId: string) => number;
   resetSessionPlanningOrder: (eventId: string, sessionId: string) => void;
 
@@ -137,7 +137,7 @@ interface EventStoreState {
   removeSessionAdjacency: (eventId: string, sessionId: string) => void;
   getEventAdjacencyRecords: (eventId: string) => SessionAdjacencyRecord[];
 
-  /* -------------------- ðŸ“Š Analysis Helpers -------------------- */
+  /* -------------------- Analysis Helpers -------------------- */
   getHistoricalAdjacencyCount: (
     eventId: string,
     currentSessionId: string,
@@ -153,10 +153,10 @@ interface EventStoreState {
   getSessionsNeedingReview: (eventId: string) => string[];
   acknowledgeSessionReview: (eventId: string, sessionId: string) => void;
 
-  /* -------------------- ðŸ§¹ Cleanup -------------------- */
+  /* -------------------- Cleanup -------------------- */
   clearEventTracking: (eventId: string) => void;
 
-  /* -------------------- ðŸ”„ Legacy Sync (for backward compatibility) -------------------- */
+  /* -------------------- Legacy Sync (for backward compatibility) -------------------- */
   updateSessionTrackingStatus: (
     eventId: string,
     sessionId: string,
@@ -243,17 +243,6 @@ export const useEventStore = create<EventStoreState>()(
             ),
           })),
 
-        // deleteDay: (eventId, dayId) =>
-        //   set((state) => ({
-        //     events: state.events.map((e) =>
-        //       e.id !== eventId
-        //         ? e
-        //         : {
-        //             ...e,
-        //             days: e.days.filter((d) => d.id !== dayId),
-        //           }
-        //     ),
-        //   })),
         deleteDay: (eventId, dayId) => {
           const state = get()
 
@@ -625,7 +614,7 @@ export const useEventStore = create<EventStoreState>()(
           }
         },
 
-        /* ==================== ðŸŽ¯ GUEST TRACKING ==================== */
+        /* ==================== GUEST TRACKING ==================== */
         toggleGuestTracking: (eventId, guestId) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -687,7 +676,7 @@ export const useEventStore = create<EventStoreState>()(
             ),
           })),
 
-        /* ==================== ðŸ“‹ SESSION TRACKING ==================== */
+        /* ==================== SESSION TRACKING ==================== */
         toggleSessionTracking: (eventId, sessionId) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -783,7 +772,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ==================== ðŸ“ˆ PLANNING ORDER MANAGEMENT ==================== */
+        /* ==================== PLANNING ORDER MANAGEMENT ==================== */
         getSessionPlanningOrder: (eventId, sessionId) => {
           const state = get();
           const event = state.events.find(e => e.id === eventId);
@@ -810,7 +799,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ==================== ðŸ”— ADJACENCY RECORDING ==================== */
+        /* ==================== ADJACENCY RECORDING ==================== */
         recordSessionAdjacency: (eventId, sessionId, sessionStartTime, tables) => {
           const state = get();
           const event = state.events.find(e => e.id === eventId);
@@ -933,7 +922,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           }));
 
-          console.log(`âœ… Recorded adjacency for session ${sessionId}`, {
+          console.log(`Recorded adjacency for session ${sessionId}`, {
             planningOrder,
             isReplanning,
             newRecordsCount: newRecords.length,
@@ -979,7 +968,7 @@ export const useEventStore = create<EventStoreState>()(
           return event?.adjacencyRecords || [];
         },
 
-        /* ==================== ðŸ“Š ANALYSIS HELPERS ==================== */
+        /* ==================== ANALYSIS HELPERS ==================== */
         getHistoricalAdjacencyCount: (eventId, currentSessionId, trackedGuestId) => {
           const state = get();
           const event = state.events.find(e => e.id === eventId);
@@ -1070,7 +1059,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ==================== ðŸ§¹ CLEANUP ==================== */
+        /* ==================== CLEANUP ==================== */
         clearEventTracking: (eventId) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -1094,7 +1083,7 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
-        /* ==================== ðŸ”„ LEGACY SYNC (backward compatibility) ==================== */
+        /* ==================== LEGACY SYNC (backward compatibility) ==================== */
         updateSessionTrackingStatus: (eventId, sessionId, isTracked, planningOrder) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -1155,7 +1144,7 @@ export const useEventStore = create<EventStoreState>()(
       {
         name: "event-master-store",
         onRehydrateStorage: () => (state) => {
-          console.log('ðŸ”„ EventStore: Hydration complete');
+          console.log('EventStore: Hydration complete');
           state?.setHasHydrated(true);
         },
       }

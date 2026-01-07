@@ -5,7 +5,7 @@
 // - Edit seat modes
 // - Select quantity of tables to create
 // - Live preview of changes
-// FIXED: Properly passes template ordering pattern to SeatOrderingPanel without infinite loops
+// FIXED: Properly passes currentOrdering to preserve user's selections across tab switches
 
 'use client';
 
@@ -247,8 +247,6 @@ export default function TemplateCustomizationModal({
   // Callback for ordering changes from SeatOrderingPanel
   // Uses ref to compare with template ordering to avoid dependency issues
   const handleOrderingChange = useCallback((ordering: number[]) => {
-
-    console.log('handleOrderingChange called with TemplateCustomizationModal:', ordering);
     const templateOrdering = templateOrderingRef.current;
     
     // Check if this ordering differs from the template default
@@ -563,6 +561,8 @@ export default function TemplateCustomizationModal({
               initialDirection={templateOrderingPattern.direction}
               initialPattern={templateOrderingPattern.type === 'manual' ? 'sequential' : templateOrderingPattern.type}
               initialStartPosition={templateOrderingPattern.startPosition}
+              initialOrdering={scaledResult?.seatOrdering}
+              currentOrdering={customOrdering.length === targetSeatCount ? customOrdering : undefined}
               onOrderingChange={handleOrderingChange}
               previewSize="large"
               maxPreviewHeight={400}
