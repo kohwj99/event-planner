@@ -1,4 +1,4 @@
-import pptxgen from "pptxgenjs";
+// utils/exportToPPTX.ts
 import { useSeatStore } from "@/store/seatStore";
 import { CHUNK_WIDTH, CHUNK_HEIGHT } from "@/types/Chunk";
 
@@ -22,52 +22,51 @@ const getAccumulatedTransform = (element: Element, stopAtClass: string): { tx: n
   let tx = 0;
   let ty = 0;
   let current: Element | null = element.parentElement;
-  
+
   while (current) {
-    // Stop when we reach the table-group (which is handled separately via relTx/relTy)
-    if (current.classList?.contains(stopAtClass)) {
-      break;
-    }
-    
+    if (current.classList?.contains(stopAtClass)) break;
+
     const transform = current.getAttribute("transform");
     if (transform) {
-      // Parse translate(x, y) or translate(x y)
       const translateMatch = transform.match(/translate\(\s*([^,\s)]+)[\s,]*([^)\s]*)\s*\)/);
       if (translateMatch) {
         tx += parseFloat(translateMatch[1]) || 0;
         ty += parseFloat(translateMatch[2]) || 0;
       }
     }
-    
     current = current.parentElement;
   }
-  
+
   return { tx, ty };
 };
 
-// Updated signature to match the call in page.tsx
+// ----------------------------
+// Export Function
+// ----------------------------
 export const exportToPPTX = async (tables: any[]) => {
-  const pptx = new pptxgen();
-  
-  // Configure Slide Layout (16:9 is default, approx 10 x 5.625 inches)
+  if (typeof window === "undefined") {
+    console.error("PPTX generation can only run in the browser");
+    return;
+  }
+
+  // Dynamic import in the browser only
+  const { default: PptxGenJS } = await import("pptxgenjs");
+  const pptx = new PptxGenJS();
+
   pptx.layout = "LAYOUT_16x9";
   const SLIDE_WIDTH_IN = 10;
   const SLIDE_HEIGHT_IN = 5.625;
 
-  // Calculate global scale to fit one Chunk (2000x1200) into the slide
-  // We use the smaller scale factor to ensure it fits completely
+  // Global scale for one chunk
   const scaleX = SLIDE_WIDTH_IN / CHUNK_WIDTH;
   const scaleY = SLIDE_HEIGHT_IN / CHUNK_HEIGHT;
-  const scale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
+  const scale = Math.min(scaleX, scaleY) * 0.95;
 
-  // Center content on slide
   const contentW = CHUNK_WIDTH * scale;
   const contentH = CHUNK_HEIGHT * scale;
   const marginX = (SLIDE_WIDTH_IN - contentW) / 2;
   const marginY = (SLIDE_HEIGHT_IN - contentH) / 2;
 
-  // Access the DOM SVG directly to read computed styles and transforms
-  // We target the svg inside the #playground-canvas container
   const svg = document.querySelector("#playground-canvas svg") as SVGSVGElement;
   if (!svg) {
     console.error("SVG element not found in #playground-canvas");
@@ -75,12 +74,10 @@ export const exportToPPTX = async (tables: any[]) => {
     return;
   }
 
-  // We get the chunks from the store because the requirement is "Each chunk should be a slide"
   const store = useSeatStore.getState();
   const allChunks = store.chunks;
-  const allTables = store.tables; // We use the store's full table list for data lookup
+  const allTables = store.tables;
 
-  // Identify which chunks actually have tables
   const chunkIdsToExport = Object.values(allChunks)
     .filter(c => c.tables && c.tables.length > 0)
     .map(c => c.id);
@@ -90,25 +87,20 @@ export const exportToPPTX = async (tables: any[]) => {
     return;
   }
 
-  // Map Table IDs to their DOM elements for style extraction
-  // The PlaygroundCanvas renders tables with class .table-group
+  // Map Table IDs to DOM elements
   const tableGroups = Array.from(svg.querySelectorAll(".table-group"));
   const tableDomMap = new Map<string, Element>();
-  tableGroups.forEach((group) => {
-    // D3 stores data on the DOM element in __data__
+  tableGroups.forEach(group => {
     const data = (group as any).__data__;
-    if (data && data.id) {
-      tableDomMap.set(data.id, group);
-    }
+    if (data && data.id) tableDomMap.set(data.id, group);
   });
 
   for (const cid of chunkIdsToExport) {
-    const chunk = Object.values(allChunks).find((c) => c.id === cid);
+    const chunk = Object.values(allChunks).find(c => c.id === cid);
     if (!chunk) continue;
 
     const slide = pptx.addSlide();
-    
-    // Add a discreet label for the chunk
+
     slide.addText(`Chunk R${chunk.row}C${chunk.col}`, {
       x: 0.2,
       y: 0.1,
@@ -118,30 +110,26 @@ export const exportToPPTX = async (tables: any[]) => {
       color: "808080",
     });
 
-    // Chunk World Origin
     const chunkX = chunk.col * CHUNK_WIDTH;
     const chunkY = chunk.row * CHUNK_HEIGHT;
 
-    // Iterate tables assigned to this chunk
     const tableIds = chunk.tables || [];
 
     for (const tid of tableIds) {
       const tableGroup = tableDomMap.get(tid);
-      const tableData = allTables.find((t) => t.id === tid);
+      const tableData = allTables.find(t => t.id === tid);
 
       if (!tableGroup || !tableData) continue;
 
-      // Table position relative to the Chunk
       const groupTx = tableData.x;
       const groupTy = tableData.y;
 
       const relTx = groupTx - chunkX;
       const relTy = groupTy - chunkY;
 
-      // Traverse all visual elements within the table group
       const children = tableGroup.querySelectorAll("*");
 
-      children.forEach((child) => {
+      children.forEach(child => {
         const tag = child.tagName.toLowerCase();
         const style = window.getComputedStyle(child);
         if (style.display === "none" || style.visibility === "hidden") return;
@@ -149,179 +137,73 @@ export const exportToPPTX = async (tables: any[]) => {
         const fillHex = rgbToHex(style.fill);
         const strokeHex = rgbToHex(style.stroke);
         const strokeWidthPx = parseFloat(style.strokeWidth) || 0;
-        
-        // Convert styles for PPT
-        // We scale the stroke width by our global scale to keep it proportional
-        const strokePt = Math.max(0.5, strokeWidthPx * scale * 72); 
+        const strokePt = Math.max(0.5, strokeWidthPx * scale * 72);
 
-        // Prepare Fill object
-        let pptFill: pptxgen.ShapeFillProps | undefined = undefined;
-        if (fillHex) {
-          pptFill = { color: fillHex };
-        } else {
-          pptFill = { type: "none" };
-        }
-        
-        // Prepare Line object
-        let pptLine: pptxgen.ShapeLineProps | undefined = undefined;
-        if (strokeHex && style.stroke !== "none") {
-            pptLine = { color: strokeHex, width: strokePt };
-        } else {
-            pptLine = { type: "none" };
-        }
+        let pptFill: any = fillHex ? { color: fillHex } : { type: "none" };
+        let pptLine: any = strokeHex && style.stroke !== "none" ? { color: strokeHex, width: strokePt } : { type: "none" };
 
-        // Skip non-visual or structural elements
         if (["g", "defs", "clippath", "style", "script", "title", "desc"].includes(tag)) return;
 
-        // Get accumulated transform from parent groups (e.g., g.seat-mode-badge, g.guest-box)
         const accumulated = getAccumulatedTransform(child, "table-group");
 
-        // Get Bounding Box (in local coordinate space)
         let bbox: DOMRect;
-        try {
-          bbox = (child as SVGGraphicsElement).getBBox();
-        } catch (e) {
-          return;
-        }
+        try { bbox = (child as SVGGraphicsElement).getBBox(); } catch { return; }
 
-        // Map Coordinates: Local + Accumulated Transform -> Relative to Chunk -> Scaled to Slide
         const finalX = (relTx + accumulated.tx + bbox.x) * scale + marginX;
         const finalY = (relTy + accumulated.ty + bbox.y) * scale + marginY;
         const finalW = bbox.width * scale;
         const finalH = bbox.height * scale;
 
         // --- SHAPE GENERATION ---
-
         if (tag === "circle" || tag === "ellipse") {
-          // Skip circles/ellipses with zero dimensions
           if (finalW < 0.001 || finalH < 0.001) return;
-          
-          slide.addShape(pptx.ShapeType.ellipse, {
-            x: finalX,
-            y: finalY,
-            w: finalW,
-            h: finalH,
-            fill: pptFill,
-            line: pptLine,
-          });
-        } 
-        
-        else if (tag === "rect") {
-          // Skip rects with zero dimensions
+          slide.addShape(pptx.ShapeType.ellipse, { x: finalX, y: finalY, w: finalW, h: finalH, fill: pptFill, line: pptLine });
+        } else if (tag === "rect") {
           if (finalW < 0.001 || finalH < 0.001) return;
-          
           const rx = parseFloat(child.getAttribute("rx") || "0");
           const ry = parseFloat(child.getAttribute("ry") || "0");
           const rectWidth = parseFloat(child.getAttribute("width") || "0");
           const rectHeight = parseFloat(child.getAttribute("height") || "0");
-          
-          // Calculate proper rectRadius as a proportion
-          // pptxgenjs rectRadius is relative to the shorter side of the rectangle
-          // We need to convert SVG's absolute rx/ry to a proportion
           let rectRadius = 0;
-          if (rx > 0 && rectWidth > 0 && rectHeight > 0) {
-            const shorterSide = Math.min(rectWidth, rectHeight);
-            // Calculate the proportion, but cap it to prevent oval shapes
-            // SVG rx=8 on a 100px wide box should be subtle, not oval
-            rectRadius = Math.min((rx / shorterSide) * 0.5, 0.1); // Cap at 0.1 for subtle corners
-          }
-          
+          if (rx > 0 && rectWidth > 0 && rectHeight > 0) rectRadius = Math.min((rx / Math.min(rectWidth, rectHeight)) * 0.5, 0.1);
           slide.addShape(rx > 0 ? pptx.ShapeType.roundRect : pptx.ShapeType.rect, {
-            x: finalX,
-            y: finalY,
-            w: finalW,
-            h: finalH,
-            fill: pptFill,
-            line: pptLine,
-            rectRadius: rectRadius,
+            x: finalX, y: finalY, w: finalW, h: finalH, fill: pptFill, line: pptLine, rectRadius
           });
-        } 
-        
-        else if (tag === "line") {
-            // Line needs special handling for direction
-            // Lines can have zero width (vertical) or zero height (horizontal)
-            const x1 = parseFloat(child.getAttribute("x1") || "0");
-            const y1 = parseFloat(child.getAttribute("y1") || "0");
-            const x2 = parseFloat(child.getAttribute("x2") || "0");
-            const y2 = parseFloat(child.getAttribute("y2") || "0");
-
-            // Apply accumulated transform to line endpoints
-            let sx = (relTx + accumulated.tx + x1) * scale + marginX;
-            let sy = (relTy + accumulated.ty + y1) * scale + marginY;
-            let ex = (relTx + accumulated.tx + x2) * scale + marginX;
-            let ey = (relTy + accumulated.ty + y2) * scale + marginY;
-
-            // Normalize
-            if (sx > ex) {
-                [sx, ex] = [ex, sx];
-                [sy, ey] = [ey, sy];
-            }
-
-            const lx = sx;
-            const ly = Math.min(sy, ey); 
-            const lw = Math.max(0.01, Math.abs(ex - sx));
-            const lh = Math.max(0.01, Math.abs(ey - sy));
-            const flipV = sy > ey;
-
-            slide.addShape(pptx.ShapeType.line, {
-                x: lx,
-                y: ly,
-                w: lw,
-                h: lh,
-                line: pptLine,
-                flipV: flipV
-            });
-        } 
-        
-        else if (tag === "text") {
+        } else if (tag === "line") {
+          const x1 = parseFloat(child.getAttribute("x1") || "0");
+          const y1 = parseFloat(child.getAttribute("y1") || "0");
+          const x2 = parseFloat(child.getAttribute("x2") || "0");
+          const y2 = parseFloat(child.getAttribute("y2") || "0");
+          let sx = (relTx + accumulated.tx + x1) * scale + marginX;
+          let sy = (relTy + accumulated.ty + y1) * scale + marginY;
+          let ex = (relTx + accumulated.tx + x2) * scale + marginX;
+          let ey = (relTy + accumulated.ty + y2) * scale + marginY;
+          if (sx > ex) [sx, ex] = [ex, sx]; if (sy > ey) [sy, ey] = [ey, sy];
+          slide.addShape(pptx.ShapeType.line, { x: sx, y: sy, w: Math.max(0.01, ex - sx), h: Math.max(0.01, ey - sy), line: pptLine });
+        } else if (tag === "text") {
           const textContent = child.textContent || "";
           if (!textContent.trim()) return;
-
           const fontSizePx = parseFloat(style.fontSize) || 12;
           const fontWeight = style.fontWeight;
           const isBold = fontWeight === "bold" || parseInt(fontWeight) >= 700;
           const pptFontSize = Math.max(1, fontSizePx * scale * 72);
-          
+
+          let align: "left" | "center" | "right" = "left";
           const anchor = child.getAttribute("text-anchor") || "start";
-          let align: pptxgen.HAlign = "left";
           if (anchor === "middle") align = "center";
           if (anchor === "end") align = "right";
 
-          // Use style.fill for text color
           const textColor = fillHex || "000000";
-
-          // --- FIX FOR SQUISHED TEXT ---
-          // 1. Add a width buffer because PPT text rendering differs from SVG.
-          // 2. Adjust X position based on alignment so the text visually stays in place.
-          // 3. Remove default margins (margin: 0) which destroy layout on small text boxes.
-          // 4. Disable wrapping (wrap: false) to match SVG single-line behavior.
-
-          const widthBuffer = finalW * 0.35; // 35% wider to be safe
-          let adjX = finalX;
-          let adjW = finalW + widthBuffer;
-
-          // Shift x to preserve visual center/start point
-          if (align === "center") {
-            adjX = finalX - (widthBuffer / 2);
-          } else if (align === "right") {
-            adjX = finalX - widthBuffer;
-          }
-          // if left align, expanding width to the right is correct, no x adjustment needed.
+          const widthBuffer = finalW * 0.35;
+          let adjX = finalX, adjW = finalW + widthBuffer;
+          if (align === "center") adjX = finalX - widthBuffer / 2;
+          else if (align === "right") adjX = finalX - widthBuffer;
 
           slide.addText(textContent, {
-            x: adjX,
-            y: finalY,
-            w: adjW,
-            h: finalH,
-            fontSize: pptFontSize,
-            color: textColor,
-            bold: isBold,
-            align: align,
-            valign: "middle", 
-            fill: { type: "none" },
-            line: { type: "none" },
-            margin: 0,   // KEY FIX: No internal padding
-            wrap: false, // KEY FIX: No auto-wrapping
+            x: adjX, y: finalY, w: adjW, h: finalH,
+            fontSize: pptFontSize, color: textColor, bold: isBold,
+            align, valign: "middle", fill: { type: "none" }, line: { type: "none" },
+            margin: 0, wrap: false
           });
         }
       });
