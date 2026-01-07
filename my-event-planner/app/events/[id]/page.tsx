@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEventStore } from "@/store/eventStore";
 import { EventType } from "@/types/Event";
 import {
-  Typography, Button, Paper, IconButton, Box
+  Typography, Box
 } from "@mui/material";
 
 import EventDetailHeader from "@/components/organisms/EventDetailHeader";

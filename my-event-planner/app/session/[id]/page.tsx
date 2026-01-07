@@ -110,7 +110,7 @@ export default function SessionDetailPage() {
   };
 
   const handleExportPPTX = () => {
-    exportToPPTX(tables);
+    exportToPPTX();
   };
 
   // Show loading spinner during initial load

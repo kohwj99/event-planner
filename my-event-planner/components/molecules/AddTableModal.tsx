@@ -149,8 +149,8 @@ function TemplateCard({
         cursor: 'pointer',
         border: '2px solid transparent',
         transition: 'all 0.2s',
-        '&:hover': { 
-          bgcolor: '#e3f2fd', 
+        '&:hover': {
+          bgcolor: '#e3f2fd',
           transform: 'translateY(-2px)',
           borderColor: '#1976d2',
           boxShadow: 3,
@@ -276,7 +276,7 @@ export default function AddTableModal({
   const [filterSessionType, setFilterSessionType] = useState<EventType | null>(sessionType);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<TableTemplateV2 | null>(null);
-  
+
   // Template customization modal
   const [customizationModalOpen, setCustomizationModalOpen] = useState(false);
   const [selectedTemplateForCustomization, setSelectedTemplateForCustomization] = useState<TableTemplateV2 | null>(null);
@@ -310,12 +310,12 @@ export default function AddTableModal({
     return rectangleSeats.top + rectangleSeats.bottom + rectangleSeats.left + rectangleSeats.right;
   }, [customTableType, roundSeats, rectangleSeats]);
 
-  const defaultOrdering = useMemo(() => 
+  const defaultOrdering = useMemo(() =>
     Array(customSeatCount).fill(0).map((_, i) => i + 1),
     [customSeatCount]
   );
 
-  const defaultModes = useMemo(() => 
+  const defaultModes = useMemo(() =>
     Array(customSeatCount).fill('default' as SeatMode),
     [customSeatCount]
   );
@@ -391,8 +391,8 @@ export default function AddTableModal({
     onClose();
   };
 
-  // Custom table handlers
   const handleOrderingChange = useCallback((ordering: number[]) => {
+    console.log('handleOrderingChange called with ModifyTableModal:', ordering);
     setSeatOrdering(ordering);
   }, []);
 
@@ -487,7 +487,7 @@ export default function AddTableModal({
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               Click a template to customize and create tables
             </Typography>
-            
+
             <Box
               sx={{
                 display: 'grid',

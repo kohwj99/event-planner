@@ -152,7 +152,7 @@ export default function ModifyTableModal({
 }: ModifyTableModalProps) {
   // Active tab
   const [activeTab, setActiveTab] = useState<TabValue>('config');
-  
+
   // Reset key for child components
   const [resetKey, setResetKey] = useState(0);
 
@@ -224,11 +224,11 @@ export default function ModifyTableModal({
       // Extract and set initial values
       const modes = extractSeatModes(table);
       const ordering = extractCurrentOrdering(table);
-      
+
       setSeatModes(modes);
       setSeatOrdering(ordering);
       setInitialOrdering(ordering);
-      
+
       setActiveTab('config');
       setResetKey(prev => prev + 1);
     }
@@ -250,6 +250,7 @@ export default function ModifyTableModal({
   // ============================================================================
 
   const handleOrderingChange = useCallback((ordering: number[]) => {
+    console.log('handleOrderingChange called with ModifyTableModal:', ordering);
     setSeatOrdering(ordering);
   }, []);
 

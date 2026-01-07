@@ -5,6 +5,7 @@
 // - Edit seat modes
 // - Select quantity of tables to create
 // - Live preview of changes
+// FIXED: Properly passes template ordering pattern to SeatOrderingPanel without infinite loops
 
 'use client';
 
@@ -48,6 +49,8 @@ import {
   SESSION_TYPE_COLORS_V2,
   ScaledResultV2,
   isCircleResultV2,
+  DirectionV2,
+  OrderingPatternTypeV2,
 } from '@/types/TemplateV2';
 
 // V2 Scaler
@@ -109,6 +112,9 @@ export default function TemplateCustomizationModal({
   
   // Reset key for child components
   const [resetKey, setResetKey] = useState(0);
+  
+  // Ref to track the template ordering for comparison
+  const templateOrderingRef = useRef<number[]>([]);
 
   // ============================================================================
   // COMPUTED VALUES
@@ -129,6 +135,24 @@ export default function TemplateCustomizationModal({
     return isCircleConfigV2(template.config) ? 'round' : 'rectangle';
   }, [template]);
 
+  // Extract ordering pattern from template
+  const templateOrderingPattern = useMemo(() => {
+    if (!template) {
+      return {
+        direction: 'counter-clockwise' as DirectionV2,
+        type: 'sequential' as OrderingPatternTypeV2,
+        startPosition: 0,
+      };
+    }
+    
+    const { orderingPattern } = template.config;
+    return {
+      direction: orderingPattern.direction,
+      type: orderingPattern.type,
+      startPosition: orderingPattern.startPosition,
+    };
+  }, [template]);
+
   // Scale the template
   const scaledResult = useMemo((): ScaledResultV2 | null => {
     if (!template || targetSeatCount === 0) return null;
@@ -143,6 +167,13 @@ export default function TemplateCustomizationModal({
       return null;
     }
   }, [template, targetSeatCount]);
+
+  // Update the template ordering ref when scaled result changes
+  useEffect(() => {
+    if (scaledResult) {
+      templateOrderingRef.current = scaledResult.seatOrdering;
+    }
+  }, [scaledResult]);
 
   // Current ordering to display (custom if edited, otherwise from scaled result)
   const displayOrdering = useMemo(() => {
@@ -180,7 +211,7 @@ export default function TemplateCustomizationModal({
   // EFFECTS
   // ============================================================================
 
-  // Initialize when template changes
+  // Initialize when template changes or modal opens
   useEffect(() => {
     if (!open || !template) return;
     
@@ -195,92 +226,82 @@ export default function TemplateCustomizationModal({
     setResetKey(prev => prev + 1);
   }, [open, template]);
 
-  // Update custom arrays when seat count changes
-  useEffect(() => {
-    if (scaledResult) {
-      // If user hasn't customized, update from scaled result
-      if (!hasCustomizedOrdering) {
-        setCustomOrdering(scaledResult.seatOrdering);
-      } else if (customOrdering.length !== targetSeatCount) {
-        // Seat count changed, need to adjust custom ordering
-        setHasCustomizedOrdering(false);
-        setCustomOrdering(scaledResult.seatOrdering);
-      }
-      
-      if (!hasCustomizedModes) {
-        setCustomModes(scaledResult.seatModes);
-      } else if (customModes.length !== targetSeatCount) {
-        // Seat count changed, need to adjust custom modes
-        setHasCustomizedModes(false);
-        setCustomModes(scaledResult.seatModes);
-      }
-    }
-  }, [scaledResult, targetSeatCount]);
-
   // ============================================================================
   // HANDLERS
   // ============================================================================
 
-  // Use refs to store latest values for stable callbacks
-  const scaledResultRef = useRef(scaledResult);
-  scaledResultRef.current = scaledResult;
-
   const handleSeatCountChange = (newCount: number) => {
     const clampedCount = Math.max(scaleRange.min, Math.min(scaleRange.max, newCount));
-    setTargetSeatCount(clampedCount);
-    // When seat count changes, reset customization flags
-    setHasCustomizedOrdering(false);
-    setHasCustomizedModes(false);
-  };
-
-  // Track if the ordering is actually different from template default
-  const isOrderingDifferent = useCallback((ordering: number[], templateOrdering: number[]) => {
-    if (ordering.length !== templateOrdering.length) return true;
-    return ordering.some((val, idx) => val !== templateOrdering[idx]);
-  }, []);
-
-  // Stable callback that uses ref
-  const handleOrderingChange = useCallback((ordering: number[]) => {
-    const current = scaledResultRef.current;
-    const templateOrdering = current?.seatOrdering || [];
-    // Only mark as customized if actually different from scaled result
-    if (ordering.length === templateOrdering.length && 
-        !ordering.some((val, idx) => val !== templateOrdering[idx])) {
-      // Same as template - don't mark as customized
-      return;
-    }
-    setCustomOrdering(ordering);
-    setHasCustomizedOrdering(true);
-  }, []); // No dependencies - uses ref
-
-  // Stable callback that uses ref
-  const handleModesChange = useCallback((modes: SeatMode[]) => {
-    const current = scaledResultRef.current;
-    const templateModes = current?.seatModes || [];
-    // Only mark as customized if actually different from scaled result
-    const isDifferent = modes.length !== templateModes.length || 
-      modes.some((val, idx) => val !== templateModes[idx]);
-    if (!isDifferent) {
-      return;
-    }
-    setCustomModes(modes);
-    setHasCustomizedModes(true);
-  }, []); // No dependencies - uses ref
-
-  const handleResetOrdering = () => {
-    if (scaledResult) {
-      setCustomOrdering(scaledResult.seatOrdering);
+    if (clampedCount !== targetSeatCount) {
+      setTargetSeatCount(clampedCount);
+      // Reset customizations when seat count changes
       setHasCustomizedOrdering(false);
+      setHasCustomizedModes(false);
+      setCustomOrdering([]);
+      setCustomModes([]);
+      // Reset key to reinitialize child components
       setResetKey(prev => prev + 1);
     }
+  };
+
+  // Callback for ordering changes from SeatOrderingPanel
+  // Uses ref to compare with template ordering to avoid dependency issues
+  const handleOrderingChange = useCallback((ordering: number[]) => {
+
+    console.log('handleOrderingChange called with TemplateCustomizationModal:', ordering);
+    const templateOrdering = templateOrderingRef.current;
+    
+    // Check if this ordering differs from the template default
+    if (templateOrdering.length === 0) {
+      // Template not loaded yet, just store the ordering
+      setCustomOrdering(ordering);
+      return;
+    }
+    
+    if (ordering.length !== templateOrdering.length) {
+      setCustomOrdering(ordering);
+      setHasCustomizedOrdering(true);
+      return;
+    }
+    
+    const isDifferent = ordering.some((val, idx) => val !== templateOrdering[idx]);
+    setCustomOrdering(ordering);
+    setHasCustomizedOrdering(isDifferent);
+  }, []);
+
+  // Callback for modes changes from SeatModePanel
+  const handleModesChange = useCallback((modes: SeatMode[]) => {
+    setCustomModes(modes);
+    // We'll check if customized in an effect to avoid dependency issues
+  }, []);
+
+  // Effect to determine if modes are actually customized
+  useEffect(() => {
+    if (customModes.length === 0 || !scaledResult) {
+      return;
+    }
+    
+    const templateModes = scaledResult.seatModes;
+    
+    if (customModes.length !== templateModes.length) {
+      setHasCustomizedModes(true);
+      return;
+    }
+    
+    const isDifferent = customModes.some((val, idx) => val !== templateModes[idx]);
+    setHasCustomizedModes(isDifferent);
+  }, [customModes, scaledResult]);
+
+  const handleResetOrdering = () => {
+    setCustomOrdering([]);
+    setHasCustomizedOrdering(false);
+    setResetKey(prev => prev + 1);
   };
 
   const handleResetModes = () => {
-    if (scaledResult) {
-      setCustomModes(scaledResult.seatModes);
-      setHasCustomizedModes(false);
-      setResetKey(prev => prev + 1);
-    }
+    setCustomModes([]);
+    setHasCustomizedModes(false);
+    setResetKey(prev => prev + 1);
   };
 
   const handleConfirm = () => {
@@ -539,6 +560,9 @@ export default function TemplateCustomizationModal({
               roundSeats={tableType === 'round' ? targetSeatCount : undefined}
               rectangleSeats={rectangleSeats}
               seatModes={displayModes}
+              initialDirection={templateOrderingPattern.direction}
+              initialPattern={templateOrderingPattern.type === 'manual' ? 'sequential' : templateOrderingPattern.type}
+              initialStartPosition={templateOrderingPattern.startPosition}
               onOrderingChange={handleOrderingChange}
               previewSize="large"
               maxPreviewHeight={400}

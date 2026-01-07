@@ -27,7 +27,6 @@ import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
-import SeatingStatsPanel from '../molecules/SeatingStatsPanel';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
 
 import { useSeatStore } from '@/store/seatStore';

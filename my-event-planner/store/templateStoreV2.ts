@@ -21,236 +21,582 @@ import {
 // BUILT-IN TEMPLATES
 // ============================================================================
 
-const now = new Date().toISOString();
-
-const BUILT_IN_TEMPLATES_V2: TableTemplateV2[] = [
-  // ==================== EXECUTIVE MEETING ====================
+const BUILT_IN_TEMPLATES: TableTemplateV2[] = [
   {
-    id: 'v2-exec-round-10',
-    name: 'Executive Round Table',
-    description: 'Round table with VIP-first seating. Host seats at positions 1-2.',
-    sessionTypes: ['Executive meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Executive meeting'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 10,
-      orderingPattern: {
-        type: 'alternating',
-        direction: 'counter-clockwise',
-        startPosition: 0,
+    "name": "U-shaped Calls",
+    "description": "Position of Honor (Left), Host (Right)\n",
+    "sessionTypes": [
+      "Bilateral Meeting"
+    ],
+    "isUserCreated": true,
+    "color": "#7b1fa2",
+    "config": {
+      "type": "rectangle",
+      "sides": {
+        "top": {
+          "seatCount": 2,
+          "scalable": false,
+          "enabled": true,
+          "allocationPriority": 0
+        },
+        "right": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 2
+        },
+        "bottom": {
+          "seatCount": 3,
+          "scalable": true,
+          "enabled": false,
+          "allocationPriority": 1
+        },
+        "left": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 3
+        }
       },
-      modePattern: {
-        type: 'manual',
-        defaultMode: 'default',
-        manualModes: ['host-only', 'host-only', 'default', 'default', 'default', 
-                      'default', 'default', 'default', 'default', 'default'],
+      "scalingConfig": {
+        "allocationStrategy": "round-robin",
+        "alternateOppositeSides": true,
+        "insertionOrder": [
+          {
+            "side": "right",
+            "edge": "end"
+          },
+          {
+            "side": "left",
+            "edge": "end"
+          }
+        ]
       },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-exec-boardroom',
-    name: 'Executive Boardroom',
-    description: 'Rectangle table with host heads at each end. Scales on top/bottom.',
-    sessionTypes: ['Executive meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Executive meeting'],
-    config: {
-      type: 'rectangle',
-      sides: {
-        top: { seatCount: 4, scalable: true, enabled: true, allocationPriority: 0 },
-        right: { seatCount: 1, scalable: false, enabled: true, allocationPriority: 2 },
-        bottom: { seatCount: 4, scalable: true, enabled: true, allocationPriority: 1 },
-        left: { seatCount: 1, scalable: false, enabled: true, allocationPriority: 3 },
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          2,
+          1,
+          3,
+          5,
+          7,
+          9,
+          11,
+          12,
+          10,
+          8,
+          6,
+          4
+        ]
       },
-      scalingConfig: { allocationStrategy: 'round-robin', alternateOppositeSides: true },
-      orderingPattern: { type: 'sequential', direction: 'clockwise', startPosition: 0 },
-      modePattern: { type: 'uniform', defaultMode: 'default' },
-    } as RectangleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "external-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "9e5c7980-c406-4401-9822-e557dc8c8621",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T01:46:04.492Z",
+    "updatedAt": "2026-01-05T01:46:04.492Z"
   },
   {
-    id: 'v2-exec-alternating',
-    name: 'Executive Alternating',
-    description: 'Round table with alternating host and external seats.',
-    sessionTypes: ['Executive meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Executive meeting'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 8,
-      orderingPattern: { type: 'alternating', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'alternating', defaultMode: 'default', alternatingModes: ['host-only', 'external-only'] },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-
-  // ==================== BILATERAL MEETING ====================
-  {
-    id: 'v2-bilateral-round',
-    name: 'Bilateral Discussion',
-    description: 'Small round table for bilateral discussions.',
-    sessionTypes: ['Bilateral Meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Bilateral Meeting'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 6,
-      orderingPattern: { type: 'sequential', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'alternating', defaultMode: 'default', alternatingModes: ['host-only', 'external-only'] },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-bilateral-facing',
-    name: 'Face-to-Face Bilateral',
-    description: 'Host side facing external side.',
-    sessionTypes: ['Bilateral Meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Bilateral Meeting'],
-    config: {
-      type: 'rectangle',
-      sides: {
-        top: { seatCount: 4, scalable: true, enabled: true, allocationPriority: 0 },
-        right: { seatCount: 0, scalable: false, enabled: false, allocationPriority: 2 },
-        bottom: { seatCount: 4, scalable: true, enabled: true, allocationPriority: 1 },
-        left: { seatCount: 0, scalable: false, enabled: false, allocationPriority: 3 },
+    "name": "Boardroom Meetings",
+    "description": "Host Officials (Top)\nGuest Officials (Bottom)\nArrangement - Center to outwards in protocol ordering",
+    "sessionTypes": [
+      "Executive meeting"
+    ],
+    "isUserCreated": true,
+    "color": "#1976d2",
+    "config": {
+      "type": "rectangle",
+      "sides": {
+        "top": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 0
+        },
+        "right": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 2
+        },
+        "bottom": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 1
+        },
+        "left": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 3
+        }
       },
-      scalingConfig: { allocationStrategy: 'round-robin', alternateOppositeSides: true },
-      orderingPattern: { type: 'opposite', direction: 'clockwise', startPosition: 0 },
-      modePattern: { type: 'uniform', defaultMode: 'default' },
-    } as RectangleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-bilateral-pairs',
-    name: 'Paired Bilateral',
-    description: 'Round table with HH, EE repeating pattern.',
-    sessionTypes: ['Bilateral Meeting'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Bilateral Meeting'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 8,
-      orderingPattern: { type: 'sequential', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'repeating', defaultMode: 'default', repeatingSequence: ['host-only', 'host-only', 'external-only', 'external-only'] },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-
-  // ==================== MEAL ====================
-  {
-    id: 'v2-meal-banquet',
-    name: 'Banquet Round',
-    description: 'Classic banquet round table. All default seats.',
-    sessionTypes: ['Meal'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Meal'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 10,
-      orderingPattern: { type: 'alternating', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'uniform', defaultMode: 'default' },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-meal-vip',
-    name: 'VIP Dining',
-    description: 'Round table with VIPs at seats 1-2.',
-    sessionTypes: ['Meal'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Meal'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 8,
-      orderingPattern: { type: 'alternating', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'manual', defaultMode: 'default', manualModes: ['host-only', 'external-only', 'default', 'default', 'default', 'default', 'default', 'default'] },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-meal-long',
-    name: 'Long Dining Table',
-    description: 'Rectangular table for formal dinners.',
-    sessionTypes: ['Meal'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Meal'],
-    config: {
-      type: 'rectangle',
-      sides: {
-        top: { seatCount: 5, scalable: true, enabled: true, allocationPriority: 0 },
-        right: { seatCount: 1, scalable: false, enabled: true, allocationPriority: 2 },
-        bottom: { seatCount: 5, scalable: true, enabled: true, allocationPriority: 1 },
-        left: { seatCount: 1, scalable: false, enabled: true, allocationPriority: 3 },
+      "scalingConfig": {
+        "allocationStrategy": "round-robin",
+        "alternateOppositeSides": true,
+        "insertionOrder": [
+          {
+            "side": "top",
+            "edge": "start"
+          },
+          {
+            "side": "bottom",
+            "edge": "end"
+          },
+          {
+            "side": "top",
+            "edge": "end"
+          },
+          {
+            "side": "bottom",
+            "edge": "start"
+          }
+        ]
       },
-      scalingConfig: { allocationStrategy: 'round-robin', alternateOppositeSides: true },
-      orderingPattern: { type: 'alternating', direction: 'clockwise', startPosition: 0 },
-      modePattern: { type: 'alternating', defaultMode: 'default', alternatingModes: ['host-only', 'external-only'] },
-    } as RectangleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-
-  // ==================== PHOTOTAKING ====================
-  {
-    id: 'v2-photo-arc',
-    name: 'Photo Arc',
-    description: 'Arc arrangement for photos. VIPs in center.',
-    sessionTypes: ['Phototaking'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Phototaking'],
-    config: {
-      type: 'circle',
-      baseSeatCount: 8,
-      orderingPattern: { type: 'alternating', direction: 'counter-clockwise', startPosition: 0 },
-      modePattern: { type: 'manual', defaultMode: 'default', manualModes: ['host-only', 'external-only', 'default', 'default', 'default', 'default', 'default', 'default'] },
-    } as CircleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    id: 'v2-photo-line',
-    name: 'Photo Line',
-    description: 'Single row. VIPs in center, scales outward.',
-    sessionTypes: ['Phototaking'],
-    isBuiltIn: true,
-    isUserCreated: false,
-    color: SESSION_TYPE_COLORS_V2['Phototaking'],
-    config: {
-      type: 'rectangle',
-      sides: {
-        top: { seatCount: 8, scalable: true, enabled: true, allocationPriority: 0 },
-        right: { seatCount: 0, scalable: false, enabled: false, allocationPriority: 2 },
-        bottom: { seatCount: 0, scalable: false, enabled: false, allocationPriority: 1 },
-        left: { seatCount: 0, scalable: false, enabled: false, allocationPriority: 3 },
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          7,
+          3,
+          1,
+          5,
+          9,
+          8,
+          4,
+          2,
+          6,
+          10
+        ]
       },
-      scalingConfig: { allocationStrategy: 'priority', alternateOppositeSides: false },
-      orderingPattern: { type: 'alternating', direction: 'counter-clockwise', startPosition: 3 },
-      modePattern: { type: 'manual', defaultMode: 'default', manualModes: ['default', 'default', 'default', 'host-only', 'external-only', 'default', 'default', 'default'] },
-    } as RectangleTableConfigV2,
-    createdAt: now,
-    updatedAt: now,
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "44f6f373-0eb6-43a8-a270-7e4226524e47",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T01:50:07.150Z",
+    "updatedAt": "2026-01-05T01:50:07.150Z"
   },
+  {
+    "name": "Long Table (with GOH)",
+    "description": "Host (Center Top), GOH (Center Bottom).\nBoth sides alternate in seat modes",
+    "sessionTypes": [
+      "Meal",
+      "Executive meeting"
+    ],
+    "isUserCreated": true,
+    "color": "#388e3c",
+    "config": {
+      "type": "rectangle",
+      "sides": {
+        "top": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 0
+        },
+        "right": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 2
+        },
+        "bottom": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 1
+        },
+        "left": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 3
+        }
+      },
+      "scalingConfig": {
+        "allocationStrategy": "round-robin",
+        "alternateOppositeSides": true,
+        "insertionOrder": [
+          {
+            "side": "bottom",
+            "edge": "end"
+          },
+          {
+            "side": "top",
+            "edge": "start"
+          },
+          {
+            "side": "bottom",
+            "edge": "start"
+          },
+          {
+            "side": "top",
+            "edge": "end"
+          }
+        ]
+      },
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          8,
+          4,
+          1,
+          6,
+          10,
+          7,
+          3,
+          2,
+          5,
+          9
+        ]
+      },
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "a641953d-6d32-4265-8da3-cc32a80acfc5",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T02:07:38.666Z",
+    "updatedAt": "2026-01-05T02:09:45.588Z"
+  },
+  {
+    "name": "Long Table (no GOH)",
+    "description": "",
+    "sessionTypes": [
+      "Executive meeting",
+      "Meal"
+    ],
+    "isUserCreated": true,
+    "color": "#1976d2",
+    "config": {
+      "type": "rectangle",
+      "sides": {
+        "top": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 0
+        },
+        "right": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 2
+        },
+        "bottom": {
+          "seatCount": 5,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 1
+        },
+        "left": {
+          "seatCount": 1,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 3
+        }
+      },
+      "scalingConfig": {
+        "allocationStrategy": "round-robin",
+        "alternateOppositeSides": true,
+        "insertionOrder": [
+          {
+            "side": "top",
+            "edge": "start"
+          },
+          {
+            "side": "top",
+            "edge": "end"
+          },
+          {
+            "side": "bottom",
+            "edge": "end"
+          },
+          {
+            "side": "bottom",
+            "edge": "start"
+          }
+        ]
+      },
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          7,
+          3,
+          1,
+          4,
+          8,
+          9,
+          5,
+          2,
+          6,
+          10
+        ]
+      },
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "external-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "cc0f94c1-bef1-4200-b28c-e72b3a8a75af",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T02:11:28.311Z",
+    "updatedAt": "2026-01-05T02:11:28.311Z"
+  },
+  {
+    "name": "Farewell Dinner (VIP)",
+    "description": "",
+    "sessionTypes": [
+      "Meal"
+    ],
+    "isUserCreated": true,
+    "color": "#388e3c",
+    "config": {
+      "type": "circle",
+      "baseSeatCount": 10,
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          1,
+          5,
+          7,
+          3,
+          9,
+          10,
+          8,
+          2,
+          6,
+          4
+        ]
+      },
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "host-only",
+          "external-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "external-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "5c84b622-b3a4-4580-a252-cace8ce88263",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T02:14:41.116Z",
+    "updatedAt": "2026-01-05T09:33:09.775Z"
+  },
+  {
+    "name": "test1",
+    "description": "qweqwe",
+    "sessionTypes": [
+      "Bilateral Meeting"
+    ],
+    "isUserCreated": true,
+    "color": "#7b1fa2",
+    "config": {
+      "type": "rectangle",
+      "sides": {
+        "top": {
+          "seatCount": 2,
+          "scalable": false,
+          "enabled": true,
+          "allocationPriority": 0
+        },
+        "right": {
+          "seatCount": 3,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 2
+        },
+        "bottom": {
+          "seatCount": 3,
+          "scalable": false,
+          "enabled": false,
+          "allocationPriority": 1
+        },
+        "left": {
+          "seatCount": 3,
+          "scalable": true,
+          "enabled": true,
+          "allocationPriority": 3
+        }
+      },
+      "scalingConfig": {
+        "allocationStrategy": "round-robin",
+        "alternateOppositeSides": true,
+        "insertionOrder": [
+          {
+            "side": "right",
+            "edge": "end"
+          },
+          {
+            "side": "left",
+            "edge": "end"
+          }
+        ]
+      },
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          2,
+          1,
+          3,
+          5,
+          7,
+          8,
+          6,
+          4
+        ]
+      },
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "external-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "host-only",
+          "external-only",
+          "external-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "f64f0fae-5404-48b8-8ff5-f65c82a3e72b",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T02:29:33.602Z",
+    "updatedAt": "2026-01-05T02:29:33.602Z"
+  },
+  {
+    "name": "Meal Round Even ",
+    "description": "",
+    "sessionTypes": [
+      "Meal"
+    ],
+    "isUserCreated": true,
+    "color": "#388e3c",
+    "config": {
+      "type": "circle",
+      "baseSeatCount": 12,
+      "orderingPattern": {
+        "type": "manual",
+        "direction": "clockwise",
+        "startPosition": 0,
+        "manualOrdering": [
+          1,
+          8,
+          3,
+          10,
+          5,
+          12,
+          6,
+          11,
+          4,
+          9,
+          2,
+          7
+        ]
+      },
+      "modePattern": {
+        "type": "manual",
+        "defaultMode": "default",
+        "manualModes": [
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only",
+          "host-only",
+          "external-only"
+        ]
+      }
+    },
+    "id": "649676d0-084d-4ceb-9d2f-555bb4b72f66",
+    "isBuiltIn": false,
+    "createdAt": "2026-01-05T09:30:15.799Z",
+    "updatedAt": "2026-01-05T09:30:15.799Z"
+  }
 ];
 
 // ============================================================================
@@ -287,14 +633,14 @@ export const useTemplateStoreV2 = create<TemplateStoreStateV2>()(
   devtools(
     persist(
       (set, get) => ({
-        templates: [...BUILT_IN_TEMPLATES_V2],
+        templates: [...BUILT_IN_TEMPLATES],
         _hasHydrated: false,
 
         setHasHydrated: (state) => set({ _hasHydrated: state }),
 
         getTemplateById: (id) => get().templates.find((t) => t.id === id),
 
-        getTemplatesBySessionType: (sessionType) => 
+        getTemplatesBySessionType: (sessionType) =>
           get().templates.filter((t) => t.sessionTypes.includes(sessionType)),
 
         getAllTemplates: () => get().templates,
@@ -303,7 +649,7 @@ export const useTemplateStoreV2 = create<TemplateStoreStateV2>()(
 
         getUserTemplates: () => get().templates.filter((t) => t.isUserCreated),
 
-        getTemplatesByShape: (shape) => 
+        getTemplatesByShape: (shape) =>
           get().templates.filter((t) => t.config.type === shape),
 
         searchTemplates: (query) => {
@@ -383,7 +729,7 @@ export const useTemplateStoreV2 = create<TemplateStoreStateV2>()(
 
         resetToDefaults: () => {
           const userTemplates = get().getUserTemplates();
-          set({ templates: [...BUILT_IN_TEMPLATES_V2, ...userTemplates] });
+          set({ templates: [...BUILT_IN_TEMPLATES, ...userTemplates] });
         },
       }),
       {
@@ -393,15 +739,15 @@ export const useTemplateStoreV2 = create<TemplateStoreStateV2>()(
 
           if (state) {
             const existingIds = new Set(state.templates.map((t) => t.id));
-            const missingBuiltIns = BUILT_IN_TEMPLATES_V2.filter((t) => !existingIds.has(t.id));
-            
+            const missingBuiltIns = BUILT_IN_TEMPLATES.filter((t) => !existingIds.has(t.id));
+
             if (missingBuiltIns.length > 0) {
               state.templates = [...state.templates, ...missingBuiltIns];
             }
 
             state.templates = state.templates.map((t) => {
               if (t.isBuiltIn) {
-                const builtIn = BUILT_IN_TEMPLATES_V2.find((b) => b.id === t.id);
+                const builtIn = BUILT_IN_TEMPLATES.find((b) => b.id === t.id);
                 if (builtIn) return { ...builtIn };
               }
               return t;
@@ -438,5 +784,5 @@ export function useTemplatesByShapeV2(shape: 'circle' | 'rectangle') {
 // EXPORTS
 // ============================================================================
 
-export { BUILT_IN_TEMPLATES_V2 };
+export { BUILT_IN_TEMPLATES };
 export default useTemplateStoreV2;

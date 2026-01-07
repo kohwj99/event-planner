@@ -310,7 +310,18 @@ export default function CreateEditTemplateModalV2({
   }, []);
 
   const handleOrderingChange = useCallback((ordering: number[]) => {
-    setSeatOrdering(ordering);
+    console.log('CALLING CETEMPLATEMODAL')
+    setSeatOrdering(prev => {
+      if (
+        prev.length === ordering.length &&
+        prev.every((v, i) => v === ordering[i])
+      ) {
+        console.log('No change in ordering detected, skipping state update.');
+        return prev; // 🚫 no state change → no re-render → loop broken
+      }
+      console.log('Ordering changed:', ordering);
+      return ordering;
+    });
   }, []);
 
   const handleModesChange = useCallback((modes: SeatMode[]) => {

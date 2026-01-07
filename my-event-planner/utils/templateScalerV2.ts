@@ -3,6 +3,7 @@
 // - Preserved seat ordering (base seats keep their order)
 // - Insertion order for new seats (added at specified edges)
 // - Mode pattern propagation (new seats inherit pattern)
+// - FIXED: Circle table scaling now preserves ordering pattern type
 
 import {
   TableTemplateV2,
@@ -21,6 +22,8 @@ import {
   isCircleConfigV2,
   isRectangleConfigV2,
   getTotalSeatCountV2,
+  OrderingPatternTypeV2,
+  DirectionV2,
 } from '@/types/TemplateV2';
 
 // ============================================================================
@@ -42,7 +45,286 @@ export interface ScaleOptionsV2 {
 }
 
 // ============================================================================
-// CIRCLE TABLE SCALING
+// ORDERING PATTERN GENERATION FOR CIRCLES
+// ============================================================================
+
+/**
+ * Generate ordering for a circle table based on pattern type
+ * This respects the template's ordering pattern configuration
+ */
+function generateCircleOrderingByPattern(
+  seatCount: number,
+  patternType: OrderingPatternTypeV2,
+  direction: DirectionV2,
+  startPosition: number
+): number[] {
+  // Normalize start position to be within bounds
+  const normalizedStart = startPosition % seatCount;
+  
+  if (patternType === 'sequential') {
+    return generateSequentialCircleOrdering(seatCount, direction, normalizedStart);
+  } else if (patternType === 'alternating') {
+    return generateAlternatingCircleOrdering(seatCount, direction, normalizedStart);
+  } else if (patternType === 'opposite') {
+    return generateOppositeCircleOrdering(seatCount, direction, normalizedStart);
+  } else if (patternType === 'center-outward') {
+    return generateCenterOutwardCircleOrdering(seatCount, direction, normalizedStart);
+  } else {
+    // For 'manual' or unknown, fallback to sequential
+    return generateSequentialCircleOrdering(seatCount, direction, normalizedStart);
+  }
+}
+
+/**
+ * Sequential ordering: 1, 2, 3, 4, ... in given direction from start position
+ */
+function generateSequentialCircleOrdering(
+  seatCount: number,
+  direction: DirectionV2,
+  startPosition: number
+): number[] {
+  const ordering = new Array<number>(seatCount);
+  
+  for (let seatNum = 1; seatNum <= seatCount; seatNum++) {
+    const offset = seatNum - 1;
+    let position: number;
+    
+    if (direction === 'clockwise') {
+      position = (startPosition + offset) % seatCount;
+    } else {
+      position = (startPosition - offset + seatCount * 10) % seatCount;
+    }
+    
+    ordering[position] = seatNum;
+  }
+  
+  return ordering;
+}
+
+/**
+ * Alternating ordering: Seat 1 at start, evens go one direction, odds go the other
+ * Example (8 seats, clockwise from position 0):
+ * Positions: [0,  1,  2,  3,  4,  5,  6,  7]
+ * Seats:     [1,  2,  4,  6,  8,  7,  5,  3]
+ */
+function generateAlternatingCircleOrdering(
+  seatCount: number,
+  direction: DirectionV2,
+  startPosition: number
+): number[] {
+  const ordering = new Array<number>(seatCount).fill(0);
+  
+  // Place seat 1 at start position
+  ordering[startPosition] = 1;
+  
+  // Collect evens and odds
+  const evens: number[] = [];
+  const odds: number[] = [];
+  
+  for (let i = 2; i <= seatCount; i++) {
+    if (i % 2 === 0) {
+      evens.push(i);
+    } else {
+      odds.push(i);
+    }
+  }
+  
+  if (direction === 'clockwise') {
+    // Evens go clockwise, odds go counter-clockwise
+    for (let i = 0; i < evens.length; i++) {
+      const position = (startPosition + 1 + i) % seatCount;
+      ordering[position] = evens[i];
+    }
+    for (let i = 0; i < odds.length; i++) {
+      const position = (startPosition - 1 - i + seatCount * 10) % seatCount;
+      ordering[position] = odds[i];
+    }
+  } else {
+    // Evens go counter-clockwise, odds go clockwise
+    for (let i = 0; i < evens.length; i++) {
+      const position = (startPosition - 1 - i + seatCount * 10) % seatCount;
+      ordering[position] = evens[i];
+    }
+    for (let i = 0; i < odds.length; i++) {
+      const position = (startPosition + 1 + i) % seatCount;
+      ordering[position] = odds[i];
+    }
+  }
+  
+  return ordering;
+}
+
+/**
+ * Opposite ordering: Seat 1 faces Seat 2, Seat 3 faces Seat 4, etc.
+ * Example (8 seats, clockwise from position 0):
+ * Positions: [0,  1,  2,  3,  4,  5,  6,  7]
+ * Seats:     [1,  3,  5,  7,  2,  4,  6,  8]
+ */
+function generateOppositeCircleOrdering(
+  seatCount: number,
+  direction: DirectionV2,
+  startPosition: number
+): number[] {
+  const ordering = new Array<number>(seatCount).fill(0);
+  const halfCount = Math.floor(seatCount / 2);
+  
+  let seatNumber = 1;
+  const step = direction === 'clockwise' ? 1 : -1;
+  
+  for (let i = 0; i < Math.ceil(seatCount / 2); i++) {
+    // Position for odd seat (1, 3, 5, ...)
+    const oddPosition = (startPosition + step * i + seatCount * 10) % seatCount;
+    ordering[oddPosition] = seatNumber++;
+    
+    // Position for even seat (2, 4, 6, ...) - across the table
+    if (seatNumber <= seatCount) {
+      const evenPosition = (oddPosition + halfCount) % seatCount;
+      ordering[evenPosition] = seatNumber++;
+    }
+  }
+  
+  return ordering;
+}
+
+/**
+ * Center-outward ordering: Start from middle and alternate outward
+ */
+function generateCenterOutwardCircleOrdering(
+  seatCount: number,
+  direction: DirectionV2,
+  startPosition: number
+): number[] {
+  const ordering = new Array<number>(seatCount).fill(0);
+  
+  // Place seat 1 at start position
+  ordering[startPosition] = 1;
+  
+  let seatNumber = 2;
+  let offset = 1;
+  
+  while (seatNumber <= seatCount) {
+    // Alternate between clockwise and counter-clockwise directions
+    const cwPosition = (startPosition + offset) % seatCount;
+    const ccwPosition = (startPosition - offset + seatCount * 10) % seatCount;
+    
+    if (direction === 'clockwise') {
+      if (ordering[cwPosition] === 0 && seatNumber <= seatCount) {
+        ordering[cwPosition] = seatNumber++;
+      }
+      if (ordering[ccwPosition] === 0 && seatNumber <= seatCount) {
+        ordering[ccwPosition] = seatNumber++;
+      }
+    } else {
+      if (ordering[ccwPosition] === 0 && seatNumber <= seatCount) {
+        ordering[ccwPosition] = seatNumber++;
+      }
+      if (ordering[cwPosition] === 0 && seatNumber <= seatCount) {
+        ordering[cwPosition] = seatNumber++;
+      }
+    }
+    
+    offset++;
+  }
+  
+  return ordering;
+}
+
+// ============================================================================
+// MODE PATTERN GENERATION FOR CIRCLES
+// ============================================================================
+
+/**
+ * Generate mode pattern for a given seat count based on pattern configuration
+ */
+function generateCircleModesByPattern(
+  seatCount: number,
+  modePattern: CircleTableConfigV2['modePattern']
+): SeatMode[] {
+  const { type, defaultMode } = modePattern;
+  
+  if (type === 'manual' && modePattern.manualModes) {
+    // For manual, extend or truncate to match count
+    const modes = [...modePattern.manualModes];
+    while (modes.length < seatCount) {
+      modes.push(defaultMode || 'default');
+    }
+    return modes.slice(0, seatCount);
+  }
+  
+  if (type === 'alternating' && modePattern.alternatingModes) {
+    return Array.from({ length: seatCount }, (_, i) =>
+      modePattern.alternatingModes![i % modePattern.alternatingModes!.length]
+    );
+  }
+  
+  if (type === 'repeating' && modePattern.repeatingSequence) {
+    return Array.from({ length: seatCount }, (_, i) =>
+      modePattern.repeatingSequence![i % modePattern.repeatingSequence!.length]
+    );
+  }
+  
+  if (type === 'ratio' && modePattern.ratios) {
+    // Distribute modes according to ratios
+    const { ratios } = modePattern;
+    const modes: SeatMode[] = [];
+    
+    const hostCount = Math.round(seatCount * ratios['host-only']);
+    const externalCount = Math.round(seatCount * ratios['external-only']);
+    const defaultCount = seatCount - hostCount - externalCount;
+    
+    for (let i = 0; i < hostCount; i++) modes.push('host-only');
+    for (let i = 0; i < externalCount; i++) modes.push('external-only');
+    for (let i = 0; i < defaultCount; i++) modes.push('default');
+    
+    // Interleave the modes for better distribution
+    return interleaveArray(modes, seatCount);
+  }
+  
+  // Uniform or unknown type - all same mode
+  return Array.from({ length: seatCount }, () => defaultMode || 'default');
+}
+
+/**
+ * Interleave array items for better distribution
+ */
+function interleaveArray<T>(arr: T[], targetLength: number): T[] {
+  if (arr.length === 0) return [];
+  
+  const result: T[] = new Array(targetLength);
+  const counts: Map<T, number> = new Map();
+  
+  // Count each unique item
+  for (const item of arr) {
+    counts.set(item, (counts.get(item) || 0) + 1);
+  }
+  
+  // Distribute items evenly
+  const items = Array.from(counts.entries());
+  let currentIdx = 0;
+  let round = 0;
+  
+  while (currentIdx < targetLength) {
+    for (const [item, count] of items) {
+      if (currentIdx >= targetLength) break;
+      
+      const assignCount = Math.ceil(count / Math.max(1, items.length));
+      const startPos = currentIdx;
+      
+      for (let i = 0; i < assignCount && currentIdx < targetLength; i++) {
+        if (round * assignCount + i < count) {
+          result[currentIdx++] = item;
+        }
+      }
+    }
+    round++;
+    if (round > targetLength) break; // Safety check
+  }
+  
+  return result;
+}
+
+// ============================================================================
+// CIRCLE TABLE SCALING - FIXED VERSION
 // ============================================================================
 
 function scaleCircleTable(
@@ -52,6 +334,43 @@ function scaleCircleTable(
   const baseSeatCount = config.baseSeatCount;
   const targetSeatCount = Math.max(2, options.targetSeatCount);
   
+  const { orderingPattern, modePattern } = config;
+  
+  // Check if this is a manual ordering (user-defined)
+  const isManualOrdering = orderingPattern.type === 'manual' && orderingPattern.manualOrdering;
+  const isManualModes = modePattern.type === 'manual' && modePattern.manualModes;
+  
+  if (isManualOrdering || isManualModes) {
+    // For manual patterns, use the old array manipulation approach
+    // This preserves custom orderings/modes as much as possible
+    return scaleCircleTableManual(config, options, targetSeatCount, baseSeatCount);
+  }
+  
+  // For pattern-based ordering, regenerate the full pattern at the new size
+  // This ensures the pattern (sequential, alternating, opposite, etc.) is correctly applied
+  
+  const ordering = generateCircleOrderingByPattern(
+    targetSeatCount,
+    orderingPattern.type,
+    orderingPattern.direction,
+    orderingPattern.startPosition
+  );
+  
+  const modes = generateCircleModesByPattern(targetSeatCount, modePattern);
+  
+  return buildCircleResult(ordering, modes);
+}
+
+/**
+ * Scale circle table with manual ordering/mode preservation
+ * Used when the template has manual (user-defined) patterns
+ */
+function scaleCircleTableManual(
+  config: CircleTableConfigV2,
+  options: ScaleOptionsV2,
+  targetSeatCount: number,
+  baseSeatCount: number
+): ScaledCircleResultV2 {
   // Get base ordering and modes from config
   const baseOrdering = config.orderingPattern.type === 'manual' && config.orderingPattern.manualOrdering
     ? [...config.orderingPattern.manualOrdering]
