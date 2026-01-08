@@ -33,6 +33,12 @@ export const PHOTO_BOX_GAP = 8;   // Gap between boxes in Photo Mode
 // TYPES
 // ============================================================================
 
+interface PhotoLayoutResult {
+  positions: Map<string, { x: number; y: number }>;
+  photoWidth?: number;
+  photoHeight?: number;
+}
+
 export interface BoxRect {
   x1: number;
   x2: number;
@@ -232,7 +238,7 @@ export function generateGuestBoxData(
 
   // First pass: calculate all box dimensions to find the maximum
   const boxDimensions: { width: number; height: number; seat: Seat; guest: Guest }[] = [];
-  
+
   (tableDatum.seats || []).forEach((s) => {
     const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
     if (!guest) return;
@@ -339,23 +345,23 @@ function tryTangentialSlide(
 ): boolean {
   const aRect = boxRectFromCenter(boxA);
   const bRect = boxRectFromCenter(boxB);
-  
+
   const overlap = getOverlapDepth(aRect, bRect, padding);
   if (!overlap) return true; // No overlap
-  
+
   // Calculate tangent directions (perpendicular to radial)
   const tangentAx = -boxA.ny;
   const tangentAy = boxA.nx;
   const tangentBx = -boxB.ny;
   const tangentBy = boxB.nx;
-  
+
   // Determine which direction to slide based on relative angles
   const angleDiff = boxB.angle - boxA.angle;
   const normalizedAngleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-  
+
   // Slide amount based on overlap (use smaller axis for efficiency)
   const slideAmount = Math.min(overlap.dx, overlap.dy) / 2 + 1;
-  
+
   if (normalizedAngleDiff > 0) {
     // B is counterclockwise from A: slide A clockwise, B counterclockwise
     boxA.x -= tangentAx * slideAmount;
@@ -369,11 +375,11 @@ function tryTangentialSlide(
     boxB.x -= tangentBx * slideAmount;
     boxB.y -= tangentBy * slideAmount;
   }
-  
+
   // Update angles after sliding
   boxA.angle = Math.atan2(boxA.y - boxA.relY, boxA.x - boxA.relX);
   boxB.angle = Math.atan2(boxB.y - boxB.relY, boxB.x - boxB.relX);
-  
+
   // Check if overlap is resolved
   const newARect = boxRectFromCenter(boxA);
   const newBRect = boxRectFromCenter(boxB);
@@ -391,18 +397,18 @@ function radialPushOuter(
 ): void {
   const aRect = boxRectFromCenter(boxA);
   const bRect = boxRectFromCenter(boxB);
-  
+
   const overlap = getOverlapDepth(aRect, bRect, padding);
   if (!overlap) return;
-  
+
   // Calculate current distances from table center (origin)
   const distA = Math.sqrt(boxA.x * boxA.x + boxA.y * boxA.y);
   const distB = Math.sqrt(boxB.x * boxB.x + boxB.y * boxB.y);
-  
+
   // Push the outer box further out (preserves compact inner arrangement)
   // Use the overlap on the axis that requires less movement
   const pushDist = Math.min(overlap.dx, overlap.dy) + 2;
-  
+
   if (distA >= distB) {
     // A is outer, push A out
     boxA.x += boxA.nx * pushDist;
@@ -434,16 +440,16 @@ export function relaxGuestBoxPositions(
       for (let j = i + 1; j < boxData.length; j++) {
         const boxA = boxData[i];
         const boxB = boxData[j];
-        
+
         const aRect = boxRectFromCenter(boxA);
         const bRect = boxRectFromCenter(boxB);
-        
+
         if (rectsOverlap(aRect, bRect, padding)) {
           hasOverlap = true;
-          
+
           // Try tangential sliding first
           const resolved = tryTangentialSlide(boxA, boxB, padding);
-          
+
           // If tangential didn't fully resolve, apply small radial push
           if (!resolved) {
             radialPushOuter(boxA, boxB, padding);
@@ -463,13 +469,13 @@ export function relaxGuestBoxPositions(
       for (let j = i + 1; j < boxData.length; j++) {
         const boxA = boxData[i];
         const boxB = boxData[j];
-        
+
         const aRect = boxRectFromCenter(boxA);
         const bRect = boxRectFromCenter(boxB);
-        
+
         if (rectsOverlap(aRect, bRect, padding)) {
           hasOverlap = true;
-          
+
           // Direct radial push both boxes
           const overlap = getOverlapDepth(aRect, bRect, padding);
           if (overlap) {
@@ -620,7 +626,7 @@ export function renderGuestBoxes(
     // Layout calculation
     const topPadding = 6;
     let currentY = rectY + topPadding;
-    
+
     const starsY = currentY + (hasStars ? 14 : 0) / 2;
     if (hasStars) currentY += 14;
 
@@ -658,124 +664,154 @@ function calculateSmartPhotoPositions(
   tableDatum: Table,
   boxSize: number,
   gap: number
-): Map<string, { x: number; y: number }> {
+): PhotoLayoutResult {
   const positions = new Map<string, { x: number; y: number }>();
   const seats = tableDatum.seats || [];
-  if (seats.length === 0) return positions;
+  if (seats.length === 0) {
+    return { positions };
+  }
 
+  // ============================================================
+  // ROUND TABLE — UNCHANGED
+  // ============================================================
   if (tableDatum.shape === 'round') {
-    // === ROUND TABLE STRATEGY ===
-    // 1. Sort seats by angle to maintain order
-    const seatsWithAngles = seats.map(s => {
-      const relX = s.x - tableDatum.x;
-      const relY = s.y - tableDatum.y;
-      return { s, angle: Math.atan2(relY, relX) };
-    }).sort((a, b) => a.angle - b.angle);
+    const seatsWithAngles = seats
+      .map(s => {
+        const relX = s.x - tableDatum.x;
+        const relY = s.y - tableDatum.y;
+        return { s, angle: Math.atan2(relY, relX) };
+      })
+      .sort((a, b) => a.angle - b.angle);
 
-    // 2. Calculate minimum radius needed to fit all boxes without overlap
-    // Circumference = numSeats * (boxSize * diagonalFactor + gap)
-    // We use a safe width estimate (boxSize)
     const minCircumference = seats.length * (boxSize + gap);
     const minRadius = minCircumference / (2 * Math.PI);
-    
-    // 3. Ensure radius is at least larger than table + box
-    const baseRadius = (tableDatum.radius || 60) + (boxSize / 2) + 10;
+    const baseRadius = (tableDatum.radius || 60) + boxSize / 2 + 10;
     const finalRadius = Math.max(baseRadius, minRadius);
-
-    // 4. Distribute evenly at this new radius based on sorted order
-    // This ignores original minor angle differences to guarantee spacing
     const angleStep = (2 * Math.PI) / seats.length;
-    
-    // Align first seat to its approximate original angle to keep orientation?
-    // Or just align to nearest cardinal? Let's use the first seat's actual angle as start anchor
     const startAngle = seatsWithAngles[0].angle;
 
     seatsWithAngles.forEach((item, i) => {
-      const angle = startAngle + (i * angleStep);
-      const px = Math.cos(angle) * finalRadius;
-      const py = Math.sin(angle) * finalRadius;
-      positions.set(item.s.id, { x: px, y: py });
-    });
-
-  } else {
-    // === RECTANGLE TABLE STRATEGY ===
-    // 1. Group seats by Side (Top, Bottom, Left, Right)
-    // We use a tolerance relative to table dimensions
-    const w = (tableDatum.width || 160);
-    const h = (tableDatum.height || 100);
-    const halfW = w / 2;
-    const halfH = h / 2;
-    const eps = 20; // Tolerance for "on the edge"
-
-    interface SeatGroup { side: 'top'|'bottom'|'left'|'right'; items: {s: Seat, sortKey: number}[]; }
-    const groups: Record<string, SeatGroup> = {
-      top: { side: 'top', items: [] },
-      bottom: { side: 'bottom', items: [] },
-      left: { side: 'left', items: [] },
-      right: { side: 'right', items: [] },
-    };
-
-    seats.forEach(s => {
-      const relX = s.x - tableDatum.x;
-      const relY = s.y - tableDatum.y;
-      
-      // Determine side based on proximity to edges
-      const dTop = Math.abs(relY - (-halfH));
-      const dBottom = Math.abs(relY - halfH);
-      const dLeft = Math.abs(relX - (-halfW));
-      const dRight = Math.abs(relX - halfW);
-      
-      const minD = Math.min(dTop, dBottom, dLeft, dRight);
-      
-      if (minD === dTop) groups.top.items.push({ s, sortKey: relX });
-      else if (minD === dBottom) groups.bottom.items.push({ s, sortKey: relX });
-      else if (minD === dLeft) groups.left.items.push({ s, sortKey: relY });
-      else groups.right.items.push({ s, sortKey: relY });
-    });
-
-    // 2. Process each side
-    Object.values(groups).forEach(group => {
-      if (group.items.length === 0) return;
-
-      // Sort items along the edge (Left->Right for T/B, Top->Bottom for L/R)
-      group.items.sort((a, b) => a.sortKey - b.sortKey);
-
-      // Calculate total span of boxes
-      const count = group.items.length;
-      const totalSpan = (count * boxSize) + ((count - 1) * gap);
-      const startOffset = -(totalSpan / 2) + (boxSize / 2); // Center around 0
-
-      // Distance from center to box center
-      const distFromCenter = (group.side === 'top' || group.side === 'bottom' ? halfH : halfW) + (boxSize / 2) + gap;
-
-      group.items.forEach((item, index) => {
-        const offset = startOffset + (index * (boxSize + gap));
-        let px = 0, py = 0;
-
-        switch (group.side) {
-          case 'top':
-            px = offset;
-            py = -distFromCenter;
-            break;
-          case 'bottom':
-            px = offset;
-            py = distFromCenter;
-            break;
-          case 'left':
-            px = -distFromCenter;
-            py = offset;
-            break;
-          case 'right':
-            px = distFromCenter;
-            py = offset;
-            break;
-        }
-        positions.set(item.s.id, { x: px, y: py });
+      const angle = startAngle + i * angleStep;
+      positions.set(item.s.id, {
+        x: Math.cos(angle) * finalRadius,
+        y: Math.sin(angle) * finalRadius,
       });
     });
+
+    return { positions };
   }
 
-  return positions;
+  // ============================================================
+  // RECTANGLE TABLE — PHOTO MODE AUTO-SIZING (NEW)
+  // ============================================================
+
+  const w = tableDatum.width || 160;
+  const h = tableDatum.height || 100;
+  const halfW = w / 2;
+  const halfH = h / 2;
+
+  interface SeatGroup {
+    side: 'top' | 'bottom' | 'left' | 'right';
+    items: { s: Seat; sortKey: number }[];
+  }
+
+  const groups: Record<'top' | 'bottom' | 'left' | 'right', SeatGroup> = {
+    top: { side: 'top', items: [] },
+    bottom: { side: 'bottom', items: [] },
+    left: { side: 'left', items: [] },
+    right: { side: 'right', items: [] },
+  };
+
+  seats.forEach(s => {
+    const relX = s.x - tableDatum.x;
+    const relY = s.y - tableDatum.y;
+
+    const dTop = Math.abs(relY + halfH);
+    const dBottom = Math.abs(relY - halfH);
+    const dLeft = Math.abs(relX + halfW);
+    const dRight = Math.abs(relX - halfW);
+
+    const minD = Math.min(dTop, dBottom, dLeft, dRight);
+
+    if (minD === dTop) groups.top.items.push({ s, sortKey: relX });
+    else if (minD === dBottom) groups.bottom.items.push({ s, sortKey: relX });
+    else if (minD === dLeft) groups.left.items.push({ s, sortKey: relY });
+    else groups.right.items.push({ s, sortKey: relY });
+  });
+
+  // ============================================================
+  // NEW: Compute REQUIRED table dimensions from photo boxes
+  // ============================================================
+
+  const topCount = groups.top.items.length;
+  const bottomCount = groups.bottom.items.length;
+  const leftCount = groups.left.items.length;
+  const rightCount = groups.right.items.length;
+
+  const SIDE_PADDING = boxSize / 2 + gap;
+
+  const requiredWidth =
+    Math.max(topCount, bottomCount) * boxSize +
+    Math.max(0, Math.max(topCount, bottomCount) - 1) * gap +
+    SIDE_PADDING * 2;
+
+  const requiredHeight =
+    Math.max(leftCount, rightCount) * boxSize +
+    Math.max(0, Math.max(leftCount, rightCount) - 1) * gap +
+    SIDE_PADDING * 2;
+
+  const photoWidth = Math.max(w, requiredWidth);
+  const photoHeight = Math.max(h, requiredHeight);
+
+  const halfPW = photoWidth / 2;
+  const halfPH = photoHeight / 2;
+
+  // ============================================================
+  // Position boxes EXACTLY on resized perimeter
+  // ============================================================
+
+  Object.values(groups).forEach(group => {
+    if (group.items.length === 0) return;
+
+    group.items.sort((a, b) => a.sortKey - b.sortKey);
+
+    const count = group.items.length;
+    const totalSpan = count * boxSize + (count - 1) * gap;
+    const startOffset = -totalSpan / 2 + boxSize / 2;
+
+    group.items.forEach((item, i) => {
+      const offset = startOffset + i * (boxSize + gap);
+      let x = 0;
+      let y = 0;
+
+      switch (group.side) {
+        case 'top':
+          x = offset;
+          y = -halfPH - boxSize / 2;
+          break;
+        case 'bottom':
+          x = offset;
+          y = halfPH + boxSize / 2;
+          break;
+        case 'left':
+          x = -halfPW - boxSize / 2;
+          y = offset;
+          break;
+        case 'right':
+          x = halfPW + boxSize / 2;
+          y = offset;
+          break;
+      }
+
+      positions.set(item.s.id, { x, y });
+    });
+  });
+
+  return {
+    positions,
+    photoWidth,
+    photoHeight,
+  };
 }
 
 /**
@@ -791,8 +827,8 @@ function renderPhotoSeats(
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
 ): void {
-  // 1. Calculate smart, non-overlapping positions
-  const smartPositions = calculateSmartPhotoPositions(tableDatum, PHOTO_BOX_SIZE, PHOTO_BOX_GAP);
+  const { positions: smartPositions, photoWidth, photoHeight } =
+    calculateSmartPhotoPositions(tableDatum, PHOTO_BOX_SIZE, PHOTO_BOX_GAP);
 
   const seatGroups = group
     .selectAll<SVGGElement, Seat>('g.photo-seat-group')
@@ -806,31 +842,30 @@ function renderPhotoSeats(
 
   // Box Shape
   enter.append('rect')
-    .attr('class', 'seat') 
+    .attr('class', 'seat')
     .attr('width', PHOTO_BOX_SIZE)
     .attr('height', PHOTO_BOX_SIZE)
     .attr('rx', 6).attr('ry', 6);
 
   // Content Text
   enter.append('text').attr('class', 'photo-name').attr('text-anchor', 'middle').attr('font-size', 10).attr('font-weight', 'bold');
-  enter.append('text').attr('class', 'photo-meta').attr('text-anchor', 'middle').attr('font-size', 9);
+  enter.append('text').attr('class', 'photo-meta-line1').attr('text-anchor', 'middle').attr('font-size', 9);
+  enter.append('text').attr('class', 'photo-meta-line2').attr('text-anchor', 'middle').attr('font-size', 9);
   enter.append('text').attr('class', 'photo-stars').attr('text-anchor', 'middle').attr('font-size', 9);
   enter.append('text').attr('class', 'photo-meal').attr('text-anchor', 'middle').attr('font-size', 9);
-  
+
   // Seat Number (small, corner)
   enter.append('text').attr('class', 'photo-num').attr('text-anchor', 'start').attr('font-size', 9).attr('fill', '#999');
 
   const merged = enter.merge(seatGroups as any);
 
-  merged.each(function(s: Seat) {
+  merged.each(function (s: Seat) {
     const grp = d3.select(this);
-    
+
     // Get position from Smart Layout Engine
     const pos = smartPositions.get(s.id) || { x: s.x - tableDatum.x, y: s.y - tableDatum.y };
-    
-    // Position Group centered
-    grp.attr('transform', `translate(${pos.x - PHOTO_BOX_SIZE/2}, ${pos.y - PHOTO_BOX_SIZE/2})`);
-    
+    grp.attr('transform', `translate(${pos.x - PHOTO_BOX_SIZE / 2}, ${pos.y - PHOTO_BOX_SIZE / 2})`);
+
     // Box Styling (Reuse Seat Colors)
     grp.select('rect.seat')
       .attr('fill', getSeatFillColor(s, colorScheme))
@@ -838,40 +873,49 @@ function renderPhotoSeats(
       .attr('stroke-width', 2)
       .attr('stroke-dasharray', getSeatStrokeDashArray(s, colorScheme));
 
-    // Content
     const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
     const cx = PHOTO_BOX_SIZE / 2;
-    
+
     // Seat Number
     grp.select('text.photo-num').attr('x', 5).attr('y', 14).text(s.seatNumber);
 
     if (guest) {
       const isHost = !!guest.fromHost;
       const boxColors = getGuestBoxColors(isHost, colorScheme);
-      
+
       const stars = getRankStars(guest.ranking);
       let mealPlan = '';
       if (selectedMealPlanIndex !== null) {
         mealPlan = guest.mealPlans?.[selectedMealPlanIndex] || '';
       }
 
-      // Name (Center - slightly up)
-      grp.select('text.photo-name')
-        .attr('x', cx).attr('y', PHOTO_BOX_SIZE/2 - 5)
-        .attr('fill', boxColors.text)
-        .text(`${guest.salutation || ''} ${guest.name || ''}`.trim());
-
-      // Meta (Center - slightly down)
-      grp.select('text.photo-meta')
-        .attr('x', cx).attr('y', PHOTO_BOX_SIZE/2 + 8)
-        .attr('fill', colorScheme.ui.metaText)
-        .text(guest.company || guest.country || '');
-        
       // Stars (Top Center)
       grp.select('text.photo-stars')
         .attr('x', cx).attr('y', 14)
         .attr('fill', colorScheme.ui.starsColor)
         .text(stars);
+
+      // Name (Center - slightly up)
+      grp.select('text.photo-name')
+        .attr('x', cx)
+        .attr('y', PHOTO_BOX_SIZE / 2 - 10)
+        .attr('fill', boxColors.text)
+        .text(`${guest.salutation || ''} ${guest.name || ''}`.trim());
+
+      // Meta: split into 2 lines (Country below Company)
+      const country = guest.country || '';
+      const company = guest.company || '';
+      grp.select('text.photo-meta-line1')
+        .attr('x', cx)
+        .attr('y', PHOTO_BOX_SIZE / 2 + 2)
+        .attr('fill', colorScheme.ui.metaText)
+        .text(company);
+
+      grp.select('text.photo-meta-line2')
+        .attr('x', cx)
+        .attr('y', PHOTO_BOX_SIZE / 2 + 14)
+        .attr('fill', colorScheme.ui.metaText)
+        .text(country);
 
       // Meal Plan (Bottom Center)
       grp.select('text.photo-meal')
@@ -881,8 +925,17 @@ function renderPhotoSeats(
 
     } else {
       // Empty Seat State
-      grp.select('text.photo-name').text('Empty').attr('fill', '#999').attr('y', PHOTO_BOX_SIZE/2);
-      grp.select('text.photo-meta').text('');
+      grp.select('text.photo-name')
+        .attr('x', cx)
+        .attr('y', PHOTO_BOX_SIZE / 2)
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .attr('fill', '#999')
+        .text('Empty');
+
+      // Clear other text nodes
+      grp.select('text.photo-meta-line1').text('');
+      grp.select('text.photo-meta-line2').text('');
       grp.select('text.photo-stars').text('');
       grp.select('text.photo-meal').text('');
     }
@@ -903,6 +956,7 @@ function renderPhotoSeats(
   });
 }
 
+
 // ============================================================================
 // MAIN EXPORTS (TOGGLE AWARE)
 // ============================================================================
@@ -922,13 +976,13 @@ export function renderSeats(
     // Clean up Standard Elements
     group.selectAll('circle.seat').remove();
     group.selectAll('text.seat-number').remove();
-    
+
     // Render Photo Mode
     renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, onSeatClick, onSeatRightClick, onSeatDoubleClick);
   } else {
     // Clean up Photo Elements
     group.selectAll('g.photo-seat-group').remove();
-    
+
     // Render Standard Elements (Circles)
     const seatsSel = group
       .selectAll<SVGCircleElement, Seat>('circle.seat')

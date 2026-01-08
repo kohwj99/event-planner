@@ -15,7 +15,6 @@ import {
   Fade,
 } from '@mui/material';
 import {
-  Visibility,
   Accessibility,
 } from '@mui/icons-material';
 import { useColorModeStore, useColorScheme } from '@/store/colorModeStore';
@@ -30,14 +29,14 @@ interface ColorModeToggleProps {
   size?: 'small' | 'medium';
 }
 
-export default function ColorModeToggle({ 
+export default function ColorModeToggle({
   showLabel = true,
   size = 'medium',
 }: ColorModeToggleProps) {
   const { colorMode, toggleColorMode } = useColorModeStore();
   const colorScheme = useColorScheme();
   const isColorblind = colorMode === 'colorblind';
-  
+
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -59,30 +58,21 @@ export default function ColorModeToggle({
   const paletteInfo = isColorblind ? PALETTE_INFO.colorblind : PALETTE_INFO.standard;
 
   return (
-    <Box 
+    <Box
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <Stack 
-        direction="row" 
-        spacing={1} 
+      <Stack
+        direction="row"
+        spacing={1}
         alignItems="center"
-        sx={{ 
+        sx={{
           cursor: 'pointer',
-          py: 0.5,
-          px: 1,
-          borderRadius: 1,
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
-        <Accessibility 
-          fontSize={size === 'small' ? 'small' : 'medium'} 
-          sx={{ 
-            color: isColorblind ? colorScheme.ui.primary : 'text.secondary',
-            transition: 'color 0.2s',
-          }} 
-        />
-        
+
+
         <FormControlLabel
           control={
             <Switch
@@ -93,9 +83,17 @@ export default function ColorModeToggle({
             />
           }
           label={showLabel ? (
-            <Typography variant={size === 'small' ? 'caption' : 'body2'} color="text.secondary">
-              Colorblind
-            </Typography>
+            <>
+              <Accessibility
+                fontSize={size === 'small' ? 'small' : 'medium'}
+                sx={{
+                  color: isColorblind ? colorScheme.ui.primary : 'text.secondary',
+                  transition: 'color 0.2s',
+                }}
+              />
+              <Typography variant={size === 'small' ? 'caption' : 'body2'} color="text.secondary">
+                Colorblind
+              </Typography></>
           ) : null}
           sx={{ mr: 0, ml: 0 }}
         />
@@ -111,10 +109,10 @@ export default function ColorModeToggle({
       >
         {({ TransitionProps }) => (
           <Fade {...TransitionProps} timeout={200}>
-            <Paper 
-              elevation={4} 
-              sx={{ 
-                p: 2, 
+            <Paper
+              elevation={4}
+              sx={{
+                p: 2,
                 minWidth: 220,
                 maxWidth: 280,
                 mr: 1,
@@ -143,19 +141,19 @@ export default function ColorModeToggle({
                     Seat Modes (stroke = type)
                   </Typography>
                   <Stack spacing={0.5}>
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill="#ffffff"
                       stroke={colorScheme.seats.defaultStroke}
                       strokeWidth={2}
                       label="Default (any guest)"
                     />
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill="#ffffff"
                       stroke={colorScheme.seats.hostOnlyStroke}
                       strokeWidth={3.5}
                       label="Host Only (thick)"
                     />
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill="#ffffff"
                       stroke={colorScheme.seats.externalOnlyStroke}
                       strokeWidth={2.5}
@@ -171,20 +169,20 @@ export default function ColorModeToggle({
                     Seat States (fill = status)
                   </Typography>
                   <Stack spacing={0.5}>
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill="#ffffff"
                       stroke={colorScheme.seats.defaultStroke}
                       strokeWidth={2}
                       label="Empty (white)"
                     />
                     <AssignedLegendRow colorScheme={colorScheme} />
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill={colorScheme.seats.selectedFill}
                       stroke={colorScheme.seats.selectedStroke}
                       strokeWidth={2}
                       label="Selected (yellow)"
                     />
-                    <LegendRowWithWidth 
+                    <LegendRowWithWidth
                       fill={colorScheme.seats.lockedFill}
                       stroke={colorScheme.seats.lockedStroke}
                       strokeWidth={2}
@@ -199,13 +197,13 @@ export default function ColorModeToggle({
                     Guest Boxes
                   </Typography>
                   <Stack spacing={0.5}>
-                    <LegendRow 
+                    <LegendRow
                       fill={colorScheme.guestBox.hostFill}
                       stroke={colorScheme.guestBox.hostStroke}
                       label="Host Guest"
                       isBox
                     />
-                    <LegendRow 
+                    <LegendRow
                       fill={colorScheme.guestBox.externalFill}
                       stroke={colorScheme.guestBox.externalStroke}
                       label="External Guest"
@@ -339,7 +337,7 @@ export function CompactColorModeToggle() {
   const { colorMode, toggleColorMode } = useColorModeStore();
   const colorScheme = useColorScheme();
   const isColorblind = colorMode === 'colorblind';
-  
+
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [showLegend, setShowLegend] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -358,12 +356,12 @@ export function CompactColorModeToggle() {
 
   return (
     <Box onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
-      <Stack 
-        direction="row" 
-        spacing={0.5} 
+      <Stack
+        direction="row"
+        spacing={0.5}
         alignItems="center"
         onClick={toggleColorMode}
-        sx={{ 
+        sx={{
           cursor: 'pointer',
           py: 0.5,
           px: 1,
@@ -372,11 +370,11 @@ export function CompactColorModeToggle() {
           '&:hover': { bgcolor: 'action.hover' },
         }}
       >
-        <Accessibility 
-          fontSize="small" 
-          sx={{ 
+        <Accessibility
+          fontSize="small"
+          sx={{
             color: isColorblind ? colorScheme.ui.primary : 'text.disabled',
-          }} 
+          }}
         />
         <Typography variant="caption" color={isColorblind ? 'primary' : 'text.secondary'}>
           {isColorblind ? 'CB' : 'Std'}
@@ -393,8 +391,8 @@ export function CompactColorModeToggle() {
       >
         {({ TransitionProps }) => (
           <Fade {...TransitionProps} timeout={200}>
-            <Paper 
-              elevation={4} 
+            <Paper
+              elevation={4}
               sx={{ p: 1.5, minWidth: 200, mr: 1 }}
               onMouseEnter={() => timeoutRef.current && clearTimeout(timeoutRef.current)}
               onMouseLeave={handleMouseLeave}
@@ -403,17 +401,17 @@ export function CompactColorModeToggle() {
                 {paletteInfo.name}: {paletteInfo.description}
               </Typography>
               <Stack spacing={0.5}>
-                <LegendRow 
+                <LegendRow
                   fill={colorScheme.seats.defaultFill}
                   stroke={colorScheme.seats.defaultStroke}
                   label="Default"
                 />
-                <LegendRow 
+                <LegendRow
                   fill={colorScheme.seats.hostOnlyFill}
                   stroke={colorScheme.seats.hostOnlyStroke}
                   label="Host Only"
                 />
-                <LegendRow 
+                <LegendRow
                   fill={colorScheme.seats.externalOnlyFill}
                   stroke={colorScheme.seats.externalOnlyStroke}
                   label="External Only"
