@@ -9,7 +9,7 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- ðŸ“Š ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Record of which guests were adjacent to a tracked guest in a specific session
@@ -44,7 +44,7 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- ðŸ“… SESSION & DAY TYPES -------------------- */
+/* -------------------- SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
@@ -54,7 +54,7 @@ export interface Session {
   startTime: string;      // ISO string
   endTime: string;        // ISO string
   
-  // ðŸ†• Session-level guest inheritance
+  // Session-level guest inheritance
   inheritedHostGuestIds: string[];     // IDs from masterHostGuests
   inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
@@ -62,7 +62,7 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // ðŸ†• Boss Adjacency Tracking Metadata
+  // Boss Adjacency Tracking Metadata
   isTrackedForAdjacency?: boolean;  // Whether this session is tracked
   planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
   needsAdjacencyReview?: boolean;   // Flag if upstream session changed
@@ -81,7 +81,7 @@ export interface EventDay {
   sessions: Session[];
 }
 
-/* -------------------- ðŸŽ¯ EVENT TYPE -------------------- */
+/* -------------------- EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
@@ -94,7 +94,7 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // ðŸ†• Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  // Boss Adjacency Tracking Configuration (CONSOLIDATED)
   trackedGuestIds?: string[];                    // IDs of guests being tracked
   trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
   adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data

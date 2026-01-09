@@ -97,12 +97,18 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const pdfW_pt = PAGE_WIDTH_IN * 72;
   const pdfH_pt = PAGE_HEIGHT_IN * 72;
   
-  const pdf = new jsPDF({ 
-    orientation: "landscape", 
-    unit: "pt", 
-    format: [pdfW_pt, pdfH_pt] // Custom format matching chunk aspect ratio
-  });
+  // const pdf = new jsPDF({ 
+  //   orientation: "landscape", 
+  //   unit: "pt", 
+  //   format: [pdfW_pt, pdfH_pt] // Custom format matching chunk aspect ratio
+  // });
 
+  const pdf = new jsPDF({
+  orientation: "landscape",
+  unit: "pt",
+  format: [pdfW_pt, pdfH_pt],
+  compress: true,
+});
   // px -> points conversion for given DPI
   const pxToPt = (px: number) => (px * 72) / exportDPI;
 
@@ -114,13 +120,13 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
       scale: RASTER_SCALE,
       useCORS: true 
     });
-    const img = canvas.toDataURL("image/png");
+    const img = canvas.toDataURL("image/jpeg");
     const ratio = Math.min(pdfW_pt / (canvas.width / RASTER_SCALE), pdfH_pt / (canvas.height / RASTER_SCALE));
     const drawW = (canvas.width / RASTER_SCALE) * ratio;
     const drawH = (canvas.height / RASTER_SCALE) * ratio;
     const x = (pdfW_pt - drawW) / 2;
     const y = (pdfH_pt - drawH) / 2;
-    pdf.addImage(img, "PNG", x, y, drawW, drawH);
+    pdf.addImage(img, "JPEG", x, y, drawW, drawH);
     pdf.save(filename);
     return;
   }
@@ -182,7 +188,7 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     const canvas = await captureChunkCanvas(c.row, c.col);
-    const imgData = canvas.toDataURL("image/png");
+    const imgData = canvas.toDataURL("image/jpeg");
 
     // Calculate draw dimensions to fill the page
     const drawW_pt = pdfW_pt;
@@ -191,7 +197,7 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     if (i > 0) pdf.addPage([pdfW_pt, pdfH_pt], "landscape");
     
     // Draw image to fill the entire page
-    pdf.addImage(imgData, "PNG", 0, 0, drawW_pt, drawH_pt);
+    pdf.addImage(imgData, "JPEG", 0, 0, drawW_pt, drawH_pt);
     
     // Add chunk label
     pdf.setFontSize(10);
@@ -265,9 +271,9 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const ovOffsetX = (pdfW_pt - ovW_pt) / 2;
   const ovOffsetY = (pdfH_pt - ovH_pt) / 2;
 
-  const overviewData = overviewCanvas.toDataURL("image/png");
+  const overviewData = overviewCanvas.toDataURL("image/jpeg");
   pdf.addPage([pdfW_pt, pdfH_pt], "landscape");
-  pdf.addImage(overviewData, "PNG", ovOffsetX, ovOffsetY, ovW_pt, ovH_pt);
+  pdf.addImage(overviewData, "JPEG", ovOffsetX, ovOffsetY, ovW_pt, ovH_pt);
   pdf.setFontSize(12);
   pdf.setTextColor(0, 0, 0);
   pdf.text("Full Map Overview", 10, 16);
