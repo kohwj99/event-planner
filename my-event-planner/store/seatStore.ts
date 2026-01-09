@@ -1,5 +1,6 @@
 import { Chunk, CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 import { Table } from "@/types/Table";
+import { SeatMode } from "@/types/Seat";
 import { moveTableGeometry } from "@/utils/tableGeometryHelper";
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
@@ -12,14 +13,19 @@ import {
   removeTableFromChunk,
 } from "@/utils/chunkHelper";
 import { detectProximityViolations, ProximityViolation } from "@/utils/violationDetector";
+import {
+  validateGuestSeatAssignment,
+  validateSeatSwap,
+  GuestInfo,
+} from "@/utils/seatValidation";
 
-/* -------------------- ðŸ”§ Types for Proximity Rules -------------------- */
+/* -------------------- 🧩 Types for Proximity Rules -------------------- */
 export interface ProximityRules {
   sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>;
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
 }
 
-/* -------------------- ðŸ§  Store Interface -------------------- */
+/* -------------------- 🧠 Store Interface -------------------- */
 interface SeatStoreState {
   tables: Table[];
   chunks: Record<string, Chunk>;
@@ -41,7 +47,7 @@ interface SeatStoreState {
   updateTableState: (tables: Table[]) => void;
   setSelectedTable: (id: string | null) => void;
   selectSeat: (tableId: string, seatId: string | null) => void;
-  assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => void;
+  assignGuestToSeat: (tableId: string, seatId: string, guestId: string | null) => boolean;
   lockSeat: (tableId: string, seatId: string, locked: boolean) => void;
   clearSeat: (tableId: string, seatId: string) => void;
   updateSeatOrder: (tableId: string, newOrder: number[]) => void;
@@ -57,7 +63,7 @@ interface SeatStoreState {
   setGuestLookup: (lookup: Record<string, any>) => void;
   detectViolations: () => void;
 
-  // ðŸ†• NEW: Table-level operations
+  // 🔵 Table-level operations
   lockAllSeatsInTable: (tableId: string) => void;
   unlockAllSeatsInTable: (tableId: string) => void;
   deleteTable: (tableId: string) => void;
@@ -79,19 +85,17 @@ interface SeatStoreState {
   } | null;
 }
 
-/* -------------------- ðŸ”§ Helper: Extract table number from label -------------------- */
+/* -------------------- 🧩 Helper: Extract table number from label -------------------- */
 function extractTableNumber(label: string): number | null {
-  // Match patterns like "Table 1", "Table 10", "VIP Table 5", etc.
   const match = label.match(/(\d+)\s*$/);
   return match ? parseInt(match[1], 10) : null;
 }
 
 function updateTableLabel(label: string, newNumber: number): string {
-  // Replace the trailing number with the new number
   return label.replace(/(\d+)\s*$/, `${newNumber}`);
 }
 
-/* -------------------- ðŸ§© Zustand Store -------------------- */
+/* -------------------- 🧩 Zustand Store -------------------- */
 export const useSeatStore = create<SeatStoreState>()(
   devtools(
     persist(
@@ -107,11 +111,7 @@ export const useSeatStore = create<SeatStoreState>()(
         },
         selectedTableId: null,
         selectedSeatId: null,
-
-        // Meal plan selection (per session)
         selectedMealPlanIndex: null,
-
-        // Violation detection state
         violations: [],
         proximityRules: null,
         guestLookup: {},
@@ -168,22 +168,103 @@ export const useSeatStore = create<SeatStoreState>()(
             })),
           })),
 
-        /* ---------- ðŸ§ Guest Seat Assignment ---------- */
-        assignGuestToSeat: (tableId, seatId, guestId) =>
-          set((state) => ({
-            tables: state.tables.map((t) =>
-              t.id !== tableId
-                ? t
-                : {
-                    ...t,
-                    seats: t.seats.map((s) =>
-                      s.id === seatId
-                        ? { ...s, assignedGuestId: guestId ?? null }
-                        : s
-                    ),
-                  }
-            ),
-          })),
+        /* ---------- 🧑 Guest Seat Assignment with Validation ---------- */
+        /**
+         * Assign a guest to a seat with seat mode validation
+         * Uses centralized validateGuestSeatAssignment function
+         * 
+         * @returns true if assignment was successful, false if validation failed
+         */
+        assignGuestToSeat: (tableId, seatId, guestId) => {
+          let assignResult = { success: false, error: '' };
+
+          set((state) => {
+            // Find the table and seat
+            const table = state.tables.find((t) => t.id === tableId);
+            if (!table) {
+              console.error('Assignment failed: Table not found');
+              assignResult = { success: false, error: 'Table not found' };
+              return state;
+            }
+
+            const seat = table.seats.find((s) => s.id === seatId);
+            if (!seat) {
+              console.error('Assignment failed: Seat not found');
+              assignResult = { success: false, error: 'Seat not found' };
+              return state;
+            }
+
+            // If clearing the seat (guestId is null), skip validation
+            if (guestId === null) {
+              console.log(`Clearing seat ${seat.seatNumber} in ${table.label}`);
+              assignResult = { success: true, error: '' };
+              
+              return {
+                tables: state.tables.map((t) =>
+                  t.id !== tableId
+                    ? t
+                    : {
+                        ...t,
+                        seats: t.seats.map((s) =>
+                          s.id === seatId
+                            ? { ...s, assignedGuestId: null }
+                            : s
+                        ),
+                      }
+                ),
+              };
+            }
+
+            // Get guest information for validation
+            const guest = state.guestLookup[guestId];
+            if (!guest) {
+              console.error('Assignment failed: Guest not found in lookup');
+              assignResult = { success: false, error: 'Guest not found' };
+              return state;
+            }
+
+            // Create guest info for validation
+            const guestInfo: GuestInfo = {
+              id: guestId,
+              name: guest.name,
+              fromHost: guest.fromHost ?? false,
+            };
+
+            // Validate the assignment using centralized validation
+            const validation = validateGuestSeatAssignment(guestInfo, seat);
+
+            if (!validation.canAssign) {
+              console.error(`Assignment failed: ${validation.reason}`);
+              assignResult = { success: false, error: validation.reason || 'Validation failed' };
+              return state;
+            }
+
+            // Validation passed, perform the assignment
+            console.log(`Assigning ${guest.name} (${guestInfo.fromHost ? 'Host' : 'External'}) to ${table.label} - Seat ${seat.seatNumber} (mode: ${validation.seatMode})`);
+            assignResult = { success: true, error: '' };
+
+            return {
+              tables: state.tables.map((t) =>
+                t.id !== tableId
+                  ? t
+                  : {
+                      ...t,
+                      seats: t.seats.map((s) =>
+                        s.id === seatId
+                          ? { ...s, assignedGuestId: guestId }
+                          : s
+                      ),
+                    }
+              ),
+            };
+          });
+
+          if (!assignResult.success && assignResult.error) {
+            console.error('Assignment failed:', assignResult.error);
+          }
+
+          return assignResult.success;
+        },
 
         lockSeat: (tableId, seatId, locked) =>
           set((state) => ({
@@ -259,82 +340,119 @@ export const useSeatStore = create<SeatStoreState>()(
           return null;
         },
 
-        // Meal plan action
         setSelectedMealPlanIndex: (index) => set({ selectedMealPlanIndex: index }),
 
+        /* ---------- 🔄 Swap Seats with Validation ---------- */
+        /**
+         * Swap two guests between seats with seat mode validation
+         * Uses centralized validateSeatSwap function
+         * 
+         * All state reading happens inside set() callback to prevent race conditions
+         * 
+         * @returns true if swap was successful, false if validation failed
+         */
         swapSeats: (table1Id, seat1Id, table2Id, seat2Id) => {
-          const state = get();
+          let swapResult = { success: false, error: '' };
 
-          // Find tables
-          const table1 = state.tables.find((t) => t.id === table1Id);
-          const table2 = state.tables.find((t) => t.id === table2Id);
-
-          if (!table1 || !table2) {
-            console.error('Swap failed: Tables not found');
-            return false;
-          }
-
-          // Find seats
-          const seat1 = table1.seats.find((s) => s.id === seat1Id);
-          const seat2 = table2.seats.find((s) => s.id === seat2Id);
-
-          if (!seat1 || !seat2) {
-            console.error('Swap failed: Seats not found');
-            return false;
-          }
-
-          // Validate swap
-          if (seat1.locked || seat2.locked) {
-            console.error('Swap failed: One or both seats are locked');
-            return false;
-          }
-
-          if (!seat1.assignedGuestId || !seat2.assignedGuestId) {
-            console.error('Swap failed: One or both seats are empty');
-            return false;
-          }
-
-          // Store the guest IDs BEFORE any state changes
-          const guest1Id = seat1.assignedGuestId;
-          const guest2Id = seat2.assignedGuestId;
-
-          console.log('Swapping:', {
-            guest1Id,
-            seat1: `${table1.label} - Seat ${seat1.seatNumber}`,
-            guest2Id,
-            seat2: `${table2.label} - Seat ${seat2.seatNumber}`,
-          });
-
-          // Perform the swap with a single state update
           set((state) => {
+            // Find tables from current state
+            const table1 = state.tables.find((t) => t.id === table1Id);
+            const table2 = state.tables.find((t) => t.id === table2Id);
+
+            if (!table1 || !table2) {
+              console.error('Swap failed: Tables not found');
+              swapResult = { success: false, error: 'Tables not found' };
+              return state;
+            }
+
+            // Find seats from current state
+            const seat1 = table1.seats.find((s) => s.id === seat1Id);
+            const seat2 = table2.seats.find((s) => s.id === seat2Id);
+
+            if (!seat1 || !seat2) {
+              console.error('Swap failed: Seats not found');
+              swapResult = { success: false, error: 'Seats not found' };
+              return state;
+            }
+
+            // Get guest information from current state
+            const guest1Id = seat1.assignedGuestId;
+            const guest2Id = seat2.assignedGuestId;
+
+            const guest1Data = guest1Id ? state.guestLookup[guest1Id] : null;
+            const guest2Data = guest2Id ? state.guestLookup[guest2Id] : null;
+
+            // Create guest info objects for validation
+            const guest1Info: GuestInfo | null = guest1Data ? {
+              id: guest1Id!,
+              name: guest1Data.name,
+              fromHost: guest1Data.fromHost ?? false,
+            } : null;
+
+            const guest2Info: GuestInfo | null = guest2Data ? {
+              id: guest2Id!,
+              name: guest2Data.name,
+              fromHost: guest2Data.fromHost ?? false,
+            } : null;
+
+            // Use centralized validation function
+            const validation = validateSeatSwap(seat1, seat2, guest1Info, guest2Info);
+
+            if (!validation.canSwap) {
+              console.error('Swap failed:', validation.reasons.join(', '));
+              swapResult = { success: false, error: validation.reasons.join(', ') };
+              return state;
+            }
+
+            // Validation passed, perform the swap
+            console.log('Swapping (atomic):', {
+              guest1: guest1Info?.name,
+              guest1Type: guest1Info?.fromHost ? 'Host' : 'External',
+              seat1: `${table1.label} - Seat ${seat1.seatNumber}`,
+              seat1Mode: seat1.mode || 'default',
+              guest2: guest2Info?.name,
+              guest2Type: guest2Info?.fromHost ? 'Host' : 'External',
+              seat2: `${table2.label} - Seat ${seat2.seatNumber}`,
+              seat2Mode: seat2.mode || 'default',
+            });
+
             const newTables = state.tables.map((table) => {
               // SAME TABLE: update both seats in one pass
               if (table.id === table1Id && table1Id === table2Id) {
                 return {
                   ...table,
                   seats: table.seats.map((seat) => {
-                    if (seat.id === seat1Id) return { ...seat, assignedGuestId: guest2Id };
-                    if (seat.id === seat2Id) return { ...seat, assignedGuestId: guest1Id };
+                    if (seat.id === seat1Id) {
+                      return { ...seat, assignedGuestId: guest2Id };
+                    }
+                    if (seat.id === seat2Id) {
+                      return { ...seat, assignedGuestId: guest1Id };
+                    }
                     return seat;
                   }),
                 };
               }
 
-              // Different tables: update each table's seat individually
+              // Different tables: update table1's seat
               if (table.id === table1Id) {
                 return {
                   ...table,
                   seats: table.seats.map((seat) =>
-                    seat.id === seat1Id ? { ...seat, assignedGuestId: guest2Id } : seat
+                    seat.id === seat1Id 
+                      ? { ...seat, assignedGuestId: guest2Id } 
+                      : seat
                   ),
                 };
               }
 
+              // Different tables: update table2's seat
               if (table.id === table2Id) {
                 return {
                   ...table,
                   seats: table.seats.map((seat) =>
-                    seat.id === seat2Id ? { ...seat, assignedGuestId: guest1Id } : seat
+                    seat.id === seat2Id 
+                      ? { ...seat, assignedGuestId: guest1Id } 
+                      : seat
                   ),
                 };
               }
@@ -342,33 +460,20 @@ export const useSeatStore = create<SeatStoreState>()(
               return table;
             });
 
+            swapResult = { success: true, error: '' };
+            console.log('Swap completed atomically');
+
             return { tables: newTables };
           });
 
-          // Verify the swap
-          const newState = get();
-          const verifyTable1 = newState.tables.find((t) => t.id === table1Id);
-          const verifyTable2 = newState.tables.find((t) => t.id === table2Id);
-          const verifySeat1 = verifyTable1?.seats.find((s) => s.id === seat1Id);
-          const verifySeat2 = verifyTable2?.seats.find((s) => s.id === seat2Id);
-
-          const swapSuccessful =
-            verifySeat1?.assignedGuestId === guest2Id &&
-            verifySeat2?.assignedGuestId === guest1Id;
-
-          if (swapSuccessful) {
-            console.log('Swap successful:', {
-              seat1Now: verifySeat1?.assignedGuestId,
-              seat2Now: verifySeat2?.assignedGuestId,
-            });
-          } else {
-            console.error('Swap verification failed!');
+          if (!swapResult.success && swapResult.error) {
+            console.error('Swap failed:', swapResult.error);
           }
 
-          return swapSuccessful;
+          return swapResult.success;
         },
 
-        /* ---------- ðŸ” VIOLATION DETECTION ---------- */
+        /* ---------- 🔍 VIOLATION DETECTION ---------- */
         setProximityRules: (rules) => set({ proximityRules: rules }),
 
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
@@ -389,11 +494,8 @@ export const useSeatStore = create<SeatStoreState>()(
           set({ violations });
         },
 
-        /* ---------- ðŸ†• NEW: TABLE-LEVEL OPERATIONS ---------- */
+        /* ---------- 🔵 TABLE-LEVEL OPERATIONS ---------- */
 
-        /**
-         * Lock all seats in a table
-         */
         lockAllSeatsInTable: (tableId) =>
           set((state) => ({
             tables: state.tables.map((t) =>
@@ -406,9 +508,6 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        /**
-         * Unlock all seats in a table
-         */
         unlockAllSeatsInTable: (tableId) =>
           set((state) => ({
             tables: state.tables.map((t) =>
@@ -421,9 +520,6 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        /**
-         * Clear all guests from all seats in a table (unseat all)
-         */
         clearAllSeatsInTable: (tableId) =>
           set((state) => ({
             tables: state.tables.map((t) =>
@@ -440,30 +536,18 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        /**
-         * Delete a table and reorder subsequent tables
-         * - Unseats all guests in the table first
-         * - Removes the table from chunks
-         * - Reorders tables that come after the deleted table
-         */
         deleteTable: (tableId) => {
           set((state) => {
             const tableToDelete = state.tables.find((t) => t.id === tableId);
             if (!tableToDelete) return state;
 
-            // Get the table number of the deleted table
             const deletedTableNumber = extractTableNumber(tableToDelete.label);
-
-            // Remove table from chunks
             const chunks = { ...state.chunks };
             removeTableFromChunk(chunks, tableId);
 
-            // Filter out the deleted table and reorder remaining tables
             const remainingTables = state.tables
               .filter((t) => t.id !== tableId)
               .map((t) => {
-                // If this table has a number greater than the deleted table's number,
-                // decrement its number
                 if (deletedTableNumber !== null) {
                   const currentNumber = extractTableNumber(t.label);
                   if (currentNumber !== null && currentNumber > deletedTableNumber) {
@@ -479,19 +563,12 @@ export const useSeatStore = create<SeatStoreState>()(
             return {
               tables: remainingTables,
               chunks,
-              // Clear selection if the deleted table was selected
               selectedTableId: state.selectedTableId === tableId ? null : state.selectedTableId,
               selectedSeatId: state.selectedTableId === tableId ? null : state.selectedSeatId,
             };
           });
         },
 
-        /**
-         * Replace a table with a new table configuration
-         * - Preserves the table's position
-         * - Preserves the table's label
-         * - Clears all guests (modifying seats unseats all guests)
-         */
         replaceTable: (tableId, newTable) =>
           set((state) => ({
             tables: state.tables.map((t) =>
@@ -552,7 +629,6 @@ export const useSeatStore = create<SeatStoreState>()(
           set({ chunks: newChunks });
         },
 
-        // ORIGINAL cleanupEmptyChunks implementation - preserved exactly
         cleanupEmptyChunks: () => {
           set((state) => {
             const chunks = { ...state.chunks };
@@ -624,7 +700,7 @@ export const useSeatStore = create<SeatStoreState>()(
           );
         },
       }),
-      { name: "seat-tables" }  // ORIGINAL persist name preserved
+      { name: "seat-tables" }
     )
   )
 );

@@ -1,11 +1,23 @@
 // src/utils/swapHelper.ts
 import { Table } from '@/types/Table';
-import { Seat } from '@/types/Seat';
+import { Seat, SeatMode } from '@/types/Seat';
+import {
+  validateSeatSwap,
+  validateGuestSeatAssignment,
+  GuestInfo,
+  SeatSwapValidation,
+} from '@/utils/seatValidation';
 
 export interface SwapValidation {
   isValid: boolean;
   reasons: string[];
   canSwap: boolean;
+  seatModeIssues?: {
+    guest1CanSitInSeat2: boolean;
+    guest2CanSitInSeat1: boolean;
+    seat1Mode: SeatMode;
+    seat2Mode: SeatMode;
+  };
 }
 
 export interface ViolationPrediction {
@@ -17,51 +29,94 @@ export interface ViolationPrediction {
 
 /**
  * Validate if two seats can be swapped
+ * This is a wrapper around the centralized validateSeatSwap function
+ * for backward compatibility with existing code
  */
 export function validateSwap(
   seat1: Seat | undefined,
-  seat2: Seat | undefined
+  seat2: Seat | undefined,
+  guestLookup?: Record<string, any>
 ): SwapValidation {
-  const reasons: string[] = [];
-  let isValid = true;
-
-  // Check if seats exist
+  // Basic checks without guest info
   if (!seat1 || !seat2) {
-    reasons.push('One or both seats do not exist');
-    isValid = false;
-    return { isValid, reasons, canSwap: false };
+    return {
+      isValid: false,
+      reasons: ['One or both seats do not exist'],
+      canSwap: false,
+    };
   }
 
-  // Check if seats are the same
   if (seat1.id === seat2.id) {
-    reasons.push('Cannot swap a seat with itself');
-    isValid = false;
+    return {
+      isValid: false,
+      reasons: ['Cannot swap a seat with itself'],
+      canSwap: false,
+    };
   }
 
-  // Check if either seat is locked
+  const reasons: string[] = [];
+
   if (seat1.locked) {
     reasons.push(`Seat ${seat1.seatNumber} is locked`);
-    isValid = false;
   }
   if (seat2.locked) {
     reasons.push(`Seat ${seat2.seatNumber} is locked`);
-    isValid = false;
   }
-
-  // Check if both seats have guests
   if (!seat1.assignedGuestId) {
     reasons.push(`Seat ${seat1.seatNumber} is empty`);
-    isValid = false;
   }
   if (!seat2.assignedGuestId) {
     reasons.push(`Seat ${seat2.seatNumber} is empty`);
-    isValid = false;
+  }
+
+  if (reasons.length > 0) {
+    return {
+      isValid: false,
+      reasons,
+      canSwap: false,
+    };
+  }
+
+  // Check seat mode compatibility if we have guest information
+  if (guestLookup && seat1.assignedGuestId && seat2.assignedGuestId) {
+    const guest1 = guestLookup[seat1.assignedGuestId];
+    const guest2 = guestLookup[seat2.assignedGuestId];
+
+    const guest1Info: GuestInfo | null = guest1 ? {
+      id: seat1.assignedGuestId,
+      name: guest1.name,
+      fromHost: guest1.fromHost ?? false,
+    } : null;
+
+    const guest2Info: GuestInfo | null = guest2 ? {
+      id: seat2.assignedGuestId,
+      name: guest2.name,
+      fromHost: guest2.fromHost ?? false,
+    } : null;
+
+    // Use centralized validation
+    const validation = validateSeatSwap(seat1, seat2, guest1Info, guest2Info);
+
+    const seat1Mode: SeatMode = seat1.mode || 'default';
+    const seat2Mode: SeatMode = seat2.mode || 'default';
+
+    return {
+      isValid: validation.canSwap,
+      reasons: validation.reasons,
+      canSwap: validation.canSwap,
+      seatModeIssues: {
+        guest1CanSitInSeat2: validation.guest1Validation?.canAssign ?? true,
+        guest2CanSitInSeat1: validation.guest2Validation?.canAssign ?? true,
+        seat1Mode,
+        seat2Mode,
+      },
+    };
   }
 
   return {
-    isValid,
-    reasons,
-    canSwap: isValid && reasons.length === 0,
+    isValid: true,
+    reasons: [],
+    canSwap: true,
   };
 }
 
@@ -73,21 +128,6 @@ function getAdjacentSeatIds(seat: Seat, allSeats: Seat[]): string[] {
     return seat.adjacentSeats;
   }
   return [];
-}
-
-/**
- * Check if two guests should sit together based on rules
- */
-function shouldSitTogether(
-  guest1Id: string,
-  guest2Id: string,
-  sitTogetherRules: any[]
-): boolean {
-  return sitTogetherRules.some(
-    (rule) =>
-      (rule.guest1Id === guest1Id && rule.guest2Id === guest2Id) ||
-      (rule.guest1Id === guest2Id && rule.guest2Id === guest1Id)
-  );
 }
 
 /**
@@ -209,6 +249,7 @@ export function predictViolationsAfterSwap(
 
 /**
  * Get all valid swap candidates for a seat
+ * Uses centralized validation for seat mode checks
  */
 export function getSwapCandidates(
   tables: Table[],
@@ -224,6 +265,7 @@ export function getSwapCandidates(
     return [];
   }
 
+  const sourceGuest = guestLookup[sourceSeat.assignedGuestId];
   const candidates: any[] = [];
 
   tables.forEach((table) => {
@@ -234,9 +276,12 @@ export function getSwapCandidates(
       // Skip empty seats
       if (!seat.assignedGuestId) return;
 
-      // Validate the swap
-      const validation = validateSwap(sourceSeat, seat);
+      const targetGuest = guestLookup[seat.assignedGuestId];
 
+      // Validate the swap including seat mode using centralized validation
+      const validation = validateSwap(sourceSeat, seat, guestLookup);
+
+      // Only include candidates that pass validation (including seat mode)
       if (validation.canSwap) {
         // Predict violations
         const prediction = predictViolationsAfterSwap(
@@ -253,16 +298,13 @@ export function getSwapCandidates(
           tableLabel: table.label,
           seatId: seat.id,
           seatNumber: seat.seatNumber,
+          seatMode: seat.mode || 'default',
           guestId: seat.assignedGuestId,
-          guest: guestLookup[seat.assignedGuestId],
+          guest: targetGuest,
           validation,
-
-          // FIX
           violationsAfterSwap: prediction.details,
-
           violationCount: prediction.totalViolations,
         });
-
       }
     });
   });
@@ -271,4 +313,89 @@ export function getSwapCandidates(
   candidates.sort((a, b) => a.violationCount - b.violationCount);
 
   return candidates;
+}
+
+/**
+ * Get incompatible swap candidates (for display purposes)
+ * These are candidates that fail ONLY due to seat mode restrictions
+ */
+export function getIncompatibleSwapCandidates(
+  tables: Table[],
+  sourceTableId: string,
+  sourceSeatId: string,
+  guestLookup: Record<string, any>
+) {
+  const sourceTable = tables.find((t) => t.id === sourceTableId);
+  const sourceSeat = sourceTable?.seats.find((s) => s.id === sourceSeatId);
+
+  if (!sourceSeat || !sourceSeat.assignedGuestId) {
+    return [];
+  }
+
+  const sourceGuest = guestLookup[sourceSeat.assignedGuestId];
+  const sourceGuestInfo: GuestInfo = {
+    id: sourceSeat.assignedGuestId,
+    name: sourceGuest?.name,
+    fromHost: sourceGuest?.fromHost ?? false,
+  };
+
+  const incompatibleCandidates: any[] = [];
+
+  tables.forEach((table) => {
+    table.seats.forEach((seat) => {
+      // Skip the source seat
+      if (seat.id === sourceSeatId) return;
+
+      // Skip empty seats
+      if (!seat.assignedGuestId) return;
+
+      // Skip locked seats
+      if (seat.locked || sourceSeat.locked) return;
+
+      const targetGuest = guestLookup[seat.assignedGuestId];
+      const targetGuestInfo: GuestInfo = {
+        id: seat.assignedGuestId,
+        name: targetGuest?.name,
+        fromHost: targetGuest?.fromHost ?? false,
+      };
+
+      // Use centralized validation to check seat mode compatibility
+      const validation = validateSeatSwap(sourceSeat, seat, sourceGuestInfo, targetGuestInfo);
+
+      // Only include if it fails due to seat mode (check if reasons mention seat mode issues)
+      if (!validation.canSwap) {
+        const hasSeatModeIssue = validation.reasons.some(
+          (reason) => 
+            reason.includes('cannot be assigned') || 
+            reason.includes('cannot sit') ||
+            reason.includes('host-only') ||
+            reason.includes('external-only')
+        );
+
+        if (hasSeatModeIssue) {
+          incompatibleCandidates.push({
+            tableId: table.id,
+            tableLabel: table.label,
+            seatId: seat.id,
+            seatNumber: seat.seatNumber,
+            seatMode: seat.mode || 'default',
+            sourceSeatMode: sourceSeat.mode || 'default',
+            guestId: seat.assignedGuestId,
+            guest: targetGuest,
+            seatModeValidation: {
+              isCompatible: false,
+              guest1CanSitInSeat2: validation.guest1Validation?.canAssign ?? false,
+              guest2CanSitInSeat1: validation.guest2Validation?.canAssign ?? false,
+              seat1Mode: sourceSeat.mode || 'default',
+              seat2Mode: seat.mode || 'default',
+              reasons: validation.reasons,
+            },
+            reasons: validation.reasons,
+          });
+        }
+      }
+    });
+  });
+
+  return incompatibleCandidates;
 }

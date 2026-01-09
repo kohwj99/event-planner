@@ -22,6 +22,8 @@ import {
   Divider,
   Paper,
   IconButton,
+  Collapse,
+  Tooltip,
 } from '@mui/material';
 import {
   Search,
@@ -32,12 +34,18 @@ import {
   Star,
   Business,
   Public,
+  Block,
+  ExpandMore,
+  ExpandLess,
+  Home,
+  PersonOutline,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
-import { getSwapCandidates } from '@/utils/swapHelper';
+import { getSwapCandidates, getIncompatibleSwapCandidates } from '@/utils/swapHelper';
 import { countViolations } from '@/utils/violationDetector';
 import type { ProximityViolation } from '@/utils/violationDetector';
+import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 
 interface SwapSeatModalProps {
   open: boolean;
@@ -53,15 +61,54 @@ interface SwapCandidate {
   tableLabel: string;
   seatId: string;
   seatNumber: number;
+  seatMode: SeatMode;
   guestId: string;
   guest: any;
   validation: {
     isValid: boolean;
     reasons: string[];
     canSwap: boolean;
+    seatModeIssues?: {
+      guest1CanSitInSeat2: boolean;
+      guest2CanSitInSeat1: boolean;
+      seat1Mode: SeatMode;
+      seat2Mode: SeatMode;
+    };
   };
   violationsAfterSwap: ProximityViolation[];
   violationCount: number;
+}
+
+interface IncompatibleCandidate {
+  tableId: string;
+  tableLabel: string;
+  seatId: string;
+  seatNumber: number;
+  seatMode: SeatMode;
+  sourceSeatMode: SeatMode;
+  guestId: string;
+  guest: any;
+  seatModeValidation: {
+    isCompatible: boolean;
+    guest1CanSitInSeat2: boolean;
+    guest2CanSitInSeat1: boolean;
+    seat1Mode: SeatMode;
+    seat2Mode: SeatMode;
+    reasons: string[];
+  };
+  reasons: string[];
+}
+
+// Helper to get seat mode display info
+function getSeatModeDisplay(mode: SeatMode) {
+  const config = SEAT_MODE_CONFIGS[mode] || SEAT_MODE_CONFIGS['default'];
+  return {
+    label: config.label,
+    shortLabel: config.shortLabel,
+    color: config.color,
+    icon: mode === 'host-only' ? <Home fontSize="small" /> : mode === 'external-only' ? <PersonOutline fontSize="small" /> : null,
+    chipColor: mode === 'host-only' ? 'primary' : mode === 'external-only' ? 'error' : 'default',
+  };
 }
 
 export default function SwapSeatModal({
@@ -73,6 +120,7 @@ export default function SwapSeatModal({
 }: SwapSeatModalProps) {
   const [filter, setFilter] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState<SwapCandidate | null>(null);
+  const [showIncompatible, setShowIncompatible] = useState(false);
 
   const tables = useSeatStore((s) => s.tables);
   const swapSeats = useSeatStore((s) => s.swapSeats);
@@ -106,6 +154,11 @@ export default function SwapSeatModal({
     [sourceSeat, guestLookup]
   );
 
+  const sourceSeatMode = useMemo(
+    () => (sourceSeat?.mode || 'default') as SeatMode,
+    [sourceSeat]
+  );
+
   // Get swap candidates - cast the return type
   const candidates = useMemo(() => {
     if (!sourceSeat || !sourceGuest) return [];
@@ -119,12 +172,25 @@ export default function SwapSeatModal({
     return result as SwapCandidate[];
   }, [tables, sourceTableId, sourceSeatId, guestLookup, proximityRules, sourceSeat, sourceGuest]);
 
+  // Get incompatible candidates (for display purposes)
+  const incompatibleCandidates = useMemo(() => {
+    if (!sourceSeat || !sourceGuest) return [];
+    const result = getIncompatibleSwapCandidates(
+      tables,
+      sourceTableId,
+      sourceSeatId,
+      guestLookup
+    );
+    return result as IncompatibleCandidate[];
+  }, [tables, sourceTableId, sourceSeatId, guestLookup, sourceSeat, sourceGuest]);
+
   // Reset selection when modal opens/closes or candidates change
   useEffect(() => {
     if (!open) return;
 
     setSelectedCandidate(null);
     setFilter('');
+    setShowIncompatible(false);
   }, [open]);
 
   // Filter candidates
@@ -137,6 +203,17 @@ export default function SwapSeatModal({
       c.tableLabel?.toLowerCase().includes(query)
     );
   }, [candidates, filter]);
+
+  // Filter incompatible candidates
+  const filteredIncompatible = useMemo(() => {
+    if (!filter.trim()) return incompatibleCandidates;
+    const query = filter.toLowerCase();
+    return incompatibleCandidates.filter((c) =>
+      c.guest?.name?.toLowerCase().includes(query) ||
+      c.guest?.company?.toLowerCase().includes(query) ||
+      c.tableLabel?.toLowerCase().includes(query)
+    );
+  }, [incompatibleCandidates, filter]);
 
   // Separate perfect swaps from others
   const perfectSwaps = filteredCandidates.filter((c) => c.violationCount === 0);
@@ -162,7 +239,7 @@ export default function SwapSeatModal({
       onClose();
     } else {
       console.error('Swap failed');
-      alert('Swap failed. Please check the console for details.');
+      alert('Swap failed. The swap may violate seat mode restrictions. Please check the console for details.');
     }
   };
 
@@ -170,9 +247,26 @@ export default function SwapSeatModal({
     onClose();
     setSelectedCandidate(null);
     setFilter('');
+    setShowIncompatible(false);
   };
 
-  const renderGuestCard = (guest: any, label: string, tableLabel?: string, seatNumber?: number) => {
+  const renderSeatModeChip = (mode: SeatMode, size: 'small' | 'medium' = 'small') => {
+    if (mode === 'default') return null;
+    
+    const display = getSeatModeDisplay(mode);
+    return (
+      <Chip
+        label={display.label}
+        size={size}
+        color={display.chipColor as 'primary' | 'error' | 'default'}
+        variant="outlined"
+        icon={display.icon || undefined}
+        sx={{ height: size === 'small' ? 20 : 24, fontSize: size === 'small' ? 10 : 12 }}
+      />
+    );
+  };
+
+  const renderGuestCard = (guest: any, label: string, tableLabel?: string, seatNumber?: number, seatMode?: SeatMode) => {
     if (!guest) return null;
 
     const isVIP = guest.ranking <= 4;
@@ -221,7 +315,7 @@ export default function SwapSeatModal({
             </Stack>
           </Stack>
 
-          <Stack direction="row" spacing={1} flexWrap="wrap">
+          <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
             <Chip
               label={guest.fromHost ? 'Host' : 'External'}
               size="small"
@@ -234,6 +328,7 @@ export default function SwapSeatModal({
                 variant="outlined"
               />
             )}
+            {seatMode && seatMode !== 'default' && renderSeatModeChip(seatMode)}
           </Stack>
         </Stack>
       </Paper>
@@ -243,22 +338,19 @@ export default function SwapSeatModal({
   const renderCandidateItem = (candidate: SwapCandidate) => {
     const isSelected = selectedCandidate?.seatId === candidate.seatId;
     const hasViolations = candidate.violationCount > 0;
+    const targetSeatModeDisplay = getSeatModeDisplay(candidate.seatMode);
 
     return (
-      <ListItem
-        key={candidate.seatId}
-        disablePadding
-        sx={{ mb: 1 }}
-      >
+      <ListItem key={candidate.seatId} disablePadding sx={{ mb: 0.5 }}>
         <ListItemButton
           selected={isSelected}
           onClick={() => setSelectedCandidate(candidate)}
           sx={{
-            border: hasViolations ? '1px solid #ff9800' : '1px solid #4caf50',
             borderRadius: 1,
-            bgcolor: hasViolations ? '#fff3e0' : '#e8f5e9',
+            border: isSelected ? '2px solid #1976d2' : '1px solid #e0e0e0',
+            bgcolor: hasViolations ? '#fff8e1' : '#e8f5e9',
             '&.Mui-selected': {
-              bgcolor: hasViolations ? '#ffe0b2' : '#c8e6c9',
+              bgcolor: hasViolations ? '#ffecb3' : '#c8e6c9',
             },
             '&:hover': {
               bgcolor: hasViolations ? '#ffe0b2' : '#c8e6c9',
@@ -308,7 +400,7 @@ export default function SwapSeatModal({
                 >
                   {candidate.guest?.title || ''} • {candidate.guest?.company || ''} • {candidate.guest?.country || ''}
                 </Typography>
-                <Stack direction="row" spacing={1}>
+                <Stack direction="row" spacing={1} alignItems="center">
                   <Chip
                     label={candidate.guest?.fromHost ? 'Host' : 'External'}
                     size="small"
@@ -321,6 +413,69 @@ export default function SwapSeatModal({
                     variant="outlined"
                     sx={{ height: 18, fontSize: 10 }}
                   />
+                  {candidate.seatMode !== 'default' && (
+                    <Tooltip title={`This seat is restricted to ${candidate.seatMode === 'host-only' ? 'host' : 'external'} guests`}>
+                      {renderSeatModeChip(candidate.seatMode) || <></>}
+                    </Tooltip>
+                  )}
+                </Stack>
+              </Stack>
+            }
+          />
+        </ListItemButton>
+      </ListItem>
+    );
+  };
+
+  const renderIncompatibleItem = (candidate: IncompatibleCandidate) => {
+    return (
+      <ListItem key={candidate.seatId} disablePadding sx={{ mb: 0.5 }}>
+        <ListItemButton
+          disabled
+          sx={{
+            borderRadius: 1,
+            border: '1px solid #e0e0e0',
+            bgcolor: '#fafafa',
+            opacity: 0.7,
+            cursor: 'not-allowed',
+          }}
+        >
+          <ListItemText slotProps={{ primary: { component: 'div' }, secondary: { component: 'div' } }}
+            primary={
+              <Stack direction="row" alignItems="center" justifyContent="space-between">
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="body1" fontWeight={600} color="text.disabled">
+                    {candidate.guest?.name || 'Unknown'}
+                  </Typography>
+                </Stack>
+                <Chip
+                  label="Seat mode incompatible"
+                  size="small"
+                  color="default"
+                  icon={<Block fontSize="small" />}
+                  sx={{ bgcolor: '#ffebee', color: '#c62828' }}
+                />
+              </Stack>
+            }
+            secondary={
+              <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                <Typography variant="caption" color="error.main" component="span">
+                  {candidate.reasons.join(' | ')}
+                </Typography>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip
+                    label={candidate.guest?.fromHost ? 'Host' : 'External'}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: 10 }}
+                  />
+                  <Chip
+                    label={`${candidate.tableLabel} - Seat ${candidate.seatNumber}`}
+                    size="small"
+                    variant="outlined"
+                    sx={{ height: 18, fontSize: 10 }}
+                  />
+                  {candidate.seatMode !== 'default' && renderSeatModeChip(candidate.seatMode)}
                 </Stack>
               </Stack>
             }
@@ -367,9 +522,20 @@ export default function SwapSeatModal({
               sourceGuest,
               'Swapping from:',
               sourceTable?.label,
-              sourceSeat?.seatNumber
+              sourceSeat?.seatNumber,
+              sourceSeatMode
             )}
           </Box>
+
+          {/* Seat Mode Info Alert */}
+          {sourceSeatMode !== 'default' && (
+            <Alert severity="info" icon={sourceSeatMode === 'host-only' ? <Home /> : <PersonOutline />}>
+              <Typography variant="body2">
+                <strong>Source seat restriction:</strong> This seat is {sourceSeatMode === 'host-only' ? 'host-only' : 'external-only'}. 
+                Only guests of the {sourceSeatMode === 'host-only' ? 'same type (host)' : 'same type (external)'} or from default seats can swap here.
+              </Typography>
+            </Alert>
+          )}
 
           <Divider />
 
@@ -392,7 +558,7 @@ export default function SwapSeatModal({
           {/* Summary */}
           <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
             <Typography variant="body2" color="text.secondary" component="span">
-              Found {filteredCandidates.length} possible swap{filteredCandidates.length !== 1 ? 's' : ''}
+              Found {filteredCandidates.length} compatible swap{filteredCandidates.length !== 1 ? 's' : ''}
             </Typography>
             {perfectSwaps.length > 0 && (
               <Chip
@@ -408,12 +574,25 @@ export default function SwapSeatModal({
                 color="warning"
               />
             )}
+            {filteredIncompatible.length > 0 && (
+              <Chip
+                label={`${filteredIncompatible.length} incompatible`}
+                size="small"
+                color="default"
+                sx={{ bgcolor: '#ffebee', color: '#c62828' }}
+              />
+            )}
           </Stack>
 
           {/* Candidates List */}
-          {filteredCandidates.length === 0 ? (
+          {filteredCandidates.length === 0 && filteredIncompatible.length === 0 ? (
             <Alert severity="info">
               No valid swap candidates found. All other seats are either empty, locked, or the same seat.
+            </Alert>
+          ) : filteredCandidates.length === 0 && filteredIncompatible.length > 0 ? (
+            <Alert severity="warning">
+              No compatible swaps available. All {filteredIncompatible.length} potential swap{filteredIncompatible.length !== 1 ? 's are' : ' is'} blocked 
+              due to seat mode restrictions. Consider changing seat modes or swapping with guests of compatible types.
             </Alert>
           ) : (
             <Box sx={{ maxHeight: 400, overflowY: 'auto' }}>
@@ -449,6 +628,27 @@ export default function SwapSeatModal({
             </Box>
           )}
 
+          {/* Incompatible Swaps Section (Collapsible) */}
+          {filteredIncompatible.length > 0 && (
+            <Box>
+              <Button
+                size="small"
+                onClick={() => setShowIncompatible(!showIncompatible)}
+                startIcon={showIncompatible ? <ExpandLess /> : <ExpandMore />}
+                sx={{ color: 'text.secondary', textTransform: 'none' }}
+              >
+                {showIncompatible ? 'Hide' : 'Show'} {filteredIncompatible.length} incompatible swap{filteredIncompatible.length !== 1 ? 's' : ''} (seat mode restrictions)
+              </Button>
+              <Collapse in={showIncompatible}>
+                <Box sx={{ maxHeight: 200, overflowY: 'auto', mt: 1 }}>
+                  <List dense disablePadding>
+                    {filteredIncompatible.map(renderIncompatibleItem)}
+                  </List>
+                </Box>
+              </Collapse>
+            </Box>
+          )}
+
           {/* Selected Candidate Preview */}
           {selectedCandidate && (
             <>
@@ -458,7 +658,8 @@ export default function SwapSeatModal({
                   selectedCandidate.guest,
                   'Swapping with:',
                   selectedCandidate.tableLabel,
-                  selectedCandidate.seatNumber
+                  selectedCandidate.seatNumber,
+                  selectedCandidate.seatMode
                 )}
 
                 {selectedCandidate.violationCount > 0 && (
