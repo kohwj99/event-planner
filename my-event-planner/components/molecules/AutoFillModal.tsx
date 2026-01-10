@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -23,20 +23,34 @@ import {
   Autocomplete,
   Chip,
   Alert,
+  Tooltip,
+  Badge,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon, Close as CloseIcon } from '@mui/icons-material';
-import { useGuestStore } from '@/store/guestStore';
+import { 
+  Add as AddIcon, 
+  Delete as DeleteIcon, 
+  Close as CloseIcon,
+  Recommend as RecommendIcon,
+  CheckCircle as CheckCircleIcon,
+  Star as StarIcon,
+  Visibility as VisibilityIcon,
+} from '@mui/icons-material';
+import { useGuestStore, Guest } from '@/store/guestStore';
+import { useEventStore } from '@/store/eventStore';
 import { autoFillSeats, SortField, SortDirection, SortRule, TableRules, ProximityRules } from '@/utils/seatAutoFillHelper';
 
 interface AutoFillModalProps {
   open: boolean;
   onClose: () => void;
+  eventId: string | null;
+  sessionId: string | null;
 }
 
 export interface SitTogetherRule {
   id: string;
   guest1Id: string;
   guest2Id: string;
+  isFromRecommendation?: boolean; // Track if this came from a recommendation
 }
 
 export interface SitAwayRule {
@@ -45,9 +59,25 @@ export interface SitAwayRule {
   guest2Id: string;
 }
 
-export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
+/**
+ * VIP Recommendation for sitting with tracked guest
+ */
+interface VIPRecommendation {
+  vipGuest: Guest;
+  trackedGuest: Guest;
+  historicalCount: number; // How many times they've sat together before
+  ranking: number;
+  reason: string;
+}
+
+export default function AutoFillModal({ open, onClose, eventId, sessionId }: AutoFillModalProps) {
   const { hostGuests, externalGuests } = useGuestStore();
   const allGuests = [...hostGuests, ...externalGuests].filter((g) => !g.deleted);
+
+  // Event store for tracking data
+  const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
+  const getFilteredHistoricalAdjacencyCount = useEventStore((s) => s.getFilteredHistoricalAdjacencyCount);
+  const isSessionTracked = useEventStore((s) => s.isSessionTracked);
 
   // Guest list selection
   const [includeHost, setIncludeHost] = useState(true);
@@ -72,11 +102,144 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     },
   });
 
-  // NEW: Proximity Rules
+  // Proximity Rules
   const [sitTogetherRules, setSitTogetherRules] = useState<SitTogetherRule[]>([]);
   const [sitAwayRules, setSitAwayRules] = useState<SitAwayRule[]>([]);
 
+  // VIP Recommendations UI state
+  const [showRecommendations, setShowRecommendations] = useState(true);
+  const [acceptedRecommendations, setAcceptedRecommendations] = useState<Set<string>>(new Set());
+
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Build guest lookup
+  const guestLookup = useMemo(() => {
+    const lookup: Record<string, Guest> = {};
+    allGuests.forEach(g => {
+      lookup[g.id] = g;
+    });
+    return lookup;
+  }, [allGuests]);
+
+  // Calculate VIP recommendations based on adjacency history
+  const vipRecommendations = useMemo((): VIPRecommendation[] => {
+    if (!eventId || !sessionId) return [];
+    
+    // Check if this session is tracked
+    const sessionTracked = isSessionTracked(eventId, sessionId);
+    if (!sessionTracked) return [];
+
+    const trackedGuestIds = getTrackedGuests(eventId);
+    if (trackedGuestIds.length === 0) return [];
+
+    const recommendations: VIPRecommendation[] = [];
+
+    trackedGuestIds.forEach(trackedGuestId => {
+      const trackedGuest = guestLookup[trackedGuestId];
+      if (!trackedGuest) return;
+
+      // Get opposite type VIPs (ranking 1-4)
+      // If tracked is host, get external VIPs; if tracked is external, get host VIPs
+      const oppositeVIPs = allGuests.filter(g => 
+        g.fromHost !== trackedGuest.fromHost && 
+        g.ranking >= 1 && 
+        g.ranking <= 4 &&
+        !g.deleted
+      );
+
+      if (oppositeVIPs.length === 0) return;
+
+      // Get historical adjacency data for this tracked guest
+      const historicalData = getFilteredHistoricalAdjacencyCount(
+        eventId,
+        sessionId,
+        trackedGuestId,
+        trackedGuest.fromHost
+      );
+
+      // Build recommendations for each VIP
+      oppositeVIPs.forEach(vip => {
+        const historyData = historicalData[vip.id];
+        const historicalCount = historyData?.count || 0;
+
+        recommendations.push({
+          vipGuest: vip,
+          trackedGuest: trackedGuest,
+          historicalCount,
+          ranking: vip.ranking,
+          reason: historicalCount === 0 
+            ? 'Never sat together before' 
+            : `Sat together ${historicalCount} time${historicalCount > 1 ? 's' : ''} before`,
+        });
+      });
+    });
+
+    // Sort recommendations:
+    // 1. By ranking (lower ranking = higher priority, 1 at top)
+    // 2. By historical count (fewer times = higher priority to even out)
+    return recommendations.sort((a, b) => {
+      // First by ranking (ascending - 1 is highest priority)
+      if (a.ranking !== b.ranking) {
+        return a.ranking - b.ranking;
+      }
+      // Then by historical count (ascending - fewer times = higher priority)
+      return a.historicalCount - b.historicalCount;
+    });
+  }, [eventId, sessionId, allGuests, guestLookup, getTrackedGuests, getFilteredHistoricalAdjacencyCount, isSessionTracked]);
+
+  // Get unique recommendation key
+  const getRecommendationKey = (rec: VIPRecommendation) => 
+    `${rec.trackedGuest.id}-${rec.vipGuest.id}`;
+
+  // Accept a recommendation (creates a sit-together rule)
+  const acceptRecommendation = (rec: VIPRecommendation) => {
+    const key = getRecommendationKey(rec);
+    
+    // Check if rule already exists
+    const ruleExists = sitTogetherRules.some(
+      rule => 
+        (rule.guest1Id === rec.trackedGuest.id && rule.guest2Id === rec.vipGuest.id) ||
+        (rule.guest1Id === rec.vipGuest.id && rule.guest2Id === rec.trackedGuest.id)
+    );
+
+    if (!ruleExists) {
+      setSitTogetherRules([
+        ...sitTogetherRules,
+        {
+          id: `rec-${Date.now()}-${key}`,
+          guest1Id: rec.trackedGuest.id,
+          guest2Id: rec.vipGuest.id,
+          isFromRecommendation: true,
+        },
+      ]);
+    }
+
+    setAcceptedRecommendations(prev => new Set(prev).add(key));
+  };
+
+  // Reject/remove a recommendation
+  const rejectRecommendation = (rec: VIPRecommendation) => {
+    const key = getRecommendationKey(rec);
+    
+    // Remove from accepted set
+    setAcceptedRecommendations(prev => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+
+    // Remove corresponding sit-together rule if it was from this recommendation
+    setSitTogetherRules(prev => 
+      prev.filter(rule => 
+        !((rule.guest1Id === rec.trackedGuest.id && rule.guest2Id === rec.vipGuest.id) ||
+          (rule.guest1Id === rec.vipGuest.id && rule.guest2Id === rec.trackedGuest.id))
+      )
+    );
+  };
+
+  // Check if recommendation is accepted
+  const isRecommendationAccepted = (rec: VIPRecommendation) => 
+    acceptedRecommendations.has(getRecommendationKey(rec));
 
   // --- Sorting Rules Handlers ---
   const addSortRule = () => setSortRules([...sortRules, { field: 'name', direction: 'asc' }]);
@@ -109,7 +272,7 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     });
   };
 
-  // --- NEW: Proximity Rules Handlers ---
+  // --- Proximity Rules Handlers ---
   const addSitTogetherRule = () => {
     setSitTogetherRules([
       ...sitTogetherRules,
@@ -210,6 +373,14 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
     }
   };
 
+  // Get color for ranking badge
+  const getRankingColor = (ranking: number): 'error' | 'warning' | 'info' | 'default' => {
+    if (ranking === 1) return 'error';
+    if (ranking === 2) return 'warning';
+    if (ranking === 3) return 'info';
+    return 'default';
+  };
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
       <DialogTitle>Auto-Fill Seats Configuration</DialogTitle>
@@ -231,6 +402,143 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
               </ul>
             </Alert>
           )}
+
+          {/* ========== VIP RECOMMENDATIONS (NEW) ========== */}
+          {vipRecommendations.length > 0 && (
+            <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0', border: '2px solid #ff9800' }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <RecommendIcon color="warning" />
+                  <Typography variant="subtitle1" fontWeight={600} color="warning.dark">
+                    VIP Seating Recommendations
+                  </Typography>
+                  <Chip 
+                    label={`${acceptedRecommendations.size} accepted`} 
+                    size="small" 
+                    color="success"
+                    sx={{ ml: 1 }}
+                  />
+                </Stack>
+                <Switch
+                  checked={showRecommendations}
+                  onChange={(e) => setShowRecommendations(e.target.checked)}
+                  size="small"
+                />
+              </Stack>
+              
+              <Typography variant="caption" color="text.secondary" display="block" mb={2}>
+                Based on Boss Adjacency tracking, these VIP guests are recommended to sit with tracked guests.
+                VIPs are sorted by ranking (higher rank first) then by fewer past adjacencies (to even out exposure).
+                Click to accept and create a Sit Together rule.
+              </Typography>
+
+              {showRecommendations && (
+                <Stack spacing={1} sx={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {vipRecommendations.map((rec) => {
+                    const isAccepted = isRecommendationAccepted(rec);
+                    const key = getRecommendationKey(rec);
+                    
+                    return (
+                      <Box
+                        key={key}
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          p: 1.5,
+                          bgcolor: isAccepted ? '#e8f5e9' : 'white',
+                          border: isAccepted ? '2px solid #4caf50' : '1px solid #e0e0e0',
+                          borderRadius: 1,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            bgcolor: isAccepted ? '#c8e6c9' : '#f5f5f5',
+                          },
+                        }}
+                        onClick={() => isAccepted ? rejectRecommendation(rec) : acceptRecommendation(rec)}
+                      >
+                        <Stack direction="row" spacing={2} alignItems="center" flexGrow={1}>
+                          {/* VIP Guest Info */}
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 200 }}>
+                            <Chip
+                              icon={<StarIcon sx={{ fontSize: 14 }} />}
+                              label={`Rank ${rec.ranking}`}
+                              size="small"
+                              color={getRankingColor(rec.ranking)}
+                              sx={{ fontWeight: 600 }}
+                            />
+                            <Box>
+                              <Typography variant="body2" fontWeight={600}>
+                                {rec.vipGuest.salutation} {rec.vipGuest.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {rec.vipGuest.company} • {rec.vipGuest.fromHost ? 'Host' : 'External'}
+                              </Typography>
+                            </Box>
+                          </Stack>
+
+                          {/* Arrow */}
+                          <Typography variant="body2" color="text.secondary">
+                            →
+                          </Typography>
+
+                          {/* Tracked Guest Info */}
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 200 }}>
+                            <VisibilityIcon fontSize="small" color="primary" />
+                            <Box>
+                              <Typography variant="body2" fontWeight={500}>
+                                {rec.trackedGuest.salutation} {rec.trackedGuest.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {rec.trackedGuest.company} • Tracked
+                              </Typography>
+                            </Box>
+                          </Stack>
+
+                          {/* History Info */}
+                          <Tooltip title={rec.reason}>
+                            <Chip
+                              label={rec.historicalCount === 0 ? 'New' : `${rec.historicalCount}x before`}
+                              size="small"
+                              color={rec.historicalCount === 0 ? 'success' : rec.historicalCount >= 2 ? 'warning' : 'default'}
+                              variant="outlined"
+                            />
+                          </Tooltip>
+                        </Stack>
+
+                        {/* Accept/Reject Indicator */}
+                        {isAccepted ? (
+                          <CheckCircleIcon color="success" />
+                        ) : (
+                          <AddIcon color="action" />
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Stack>
+              )}
+
+              {acceptedRecommendations.size > 0 && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {acceptedRecommendations.size} recommendation{acceptedRecommendations.size > 1 ? 's' : ''} accepted. 
+                  These will be added as Sit Together rules below.
+                </Alert>
+              )}
+            </Paper>
+          )}
+
+          {/* No recommendations info */}
+          {eventId && sessionId && vipRecommendations.length === 0 && isSessionTracked(eventId, sessionId) && (
+            <Alert severity="info" icon={<RecommendIcon />}>
+              No VIP recommendations available. Make sure you have:
+              <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
+                <li>Tracked guests marked in the event</li>
+                <li>VIP guests (ranking 1-4) of the opposite type</li>
+              </ul>
+            </Alert>
+          )}
+
+          <Divider />
 
           {/* ========== GUEST LIST SELECTION ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
@@ -325,7 +633,7 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
 
           <Divider />
 
-          {/* ========== PROXIMITY RULES (NEW) ========== */}
+          {/* ========== PROXIMITY RULES ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
             <FormLabel component="legend" sx={{ mb: 1, fontWeight: 600 }}>
               Proximity Rules
@@ -336,9 +644,19 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
 
             {/* Sit Together Rules */}
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
-                🤝 Sit Together Rules
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  🤝 Sit Together Rules
+                </Typography>
+                {sitTogetherRules.filter(r => r.isFromRecommendation).length > 0 && (
+                  <Chip 
+                    label={`${sitTogetherRules.filter(r => r.isFromRecommendation).length} from recommendations`}
+                    size="small"
+                    color="warning"
+                    variant="outlined"
+                  />
+                )}
+              </Stack>
               <Typography variant="caption" color="text.secondary" display="block" mb={1}>
                 These guests will be seated adjacent to each other whenever possible
               </Typography>
@@ -350,8 +668,18 @@ export default function AutoFillModal({ open, onClose }: AutoFillModalProps) {
                     direction="row"
                     spacing={1}
                     alignItems="center"
-                    sx={{ border: '1px solid #4caf50', p: 1, borderRadius: 1, bgcolor: 'white' }}
+                    sx={{ 
+                      border: rule.isFromRecommendation ? '2px solid #ff9800' : '1px solid #4caf50', 
+                      p: 1, 
+                      borderRadius: 1, 
+                      bgcolor: rule.isFromRecommendation ? '#fff8e1' : 'white' 
+                    }}
                   >
+                    {rule.isFromRecommendation && (
+                      <Tooltip title="From VIP Recommendation">
+                        <RecommendIcon fontSize="small" color="warning" />
+                      </Tooltip>
+                    )}
                     <Autocomplete
                       size="small"
                       options={allGuests}

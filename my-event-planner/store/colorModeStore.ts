@@ -1,5 +1,6 @@
 // store/colorModeStore.ts
 // Zustand store for managing color mode (standard vs colorblind)
+// UPDATED: Added skipHydration and _hasHydrated for SSR compatibility
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -22,10 +23,14 @@ interface ColorModeState {
   // Computed color scheme based on mode
   colorScheme: ColorScheme;
   
+  // Hydration tracking for SSR
+  _hasHydrated: boolean;
+  
   // Actions
   setColorMode: (mode: ColorMode) => void;
   toggleColorMode: () => void;
   isColorblindMode: () => boolean;
+  setHasHydrated: (state: boolean) => void;
 }
 
 // ============================================================================
@@ -38,6 +43,7 @@ export const useColorModeStore = create<ColorModeState>()(
       // Initial state
       colorMode: 'standard',
       colorScheme: STANDARD_COLORS,
+      _hasHydrated: false,
       
       // Set color mode
       setColorMode: (mode: ColorMode) => {
@@ -59,14 +65,20 @@ export const useColorModeStore = create<ColorModeState>()(
       
       // Check if colorblind mode is active
       isColorblindMode: () => get().colorMode === 'colorblind',
+      
+      // Set hydration state
+      setHasHydrated: (state: boolean) => set({ _hasHydrated: state }),
     }),
     {
       name: 'color-mode-storage', // localStorage key
+      // CRITICAL: Skip automatic hydration to prevent SSR mismatch
+      skipHydration: true,
       partialize: (state) => ({ colorMode: state.colorMode }), // Only persist the mode
       onRehydrateStorage: () => (state) => {
         // Recompute colorScheme on rehydration
         if (state) {
           state.colorScheme = getColorScheme(state.colorMode);
+          state.setHasHydrated(true);
         }
       },
     }
@@ -85,6 +97,9 @@ export const useColorMode = () => useColorModeStore((state) => state.colorMode);
 
 // Get toggle function
 export const useToggleColorMode = () => useColorModeStore((state) => state.toggleColorMode);
+
+// Get hydration state
+export const useColorModeHydration = () => useColorModeStore((state) => state._hasHydrated);
 
 // ============================================================================
 // NON-REACTIVE GETTERS (for use outside React components)

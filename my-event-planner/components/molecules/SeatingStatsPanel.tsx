@@ -39,6 +39,7 @@ import {
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
+import { getEnhancedAdjacentSeats } from '@/utils/adjacencyHelper';
 // Note: violations are now read directly from seatStore
 
 interface SeatingStats {
@@ -86,7 +87,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
   // Tracking - now from eventStore (consolidated)
   const isSessionTracked = useEventStore((s) => s.isSessionTracked);
   const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
-  const getHistoricalAdjacencyCount = useEventStore((s) => s.getHistoricalAdjacencyCount);
+  const getFilteredTrackedGuestHistory = useEventStore((s) => s.getFilteredTrackedGuestHistory);
   
   const guestLookup = useMemo(() => {
     const lookup: Record<string, any> = {};
@@ -101,6 +102,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
   const trackedGuestIds = getTrackedGuests(eventId);
 
   // Calculate adjacency history for tracked guests
+  // Now filtered to show only opposite guest type with adjacency type breakdown
   const adjacencyHistory = useMemo(() => {
     if (!sessionTracked || trackedGuestIds.length === 0) {
       return [];
@@ -110,18 +112,24 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
       const guest = guestLookup[trackedGuestId];
       if (!guest) return null;
 
-      // Get historical adjacency count (previous sessions only)
-      const adjacencyCount = getHistoricalAdjacencyCount(eventId, sessionId, trackedGuestId);
+      // Get filtered historical adjacency (only opposite guest type)
+      // If tracked is host, shows external guests; if tracked is external, shows host guests
+      const history = getFilteredTrackedGuestHistory(
+        eventId, 
+        sessionId, 
+        trackedGuestId,
+        guest.fromHost
+      );
 
-      // Convert to array and sort by count
-      const adjacencies = Object.entries(adjacencyCount)
-        .map(([guestId, count]) => ({
-          guestId,
-          guest: guestLookup[guestId],
-          count: count as number,
+      // Convert to array with guest details and adjacency type breakdown
+      const adjacencies = history
+        .map(item => ({
+          guestId: item.guestId,
+          guest: guestLookup[item.guestId],
+          count: item.count,
+          byType: item.byType || {},
         }))
-        .filter(a => a.guest) // Only include valid guests
-        .sort((a, b) => b.count - a.count);
+        .filter(a => a.guest); // Only include valid guests
 
       const totalAdjacencies = adjacencies.reduce((sum, a) => sum + a.count, 0);
 
@@ -131,9 +139,86 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
         adjacencies,
         totalAdjacencies,
         uniqueGuests: adjacencies.length,
+        // Info about what type of guests are shown
+        showingGuestType: guest.fromHost ? 'external' : 'host',
       };
     }).filter(Boolean);
-  }, [sessionTracked, trackedGuestIds, eventId, sessionId, guestLookup, getHistoricalAdjacencyCount]);
+  }, [sessionTracked, trackedGuestIds, eventId, sessionId, guestLookup, getFilteredTrackedGuestHistory]);
+
+  // Calculate CURRENT session adjacencies (what would be recorded when saving)
+  // This shows users what's being tracked right now without navigating to next session
+  const currentSessionAdjacencies = useMemo(() => {
+    if (!sessionTracked || trackedGuestIds.length === 0) {
+      return [];
+    }
+
+    // Build guest-to-seat mapping
+    const guestSeatMap = new Map<string, { tableId: string; seatId: string; table: any }>();
+    tables.forEach(table => {
+      table.seats.forEach(seat => {
+        if (seat.assignedGuestId) {
+          guestSeatMap.set(seat.assignedGuestId, {
+            tableId: table.id,
+            seatId: seat.id,
+            table: table,
+          });
+        }
+      });
+    });
+
+    return trackedGuestIds.map(trackedGuestId => {
+      const trackedGuest = guestLookup[trackedGuestId];
+      if (!trackedGuest) return null;
+
+      const guestSeatData = guestSeatMap.get(trackedGuestId);
+      if (!guestSeatData) {
+        // Tracked guest is not seated in this session
+        return {
+          trackedGuestId,
+          trackedGuest,
+          isSeated: false,
+          adjacencies: [],
+          totalAdjacencies: 0,
+          showingGuestType: trackedGuest.fromHost ? 'external' : 'host',
+        };
+      }
+
+      const { seatId, table } = guestSeatData;
+      
+      // Get enhanced adjacencies (side + opposite + edge for rectangle tables)
+      const enhancedAdjacencies = getEnhancedAdjacentSeats(table, seatId);
+      
+      // Filter to only show opposite guest type and exclude locked seats
+      const oppositeFromHost = !trackedGuest.fromHost; // If tracked is host, show external (fromHost=false)
+      
+      const adjacencies = enhancedAdjacencies
+        .filter(adj => {
+          const adjGuest = guestLookup[adj.guestId];
+          if (!adjGuest) return false;
+          // Only include guests of the opposite type
+          return adjGuest.fromHost === oppositeFromHost;
+        })
+        .filter(adj => {
+          // Exclude locked seats
+          const adjSeat = table.seats.find((s: any) => s.id === adj.seatId);
+          return adjSeat && !adjSeat.locked;
+        })
+        .map(adj => ({
+          guestId: adj.guestId,
+          guest: guestLookup[adj.guestId],
+          adjacencyType: adj.adjacencyType,
+        }));
+
+      return {
+        trackedGuestId,
+        trackedGuest,
+        isSeated: true,
+        adjacencies,
+        totalAdjacencies: adjacencies.length,
+        showingGuestType: trackedGuest.fromHost ? 'external' : 'host',
+      };
+    }).filter(Boolean);
+  }, [sessionTracked, trackedGuestIds, tables, guestLookup]);
 
   // Calculate statistics
   const stats = useMemo((): SeatingStats => {
@@ -729,7 +814,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
 
             {detailView === 'adjacency' && (
               <Stack spacing={2}>
-                {adjacencyHistory.length === 0 ? (
+                {!sessionTracked || trackedGuestIds.length === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 4 }}>
                     <Visibility sx={{ fontSize: 48, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
                     <Typography variant="body2" color="text.secondary">
@@ -738,88 +823,218 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                   </Box>
                 ) : (
                   <>
-                    <Typography variant="caption" color="text.secondary" sx={{ px: 1 }}>
-                      Historical adjacency counts from previous sessions (chronological)
-                    </Typography>
-
-                    {adjacencyHistory.map((history: any) => (
-                      <Accordion key={history.trackedGuestId} defaultExpanded={adjacencyHistory.length === 1}>
-                        <AccordionSummary expandIcon={<ExpandMore />}>
-                          <Stack direction="row" spacing={2} alignItems="center" width="100%">
+                    {/* ==================== CURRENT SESSION TRACKLIST ==================== */}
+                    <Box sx={{ 
+                      bgcolor: '#e3f2fd', 
+                      borderRadius: 1, 
+                      p: 1.5,
+                      border: '1px solid #90caf9'
+                    }}>
+                      <Typography variant="subtitle2" fontWeight={600} color="primary" gutterBottom>
+                        Current Session Tracklist
+                      </Typography>
+                      {currentSessionAdjacencies.map((current: any) => (
+                        <Box 
+                          key={current.trackedGuestId} 
+                          sx={{ 
+                            bgcolor: 'white', 
+                            borderRadius: 1, 
+                            p: 1.5, 
+                            mb: 1,
+                            border: '1px solid #e0e0e0'
+                          }}
+                        >
+                          <Stack direction="row" spacing={2} alignItems="center" mb={1}>
                             <Visibility color="primary" fontSize="small" />
                             <Box flexGrow={1}>
-                              <Typography variant="subtitle2" fontWeight={600}>
-                                {history.trackedGuest.salutation} {history.trackedGuest.name}
+                              <Typography variant="body2" fontWeight={600}>
+                                {current.trackedGuest.salutation} {current.trackedGuest.name}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                {history.trackedGuest.company}
+                                {current.trackedGuest.company} • {current.trackedGuest.fromHost ? 'Host' : 'External'}
                               </Typography>
                             </Box>
-                            <Stack direction="row" spacing={1}>
+                            {!current.isSeated ? (
                               <Chip
-                                label={`${history.uniqueGuests} guests`}
-                                size="small"
-                                color="primary"
-                                variant="outlined"
-                              />
-                              <Chip
-                                label={`${history.totalAdjacencies} total`}
+                                label="Not Seated"
                                 size="small"
                                 color="default"
+                                variant="outlined"
                               />
-                            </Stack>
+                            ) : (
+                              <Chip
+                                label={`${current.totalAdjacencies} ${current.showingGuestType}`}
+                                size="small"
+                                color={current.totalAdjacencies > 0 ? 'success' : 'default'}
+                              />
+                            )}
                           </Stack>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          {history.adjacencies.length === 0 ? (
-                            <Typography variant="body2" color="text.secondary" align="center" py={2}>
-                              No previous adjacencies recorded
+
+                          {current.isSeated && current.adjacencies.length === 0 && (
+                            <Typography variant="caption" color="text.secondary" sx={{ pl: 4 }}>
+                              No {current.showingGuestType} guests adjacent
                             </Typography>
-                          ) : (
-                            <Table size="small">
-                              <TableHead>
-                                <TableRow>
-                                  <TableCell>Guest</TableCell>
-                                  <TableCell>Company</TableCell>
-                                  <TableCell align="center">Count</TableCell>
-                                </TableRow>
-                              </TableHead>
-                              <TableBody>
-                                {history.adjacencies.map((adj: any) => (
-                                  <TableRow
-                                    key={adj.guestId}
-                                    sx={{
-                                      bgcolor: adj.count >= 3 ? '#ffebee' : adj.count >= 2 ? '#fff3e0' : 'transparent',
-                                    }}
-                                  >
-                                    <TableCell>
-                                      <Typography variant="body2" fontWeight={500}>
-                                        {adj.guest.salutation} {adj.guest.name}
-                                      </Typography>
-                                      <Typography variant="caption" color="text.secondary">
-                                        {adj.guest.title}
-                                      </Typography>
-                                    </TableCell>
-                                    <TableCell>
-                                      <Typography variant="body2">
-                                        {adj.guest.company}
-                                      </Typography>
-                                    </TableCell>
-                                    <TableCell align="center">
-                                      <Chip
-                                        label={`${adj.count}x`}
-                                        size="small"
-                                        color={adj.count >= 3 ? 'error' : adj.count >= 2 ? 'warning' : 'default'}
-                                      />
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
                           )}
-                        </AccordionDetails>
-                      </Accordion>
-                    ))}
+
+                          {current.isSeated && current.adjacencies.length > 0 && (
+                            <Stack spacing={0.5} sx={{ pl: 4 }}>
+                              {current.adjacencies.map((adj: any) => (
+                                <Stack 
+                                  key={adj.guestId} 
+                                  direction="row" 
+                                  spacing={1} 
+                                  alignItems="center"
+                                  sx={{ 
+                                    bgcolor: '#f5f5f5', 
+                                    borderRadius: 0.5, 
+                                    px: 1, 
+                                    py: 0.5 
+                                  }}
+                                >
+                                  <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                                    {adj.guest.salutation} {adj.guest.name}
+                                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                                      {adj.guest.company}
+                                    </Typography>
+                                  </Typography>
+                                  <Chip
+                                    label={adj.adjacencyType === 'side' ? 'Side' : adj.adjacencyType === 'opposite' ? 'Opposite' : 'Edge'}
+                                    size="small"
+                                    color={adj.adjacencyType === 'opposite' ? 'info' : adj.adjacencyType === 'edge' ? 'secondary' : 'default'}
+                                    variant="outlined"
+                                    sx={{ fontSize: '0.65rem', height: 18 }}
+                                  />
+                                </Stack>
+                              ))}
+                            </Stack>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+
+                    <Divider sx={{ my: 1 }} />
+
+                    {/* ==================== HISTORICAL ADJACENCY DATA ==================== */}
+                    <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                      Historical Adjacency
+                    </Typography>
+                    {adjacencyHistory.length === 0 ? (
+                      <Box sx={{ textAlign: 'center', py: 2 }}>
+                        <Typography variant="body2" color="text.secondary">
+                          No historical adjacency data yet
+                        </Typography>
+                      </Box>
+                    ) : (
+                      adjacencyHistory.map((history: any) => (
+                        <Accordion key={history.trackedGuestId} defaultExpanded={adjacencyHistory.length === 1}>
+                          <AccordionSummary expandIcon={<ExpandMore />}>
+                            <Stack direction="row" spacing={2} alignItems="center" width="100%">
+                              <Visibility color="primary" fontSize="small" />
+                              <Box flexGrow={1}>
+                                <Typography variant="subtitle2" fontWeight={600}>
+                                  {history.trackedGuest.salutation} {history.trackedGuest.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {history.trackedGuest.company} • {history.trackedGuest.fromHost ? 'Host' : 'External'}
+                                </Typography>
+                              </Box>
+                              <Stack direction="row" spacing={1}>
+                                <Chip
+                                  label={`${history.uniqueGuests} ${history.showingGuestType}`}
+                                  size="small"
+                                  color={history.showingGuestType === 'external' ? 'error' : 'primary'}
+                                  variant="outlined"
+                                />
+                                <Chip
+                                  label={`${history.totalAdjacencies} total`}
+                                  size="small"
+                                  color="default"
+                                />
+                              </Stack>
+                            </Stack>
+                          </AccordionSummary>
+                          <AccordionDetails>
+                            {history.adjacencies.length === 0 ? (
+                              <Typography variant="body2" color="text.secondary" align="center" py={2}>
+                                No previous adjacencies with {history.showingGuestType} guests recorded
+                              </Typography>
+                            ) : (
+                              <Table size="small">
+                                <TableHead>
+                                  <TableRow>
+                                    <TableCell>Guest</TableCell>
+                                    <TableCell>Company</TableCell>
+                                    <TableCell align="center">Total</TableCell>
+                                    <TableCell align="center">Type</TableCell>
+                                  </TableRow>
+                                </TableHead>
+                                <TableBody>
+                                  {history.adjacencies.map((adj: any) => (
+                                    <TableRow
+                                      key={adj.guestId}
+                                      sx={{
+                                        bgcolor: adj.count >= 3 ? '#ffebee' : adj.count >= 2 ? '#fff3e0' : 'transparent',
+                                      }}
+                                    >
+                                      <TableCell>
+                                        <Typography variant="body2" fontWeight={500}>
+                                          {adj.guest.salutation} {adj.guest.name}
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          {adj.guest.title}
+                                        </Typography>
+                                      </TableCell>
+                                      <TableCell>
+                                        <Typography variant="body2">
+                                          {adj.guest.company}
+                                        </Typography>
+                                      </TableCell>
+                                      <TableCell align="center">
+                                        <Chip
+                                          label={`${adj.count}x`}
+                                          size="small"
+                                          color={adj.count >= 3 ? 'error' : adj.count >= 2 ? 'warning' : 'default'}
+                                        />
+                                      </TableCell>
+                                      <TableCell align="center">
+                                        <Stack direction="row" spacing={0.5} justifyContent="center" flexWrap="wrap">
+                                          {adj.byType?.side > 0 && (
+                                            <Chip
+                                              label={`Side: ${adj.byType.side}`}
+                                              size="small"
+                                              variant="outlined"
+                                              sx={{ fontSize: '0.65rem', height: 18 }}
+                                            />
+                                          )}
+                                          {adj.byType?.opposite > 0 && (
+                                            <Chip
+                                              label={`Opp: ${adj.byType.opposite}`}
+                                              size="small"
+                                              color="info"
+                                              variant="outlined"
+                                              sx={{ fontSize: '0.65rem', height: 18 }}
+                                            />
+                                          )}
+                                          {adj.byType?.edge > 0 && (
+                                            <Chip
+                                              label={`Edge: ${adj.byType.edge}`}
+                                              size="small"
+                                              color="secondary"
+                                              variant="outlined"
+                                              sx={{ fontSize: '0.65rem', height: 18 }}
+                                            />
+                                          )}
+                                        </Stack>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))}
+                                </TableBody>
+                              </Table>
+                            )}
+                          </AccordionDetails>
+                        </Accordion>
+                      ))
+                    )}
                   </>
                 )}
               </Stack>

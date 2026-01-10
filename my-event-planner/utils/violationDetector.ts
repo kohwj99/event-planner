@@ -1,4 +1,4 @@
-// src/utils/violationDetector.ts - STREAMLINED & COMPREHENSIVE
+// src/utils/violationDetector.ts - FIXED: Now handles multiple sit-together partners
 import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
 
@@ -69,17 +69,25 @@ function shouldSitAway(
 }
 
 /**
- * Get sit-together partner for a guest
+ * FIXED: Get ALL sit-together partners for a guest (not just the first one)
+ * 
+ * This is the critical fix - the old function only returned the first partner,
+ * missing any additional sit-together relationships.
  */
-function getSitTogetherPartner(
+function getAllSitTogetherPartners(
   guestId: string,
   rules: ProximityRules['sitTogether']
-): string | null {
+): string[] {
+  const partners: string[] = [];
   for (const rule of rules) {
-    if (rule.guest1Id === guestId) return rule.guest2Id;
-    if (rule.guest2Id === guestId) return rule.guest1Id;
+    if (rule.guest1Id === guestId && !partners.includes(rule.guest2Id)) {
+      partners.push(rule.guest2Id);
+    }
+    if (rule.guest2Id === guestId && !partners.includes(rule.guest1Id)) {
+      partners.push(rule.guest1Id);
+    }
   }
-  return null;
+  return partners;
 }
 
 /**
@@ -105,6 +113,8 @@ function isDuplicateViolation(
 
 /**
  * PRIMARY FUNCTION: Detect all proximity violations in the current seating arrangement
+ * 
+ * FIXED: Now checks ALL sit-together partners, not just the first one.
  * 
  * This function:
  * 1. Checks sit-together violations (guests who should be adjacent but aren't)
@@ -145,27 +155,27 @@ export function detectProximityViolations(
         .filter(Boolean) as string[];
 
       // ===================================================================
-      // CHECK SIT-TOGETHER VIOLATIONS
+      // CHECK SIT-TOGETHER VIOLATIONS - FIXED: Now checks ALL partners
       // ===================================================================
-      const togetherPartner = getSitTogetherPartner(guestId, proximityRules.sitTogether);
+      const togetherPartners = getAllSitTogetherPartners(guestId, proximityRules.sitTogether);
       
-      if (togetherPartner) {
-        const partner = guestLookup[togetherPartner];
+      for (const partnerId of togetherPartners) {
+        const partner = guestLookup[partnerId];
         
         // Check if partner is NOT adjacent
-        if (partner && !adjacentGuestIds.includes(togetherPartner)) {
+        if (partner && !adjacentGuestIds.includes(partnerId)) {
           // Verify partner is seated somewhere (not just absent from guest list)
           const partnerIsSeated = tables.some((t) =>
-            t.seats.some((s) => s.assignedGuestId === togetherPartner)
+            t.seats.some((s) => s.assignedGuestId === partnerId)
           );
 
           if (partnerIsSeated) {
             // Avoid duplicate violations (A-B and B-A)
-            if (!isDuplicateViolation(violations, 'sit-together', guestId, togetherPartner)) {
+            if (!isDuplicateViolation(violations, 'sit-together', guestId, partnerId)) {
               violations.push({
                 type: 'sit-together',
                 guest1Id: guestId,
-                guest2Id: togetherPartner,
+                guest2Id: partnerId,
                 guest1Name: guest.name,
                 guest2Name: partner.name,
                 tableId: table.id,

@@ -173,6 +173,8 @@ export const useSeatStore = create<SeatStoreState>()(
          * Assign a guest to a seat with seat mode validation
          * Uses centralized validateGuestSeatAssignment function
          * 
+         * UPDATED: Now triggers violation detection after assignment
+         * 
          * @returns true if assignment was successful, false if validation failed
          */
         assignGuestToSeat: (tableId, seatId, guestId) => {
@@ -263,6 +265,11 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Assignment failed:', assignResult.error);
           }
 
+          // ✅ TRIGGER VIOLATION DETECTION after assignment
+          if (assignResult.success) {
+            get().detectViolations();
+          }
+
           return assignResult.success;
         },
 
@@ -280,7 +287,11 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        clearSeat: (tableId, seatId) =>
+        /**
+         * Clear a seat (remove guest assignment)
+         * UPDATED: Now triggers violation detection after clearing
+         */
+        clearSeat: (tableId, seatId) => {
           set((state) => ({
             tables: state.tables.map((t) =>
               t.id !== tableId
@@ -294,7 +305,11 @@ export const useSeatStore = create<SeatStoreState>()(
                     ),
                   }
             ),
-          })),
+          }));
+
+          // ✅ TRIGGER VIOLATION DETECTION after clearing seat
+          get().detectViolations();
+        },
 
         updateSeatOrder: (tableId, newOrder) =>
           set((state) => ({
@@ -346,6 +361,8 @@ export const useSeatStore = create<SeatStoreState>()(
         /**
          * Swap two guests between seats with seat mode validation
          * Uses centralized validateSeatSwap function
+         * 
+         * UPDATED: Now triggers violation detection after swap
          * 
          * All state reading happens inside set() callback to prevent race conditions
          * 
@@ -470,6 +487,11 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Swap failed:', swapResult.error);
           }
 
+          // ✅ TRIGGER VIOLATION DETECTION after swap
+          if (swapResult.success) {
+            get().detectViolations();
+          }
+
           return swapResult.success;
         },
 
@@ -478,6 +500,10 @@ export const useSeatStore = create<SeatStoreState>()(
 
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
 
+        /**
+         * Detect all proximity violations based on current seating arrangement
+         * Called automatically after seat modifications when proximityRules are set
+         */
         detectViolations: () => {
           const state = get();
           if (!state.proximityRules) {
@@ -485,12 +511,14 @@ export const useSeatStore = create<SeatStoreState>()(
             return;
           }
 
+          console.log('🔍 Running violation detection...');
           const violations = detectProximityViolations(
             state.tables,
             state.proximityRules,
             state.guestLookup
           );
 
+          console.log(`🔍 Detected ${violations.length} violations`);
           set({ violations });
         },
 
@@ -520,7 +548,11 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           })),
 
-        clearAllSeatsInTable: (tableId) =>
+        /**
+         * Clear all seats in a table
+         * UPDATED: Now triggers violation detection after clearing
+         */
+        clearAllSeatsInTable: (tableId) => {
           set((state) => ({
             tables: state.tables.map((t) =>
               t.id !== tableId
@@ -534,8 +566,16 @@ export const useSeatStore = create<SeatStoreState>()(
                     })),
                   }
             ),
-          })),
+          }));
 
+          // ✅ TRIGGER VIOLATION DETECTION after clearing all seats
+          get().detectViolations();
+        },
+
+        /**
+         * Delete a table (removes all seated guests)
+         * UPDATED: Now triggers violation detection after deletion
+         */
         deleteTable: (tableId) => {
           set((state) => {
             const tableToDelete = state.tables.find((t) => t.id === tableId);
@@ -567,14 +607,21 @@ export const useSeatStore = create<SeatStoreState>()(
               selectedSeatId: state.selectedTableId === tableId ? null : state.selectedSeatId,
             };
           });
+
+          // ✅ TRIGGER VIOLATION DETECTION after deleting table
+          get().detectViolations();
         },
 
-        replaceTable: (tableId, newTable) =>
+        replaceTable: (tableId, newTable) => {
           set((state) => ({
             tables: state.tables.map((t) =>
               t.id !== tableId ? t : newTable
             ),
-          })),
+          }));
+
+          // ✅ TRIGGER VIOLATION DETECTION after replacing table (seats may have changed)
+          get().detectViolations();
+        },
 
         /* ---------- CHUNK MANAGEMENT ---------- */
         ensureChunkExists: (row, col) =>

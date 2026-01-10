@@ -7,6 +7,8 @@ import {
   Session,
   EventType,
   SessionAdjacencyRecord,
+  AdjacencyDetail,
+  AdjacencyType,
   PlanningOrderTracker,
   DEFAULT_EVENT_TRACKING,
   ensureTrackingFields
@@ -15,6 +17,7 @@ import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
+import { getEnhancedAdjacentSeats, EnhancedAdjacency } from "@/utils/adjacencyHelper";
 
 interface EventStoreState {
   /* -------------------- State -------------------- */
@@ -83,7 +86,7 @@ interface EventStoreState {
   getEventIdForSession: (sessionId: string) => string | null;
   getSessionById: (sessionId: string) => { session: Session; dayId: string; eventId: string } | null;
 
-  /* --------------------  Seat Plan Snapshot -------------------- */
+  /* --------------------Â  Seat Plan Snapshot -------------------- */
   saveSessionSeatPlan: (
     eventId: string,
     dayId: string,
@@ -126,8 +129,10 @@ interface EventStoreState {
   /* -------------------- Planning Order Management -------------------- */
   getSessionPlanningOrder: (eventId: string, sessionId: string) => number;
   resetSessionPlanningOrder: (eventId: string, sessionId: string) => void;
+  /** Computes full datetime (ISO string) from day date + session start time for chronological ordering */
+  getSessionDateTime: (sessionId: string) => string | null;
 
-  /* -------------------- ðŸ”— Adjacency Recording -------------------- */
+  /* -------------------- Ã°Å¸â€â€” Adjacency Recording -------------------- */
   recordSessionAdjacency: (
     eventId: string,
     sessionId: string,
@@ -144,11 +149,34 @@ interface EventStoreState {
     trackedGuestId: string
   ) => Record<string, number>;
 
+  /**
+   * Gets historical adjacency count filtered by opposite guest type.
+   * If tracked guest is a host, returns only external guest adjacencies.
+   * If tracked guest is external, returns only host guest adjacencies.
+   * Also includes adjacency type breakdown (side/opposite/edge).
+   */
+  getFilteredHistoricalAdjacencyCount: (
+    eventId: string,
+    currentSessionId: string,
+    trackedGuestId: string,
+    trackedGuestFromHost: boolean
+  ) => Record<string, { count: number; byType: Record<string, number> }>;
+
   getTrackedGuestHistory: (
     eventId: string,
     currentSessionId: string,
     trackedGuestId: string
   ) => Array<{ guestId: string; count: number }>;
+
+  /**
+   * Gets tracked guest history filtered by opposite guest type with adjacency type breakdown.
+   */
+  getFilteredTrackedGuestHistory: (
+    eventId: string,
+    currentSessionId: string,
+    trackedGuestId: string,
+    trackedGuestFromHost: boolean
+  ) => Array<{ guestId: string; count: number; byType: Record<string, number> }>;
 
   getSessionsNeedingReview: (eventId: string) => string[];
   acknowledgeSessionReview: (eventId: string, sessionId: string) => void;
@@ -524,16 +552,32 @@ export const useEventStore = create<EventStoreState>()(
 
         /* ==================== STATISTICS & AUDIT ==================== */
         getPriorStats: (eventId, currentSessionId) => {
-          const event = get().events.find((e) => e.id === eventId);
+          const state = get();
+          const event = state.events.find((e) => e.id === eventId);
           if (!event) return {};
 
-          const allSessions = event.days.flatMap((d) => d.sessions);
-          const currentSession = allSessions.find((s) => s.id === currentSessionId);
-          if (!currentSession) return {};
+          // Get the current session's full datetime for proper chronological comparison
+          const currentSessionDateTime = state.getSessionDateTime(currentSessionId);
+          if (!currentSessionDateTime) return {};
 
-          const previousSessions = allSessions.filter((s: Session) =>
-            s.startTime < currentSession.startTime && s.id !== currentSessionId
-          );
+          // Build a list of sessions with their full datetimes
+          const sessionsWithDateTime: Array<{ session: Session; dateTime: string }> = [];
+          event.days.forEach(day => {
+            day.sessions.forEach(session => {
+              const sessionDateTime = state.getSessionDateTime(session.id);
+              if (sessionDateTime) {
+                sessionsWithDateTime.push({ session, dateTime: sessionDateTime });
+              }
+            });
+          });
+
+          // Filter sessions that are chronologically before the current session
+          const previousSessions = sessionsWithDateTime
+            .filter(({ session, dateTime }) => 
+              session.id !== currentSessionId && 
+              new Date(dateTime).getTime() < new Date(currentSessionDateTime).getTime()
+            )
+            .map(({ session }) => session);
 
           const guestMap: Record<string, Guest> = {};
           [...event.masterHostGuests, ...event.masterExternalGuests].forEach(
@@ -544,17 +588,36 @@ export const useEventStore = create<EventStoreState>()(
         },
 
         checkSessionAuditStatus: (eventId, sessionId) => {
-          const event = get().events.find((e) => e.id === eventId);
+          const state = get();
+          const event = state.events.find((e) => e.id === eventId);
           if (!event) return "clean";
+
+          // Get the current session's full datetime
+          const currentSessionDateTime = state.getSessionDateTime(sessionId);
+          if (!currentSessionDateTime) return "clean";
 
           const allSessions = event.days.flatMap((d) => d.sessions);
           const currentSession = allSessions.find((s) => s.id === sessionId);
-
           if (!currentSession || !currentSession.lastStatsCheck) return "clean";
 
-          const previousSessions = allSessions.filter((s: Session) =>
-            s.startTime < currentSession.startTime && s.id !== sessionId
-          );
+          // Build sessions with their full datetimes for proper comparison
+          const sessionsWithDateTime: Array<{ session: Session; dateTime: string }> = [];
+          event.days.forEach(day => {
+            day.sessions.forEach(session => {
+              const sessionDateTime = state.getSessionDateTime(session.id);
+              if (sessionDateTime) {
+                sessionsWithDateTime.push({ session, dateTime: sessionDateTime });
+              }
+            });
+          });
+
+          // Filter sessions chronologically before the current session
+          const previousSessions = sessionsWithDateTime
+            .filter(({ session, dateTime }) => 
+              session.id !== sessionId && 
+              new Date(dateTime).getTime() < new Date(currentSessionDateTime).getTime()
+            )
+            .map(({ session }) => session);
 
           let maxPrevModified = "";
           previousSessions.forEach((s: Session) => {
@@ -799,6 +862,40 @@ export const useEventStore = create<EventStoreState>()(
             }),
           })),
 
+        /**
+         * Computes the full datetime (ISO string) for a session by combining 
+         * the day's date with the session's start time.
+         * This is used for chronological ordering of adjacency records.
+         */
+        getSessionDateTime: (sessionId) => {
+          const state = get();
+          
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                // Combine day date with session start time
+                const dayDate = new Date(day.date);
+                const sessionTime = new Date(session.startTime);
+                
+                // Extract time components from session start time
+                const hours = sessionTime.getHours();
+                const minutes = sessionTime.getMinutes();
+                const seconds = sessionTime.getSeconds();
+                const milliseconds = sessionTime.getMilliseconds();
+                
+                // Create combined datetime using day's date and session's time
+                const combined = new Date(dayDate);
+                combined.setHours(hours, minutes, seconds, milliseconds);
+                
+                return combined.toISOString();
+              }
+            }
+          }
+          
+          return null;
+        },
+
         /* ==================== ADJACENCY RECORDING ==================== */
         recordSessionAdjacency: (eventId, sessionId, sessionStartTime, tables) => {
           const state = get();
@@ -815,6 +912,13 @@ export const useEventStore = create<EventStoreState>()(
             return;
           }
 
+          // Compute the full session datetime by combining day date + session start time
+          const sessionDateTime = state.getSessionDateTime(sessionId);
+          if (!sessionDateTime) {
+            console.warn(`Could not compute sessionDateTime for session ${sessionId}`);
+            return;
+          }
+
           let tracker = event.planningOrderTracker || DEFAULT_EVENT_TRACKING.planningOrderTracker;
 
           const currentOrder = tracker.sessionOrderMap[sessionId];
@@ -826,8 +930,8 @@ export const useEventStore = create<EventStoreState>()(
 
           const newRecords: SessionAdjacencyRecord[] = [];
 
-          // Build guest-to-seat mapping
-          const guestSeatMap = new Map<string, { tableId: string; seatId: string; seat: any }>();
+          // Build guest-to-seat mapping and table lookup
+          const guestSeatMap = new Map<string, { tableId: string; seatId: string; seat: any; table: Table }>();
 
           tables.forEach(table => {
             table.seats.forEach(seat => {
@@ -836,33 +940,39 @@ export const useEventStore = create<EventStoreState>()(
                   tableId: table.id,
                   seatId: seat.id,
                   seat: seat,
+                  table: table,
                 });
               }
             });
           });
 
-          // For each tracked guest, find adjacent guests
+          // For each tracked guest, find enhanced adjacent guests (left/right + opposite + edge)
           trackedGuests.forEach(trackedGuestId => {
             const guestSeatData = guestSeatMap.get(trackedGuestId);
 
             if (!guestSeatData) return;
 
-            const { seat } = guestSeatData;
-            const adjacentSeatIds = seat.adjacentSeats || [];
-
-            if (adjacentSeatIds.length === 0) return;
-
+            const { seatId, table } = guestSeatData;
+            
+            // Use enhanced adjacency calculation for rectangle tables
+            // This includes: side (left/right), opposite, and edge adjacencies
+            const enhancedAdjacencies = getEnhancedAdjacentSeats(table, seatId);
+            
+            // Filter out locked seats and build adjacency details
+            const adjacentGuestDetails: AdjacencyDetail[] = [];
             const adjacentGuestIds: string[] = [];
-
-            adjacentSeatIds.forEach((adjacentSeatId: string) => {
-              for (const table of tables) {
-                const adjacentSeat = table.seats.find(s => s.id === adjacentSeatId);
-
-                if (adjacentSeat) {
-                  if (adjacentSeat.assignedGuestId && !adjacentSeat.locked) {
-                    adjacentGuestIds.push(adjacentSeat.assignedGuestId);
-                  }
-                  break;
+            
+            enhancedAdjacencies.forEach(adj => {
+              // Find the seat to check if it's locked
+              const adjSeat = table.seats.find(s => s.id === adj.seatId);
+              if (adjSeat && !adjSeat.locked) {
+                adjacentGuestDetails.push({
+                  guestId: adj.guestId,
+                  adjacencyType: adj.adjacencyType as AdjacencyType,
+                });
+                // Also maintain backward-compatible adjacentGuestIds array
+                if (!adjacentGuestIds.includes(adj.guestId)) {
+                  adjacentGuestIds.push(adj.guestId);
                 }
               }
             });
@@ -871,9 +981,11 @@ export const useEventStore = create<EventStoreState>()(
               newRecords.push({
                 sessionId,
                 sessionStartTime,
+                sessionDateTime, // Add the computed full datetime for chronological ordering
                 planningOrder,
                 trackedGuestId,
-                adjacentGuestIds,
+                adjacentGuestIds, // Backward compatible
+                adjacentGuestDetails, // Enhanced with type info
                 needsReview: false,
               });
             }
@@ -973,19 +1085,35 @@ export const useEventStore = create<EventStoreState>()(
           const state = get();
           const event = state.events.find(e => e.id === eventId);
 
-          if (!event || !event.planningOrderTracker) return {};
+          if (!event) return {};
 
-          const tracker = event.planningOrderTracker;
-          const currentOrder = tracker.sessionOrderMap[currentSessionId];
-
-          if (currentOrder === undefined) {
+          // Get the current session's chronological datetime
+          const currentSessionDateTime = state.getSessionDateTime(currentSessionId);
+          
+          if (!currentSessionDateTime) {
+            // Fallback: if we can't compute datetime, return empty
+            // This handles cases where session isn't found
             return {};
           }
 
           const allRecords = event.adjacencyRecords || [];
-          const relevantRecords = allRecords.filter(
-            r => r.planningOrder < currentOrder && r.trackedGuestId === trackedGuestId
-          );
+          
+          // Filter records that are CHRONOLOGICALLY BEFORE the current session
+          // This is the key fix: we compare by sessionDateTime (day + time) not planningOrder
+          const relevantRecords = allRecords.filter(record => {
+            // Skip records for different tracked guests
+            if (record.trackedGuestId !== trackedGuestId) return false;
+            
+            // Skip records from the current session itself
+            if (record.sessionId === currentSessionId) return false;
+            
+            // Use sessionDateTime for chronological comparison
+            // If record has sessionDateTime, use it; otherwise fall back to sessionStartTime
+            const recordDateTime = record.sessionDateTime || record.sessionStartTime;
+            
+            // Compare chronologically: only include records from sessions BEFORE current
+            return new Date(recordDateTime).getTime() < new Date(currentSessionDateTime).getTime();
+          });
 
           const adjacencyCount: Record<string, number> = {};
 
@@ -1007,6 +1135,105 @@ export const useEventStore = create<EventStoreState>()(
 
           return Object.entries(adjacencyCount)
             .map(([guestId, count]) => ({ guestId, count }))
+            .sort((a, b) => b.count - a.count);
+        },
+
+        /**
+         * Gets historical adjacency count filtered by opposite guest type.
+         * If tracked guest is a host, returns only external guest adjacencies.
+         * If tracked guest is external, returns only host guest adjacencies.
+         */
+        getFilteredHistoricalAdjacencyCount: (eventId, currentSessionId, trackedGuestId, trackedGuestFromHost) => {
+          const state = get();
+          const event = state.events.find(e => e.id === eventId);
+
+          if (!event) return {};
+
+          // Get the current session's chronological datetime
+          const currentSessionDateTime = state.getSessionDateTime(currentSessionId);
+          
+          if (!currentSessionDateTime) {
+            return {};
+          }
+
+          // Build a set of guest IDs that are the opposite type
+          // If tracked is host, we want external guests; if tracked is external, we want host guests
+          const oppositeGuestIds = new Set<string>();
+          const guestList = trackedGuestFromHost 
+            ? event.masterExternalGuests 
+            : event.masterHostGuests;
+          
+          guestList.forEach(g => {
+            if (!g.deleted) {
+              oppositeGuestIds.add(g.id);
+            }
+          });
+
+          const allRecords = event.adjacencyRecords || [];
+          
+          // Filter records chronologically and by tracked guest
+          const relevantRecords = allRecords.filter(record => {
+            if (record.trackedGuestId !== trackedGuestId) return false;
+            if (record.sessionId === currentSessionId) return false;
+            
+            const recordDateTime = record.sessionDateTime || record.sessionStartTime;
+            return new Date(recordDateTime).getTime() < new Date(currentSessionDateTime).getTime();
+          });
+
+          const adjacencyCount: Record<string, { count: number; byType: Record<string, number> }> = {};
+
+          relevantRecords.forEach(record => {
+            // Use enhanced details if available, otherwise fall back to simple adjacentGuestIds
+            if (record.adjacentGuestDetails && record.adjacentGuestDetails.length > 0) {
+              record.adjacentGuestDetails.forEach(detail => {
+                // Filter to only opposite type guests
+                if (!oppositeGuestIds.has(detail.guestId)) return;
+                
+                if (!adjacencyCount[detail.guestId]) {
+                  adjacencyCount[detail.guestId] = { count: 0, byType: {} };
+                }
+                adjacencyCount[detail.guestId].count += 1;
+                
+                const adjType = detail.adjacencyType || 'side';
+                adjacencyCount[detail.guestId].byType[adjType] = 
+                  (adjacencyCount[detail.guestId].byType[adjType] || 0) + 1;
+              });
+            } else {
+              // Fallback for old records without adjacentGuestDetails
+              record.adjacentGuestIds.forEach(guestId => {
+                // Filter to only opposite type guests
+                if (!oppositeGuestIds.has(guestId)) return;
+                
+                if (!adjacencyCount[guestId]) {
+                  adjacencyCount[guestId] = { count: 0, byType: {} };
+                }
+                adjacencyCount[guestId].count += 1;
+                adjacencyCount[guestId].byType['side'] = 
+                  (adjacencyCount[guestId].byType['side'] || 0) + 1;
+              });
+            }
+          });
+
+          return adjacencyCount;
+        },
+
+        /**
+         * Gets tracked guest history filtered by opposite guest type with adjacency type breakdown.
+         */
+        getFilteredTrackedGuestHistory: (eventId, currentSessionId, trackedGuestId, trackedGuestFromHost) => {
+          const adjacencyCount = get().getFilteredHistoricalAdjacencyCount(
+            eventId,
+            currentSessionId,
+            trackedGuestId,
+            trackedGuestFromHost
+          );
+
+          return Object.entries(adjacencyCount)
+            .map(([guestId, data]) => ({ 
+              guestId, 
+              count: data.count, 
+              byType: data.byType 
+            }))
             .sort((a, b) => b.count - a.count);
         },
 
@@ -1143,6 +1370,7 @@ export const useEventStore = create<EventStoreState>()(
 
       {
         name: "event-master-store",
+        skipHydration: true,
         onRehydrateStorage: () => (state) => {
           console.log('EventStore: Hydration complete');
           state?.setHasHydrated(true);
