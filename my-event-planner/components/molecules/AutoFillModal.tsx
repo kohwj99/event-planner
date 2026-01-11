@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -37,7 +37,13 @@ import {
 } from '@mui/icons-material';
 import { useGuestStore, Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
+import { useSeatStore } from '@/store/seatStore';
 import { autoFillSeats, SortField, SortDirection, SortRule, TableRules, ProximityRules } from '@/utils/seatAutoFillHelper';
+import { 
+  SessionRulesConfig, 
+  DEFAULT_SESSION_RULES,
+  StoredProximityViolation,
+} from '@/types/Event';
 
 interface AutoFillModalProps {
   open: boolean;
@@ -74,10 +80,16 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
   const { hostGuests, externalGuests } = useGuestStore();
   const allGuests = [...hostGuests, ...externalGuests].filter((g) => !g.deleted);
 
-  // Event store for tracking data
+  // Event store for tracking data and session rules
   const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
   const getFilteredHistoricalAdjacencyCount = useEventStore((s) => s.getFilteredHistoricalAdjacencyCount);
   const isSessionTracked = useEventStore((s) => s.isSessionTracked);
+  const getSessionById = useEventStore((s) => s.getSessionById);
+  
+  // 🆕 Session rules methods
+  const loadSessionRules = useEventStore((s) => s.loadSessionRules);
+  const saveSessionRules = useEventStore((s) => s.saveSessionRules);
+  const saveSessionViolations = useEventStore((s) => s.saveSessionViolations);
 
   // Guest list selection
   const [includeHost, setIncludeHost] = useState(true);
@@ -111,6 +123,100 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
   const [acceptedRecommendations, setAcceptedRecommendations] = useState<Set<string>>(new Set());
 
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Track the last loaded session to detect session changes
+  const [lastLoadedSessionId, setLastLoadedSessionId] = useState<string | null>(null);
+
+  // Default values - defined as constants for reuse
+  const DEFAULT_SORT_RULES: SortRule[] = [{ field: 'ranking', direction: 'asc' }];
+  const DEFAULT_TABLE_RULES: TableRules = {
+    ratioRule: {
+      enabled: false,
+      hostRatio: 50,
+      externalRatio: 50,
+    },
+    spacingRule: {
+      enabled: false,
+      spacing: 1,
+      startWithExternal: false,
+    },
+  };
+
+  // Reset all rules to defaults
+  const resetToDefaults = () => {
+    setIncludeHost(true);
+    setIncludeExternal(true);
+    setSortRules([...DEFAULT_SORT_RULES]);
+    setTableRules({ ...DEFAULT_TABLE_RULES });
+    setSitTogetherRules([]);
+    setSitAwayRules([]);
+    setAcceptedRecommendations(new Set());
+  };
+
+  // 🆕 Load saved rules when modal opens with a valid session
+  // This effect handles both initial load and session switching
+  useEffect(() => {
+    if (open && sessionId) {
+      // Check if this is a different session than last time
+      const isNewSession = sessionId !== lastLoadedSessionId;
+      
+      if (isNewSession) {
+        // First, reset everything to defaults
+        resetToDefaults();
+        
+        // Then load saved rules if they exist for THIS session
+        const savedRules = loadSessionRules(sessionId);
+        
+        if (savedRules && savedRules.lastModified) {
+          // Only load if rules were actually saved (have lastModified timestamp)
+          console.log('Loading saved session rules for session:', sessionId, savedRules);
+          
+          // Load guest list selection
+          setIncludeHost(savedRules.guestListSelection.includeHost);
+          setIncludeExternal(savedRules.guestListSelection.includeExternal);
+          
+          // Load sort rules (only if non-empty)
+          if (savedRules.sortRules && savedRules.sortRules.length > 0) {
+            setSortRules(savedRules.sortRules);
+          }
+          
+          // Load table rules
+          if (savedRules.tableRules) {
+            setTableRules(savedRules.tableRules);
+          }
+          
+          // Load proximity rules
+          if (savedRules.proximityRules) {
+            // Ensure all sit-together rules have IDs
+            const sitTogetherWithIds = savedRules.proximityRules.sitTogether.map((rule, idx) => ({
+              ...rule,
+              id: rule.id || `together-loaded-${idx}-${Date.now()}`,
+            }));
+            setSitTogetherRules(sitTogetherWithIds);
+            
+            // Ensure all sit-away rules have IDs
+            const sitAwayWithIds = savedRules.proximityRules.sitAway.map((rule, idx) => ({
+              ...rule,
+              id: rule.id || `away-loaded-${idx}-${Date.now()}`,
+            }));
+            setSitAwayRules(sitAwayWithIds);
+          }
+        } else {
+          console.log('No saved rules for session, using defaults:', sessionId);
+          // Defaults already set by resetToDefaults() above
+        }
+        
+        setLastLoadedSessionId(sessionId);
+      }
+    }
+  }, [open, sessionId, loadSessionRules, lastLoadedSessionId]);
+
+  // Reset lastLoadedSessionId when modal closes so it reloads fresh next time
+  useEffect(() => {
+    if (!open) {
+      setLastLoadedSessionId(null);
+    }
+  }, [open]);
 
   // Build guest lookup
   const guestLookup = useMemo(() => {
@@ -347,6 +453,22 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
 
   const validationErrors = getValidationErrors();
 
+  // 🆕 Build the current rules config for saving
+  const buildCurrentRulesConfig = (): SessionRulesConfig => {
+    return {
+      guestListSelection: {
+        includeHost,
+        includeExternal,
+      },
+      sortRules: sortRules,
+      tableRules: tableRules,
+      proximityRules: {
+        sitTogether: sitTogetherRules.filter(r => r.guest1Id && r.guest2Id),
+        sitAway: sitAwayRules.filter(r => r.guest1Id && r.guest2Id),
+      },
+    };
+  };
+
   // --- Confirm Handler ---
   const handleConfirm = async () => {
     if (validationErrors.length > 0) {
@@ -367,6 +489,36 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
         tableRules,
         proximityRules,
       });
+
+      // 🆕 After autofill completes, save the rules and violations to the session
+      if (eventId && sessionId) {
+        const sessionData = getSessionById(sessionId);
+        if (sessionData) {
+          const { dayId } = sessionData;
+          
+          // Build and save the rules config
+          const rulesConfig = buildCurrentRulesConfig();
+          saveSessionRules(eventId, dayId, sessionId, rulesConfig);
+          
+          // Get current violations from seatStore and save them
+          const currentViolations = useSeatStore.getState().violations;
+          const storedViolations: StoredProximityViolation[] = currentViolations.map(v => ({
+            type: v.type,
+            guest1Id: v.guest1Id,
+            guest2Id: v.guest2Id,
+            guest1Name: v.guest1Name,
+            guest2Name: v.guest2Name,
+            tableId: v.tableId,
+            tableLabel: v.tableLabel,
+            seat1Id: v.seat1Id,
+            seat2Id: v.seat2Id,
+            reason: v.reason,
+          }));
+          saveSessionViolations(eventId, dayId, sessionId, storedViolations);
+          
+          console.log('Saved session rules and violations:', { rulesConfig, violations: storedViolations.length });
+        }
+      }
     } finally {
       setIsProcessing(false);
       onClose();
@@ -381,14 +533,34 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     return 'default';
   };
 
+  // Check if current session has saved rules (for UI indicator)
+  const sessionHasSavedRules = useMemo(() => {
+    if (!sessionId) return false;
+    const savedRules = loadSessionRules(sessionId);
+    return savedRules && savedRules.lastModified;
+  }, [sessionId, loadSessionRules]);
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>Auto-Fill Seats Configuration</DialogTitle>
+      <DialogTitle>
+        <Stack direction="row" alignItems="center" justifyContent="space-between">
+          <Typography variant="h6">Auto-Fill Seats Configuration</Typography>
+          {sessionId && sessionHasSavedRules && (
+            <Chip 
+              label="Rules loaded from session" 
+              size="small" 
+              color="info" 
+              variant="outlined"
+            />
+          )}
+        </Stack>
+      </DialogTitle>
 
       <DialogContent>
         <Stack spacing={3}>
           <Typography variant="body2" color="text.secondary">
             Configure guest lists, sorting rules, table assignment rules, and proximity rules for autofill.
+            {sessionId && ' Rules will be saved to this session when you confirm auto-fill.'}
           </Typography>
 
           {/* Validation Errors */}
@@ -403,7 +575,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
             </Alert>
           )}
 
-          {/* ========== VIP RECOMMENDATIONS (NEW) ========== */}
+          {/* ========== VIP RECOMMENDATIONS ========== */}
           {vipRecommendations.length > 0 && (
             <Paper elevation={0} sx={{ p: 2, bgcolor: '#fff3e0', border: '2px solid #ff9800' }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
@@ -553,7 +725,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                     onChange={(e) => setIncludeHost(e.target.checked)}
                   />
                 }
-                label={`Host Guests (${hostGuests.length})`}
+                label={`Host Guests (${hostGuests.filter(g => !g.deleted).length})`}
               />
               <FormControlLabel
                 control={
@@ -562,7 +734,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                     onChange={(e) => setIncludeExternal(e.target.checked)}
                   />
                 }
-                label={`External Guests (${externalGuests.length})`}
+                label={`External Guests (${externalGuests.filter(g => !g.deleted).length})`}
               />
             </Stack>
           </Paper>
@@ -572,53 +744,43 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
           {/* ========== SORTING RULES ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#f5f5f5' }}>
             <FormLabel component="legend" sx={{ mb: 1, fontWeight: 600 }}>
-              Sorting Rules (Priority Order)
+              Sorting Priority
             </FormLabel>
             <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-              Define how guests are ordered within their respective lists (Host/External)
+              Define the order in which guests are considered for seating. First rule has highest priority.
             </Typography>
             
             <Stack spacing={1}>
-              {sortRules.map((rule, index) => (
-                <Stack
-                  key={index}
-                  direction="row"
-                  spacing={2}
-                  alignItems="center"
-                  sx={{ border: '1px solid #ddd', p: 1, borderRadius: 1, bgcolor: 'white' }}
-                >
-                  <Typography variant="body2" sx={{ minWidth: 60 }}>
-                    Rule {index + 1}
+              {sortRules.map((rule, idx) => (
+                <Stack key={idx} direction="row" spacing={1} alignItems="center">
+                  <Typography variant="body2" sx={{ width: 24 }}>
+                    {idx + 1}.
                   </Typography>
-
                   <Select
                     size="small"
                     value={rule.field}
-                    onChange={(e) => updateSortRule(index, 'field', e.target.value as SortField)}
+                    onChange={(e) => updateSortRule(idx, 'field', e.target.value)}
                     sx={{ minWidth: 140 }}
                   >
+                    <MenuItem value="ranking">Ranking</MenuItem>
                     <MenuItem value="name">Name</MenuItem>
                     <MenuItem value="country">Country</MenuItem>
                     <MenuItem value="organization">Organization</MenuItem>
-                    <MenuItem value="ranking">Ranking (Protocol)</MenuItem>
                   </Select>
-
                   <Select
                     size="small"
                     value={rule.direction}
-                    onChange={(e) => updateSortRule(index, 'direction', e.target.value as SortDirection)}
+                    onChange={(e) => updateSortRule(idx, 'direction', e.target.value)}
                     sx={{ minWidth: 120 }}
                   >
                     <MenuItem value="asc">Ascending</MenuItem>
                     <MenuItem value="desc">Descending</MenuItem>
                   </Select>
-
-                  <IconButton onClick={() => removeSortRule(index)} size="small" color="error">
+                  <IconButton onClick={() => removeSortRule(idx)} size="small" disabled={sortRules.length <= 1}>
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
               ))}
-
               <Button
                 variant="outlined"
                 size="small"
@@ -626,7 +788,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                 onClick={addSortRule}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                Add Sorting Rule
+                Add Sort Rule
               </Button>
             </Stack>
           </Paper>
@@ -639,26 +801,16 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
               Proximity Rules
             </FormLabel>
             <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-              Define who should sit together or apart
+              Define which guests should or should not sit together
             </Typography>
 
             {/* Sit Together Rules */}
             <Box sx={{ mb: 3 }}>
-              <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                <Typography variant="subtitle2" fontWeight={600}>
-                  🤝 Sit Together Rules
-                </Typography>
-                {sitTogetherRules.filter(r => r.isFromRecommendation).length > 0 && (
-                  <Chip 
-                    label={`${sitTogetherRules.filter(r => r.isFromRecommendation).length} from recommendations`}
-                    size="small"
-                    color="warning"
-                    variant="outlined"
-                  />
-                )}
-              </Stack>
+              <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                🤝 Sit Together Rules
+              </Typography>
               <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-                These guests will be seated adjacent to each other whenever possible
+                These guests will be seated adjacent to each other when possible
               </Typography>
               
               <Stack spacing={1}>
@@ -669,17 +821,12 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                     spacing={1}
                     alignItems="center"
                     sx={{ 
-                      border: rule.isFromRecommendation ? '2px solid #ff9800' : '1px solid #4caf50', 
+                      border: rule.isFromRecommendation ? '2px solid #4caf50' : '1px solid #4caf50', 
                       p: 1, 
                       borderRadius: 1, 
-                      bgcolor: rule.isFromRecommendation ? '#fff8e1' : 'white' 
+                      bgcolor: rule.isFromRecommendation ? '#e8f5e9' : 'white' 
                     }}
                   >
-                    {rule.isFromRecommendation && (
-                      <Tooltip title="From VIP Recommendation">
-                        <RecommendIcon fontSize="small" color="warning" />
-                      </Tooltip>
-                    )}
                     <Autocomplete
                       size="small"
                       options={allGuests}
@@ -699,6 +846,9 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                       renderInput={(params) => <TextField {...params} placeholder="Select Guest 2" />}
                       sx={{ flex: 1 }}
                     />
+                    {rule.isFromRecommendation && (
+                      <Chip label="VIP Rec" size="small" color="success" variant="outlined" />
+                    )}
                     <IconButton onClick={() => removeSitTogetherRule(rule.id)} size="small" color="error">
                       <DeleteIcon fontSize="small" />
                     </IconButton>

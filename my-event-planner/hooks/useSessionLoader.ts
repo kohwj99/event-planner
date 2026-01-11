@@ -2,6 +2,8 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { detectProximityViolations } from '@/utils/violationDetector';
+import { StoredProximityViolation } from '@/types/Event';
 
 /**
  * Hook for loading and saving session data
@@ -10,6 +12,8 @@ import { useGuestStore } from '@/store/guestStore';
  * 1. Loading session seat plans when navigating to a session
  * 2. Saving seat plans when navigating away
  * 3. Recording adjacency data for tracked sessions
+ * 4. 🆕 Loading and saving session rules (proximity rules, sort order, table rules)
+ * 5. 🆕 Loading and saving violations
  * 
  * NOTE: All tracking functionality is now in eventStore.
  * No separate trackingStore import is needed.
@@ -39,6 +43,12 @@ export const useSessionLoader = (sessionId: string | null) => {
   const getSessionGuests = useEventStore((state) => state.getSessionGuests);
   const setActiveSession = useEventStore((state) => state.setActiveSession);
   
+  // 🆕 Session rules methods
+  const loadSessionRules = useEventStore((state) => state.loadSessionRules);
+  const saveSessionRules = useEventStore((state) => state.saveSessionRules);
+  const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
+  const saveSessionViolations = useEventStore((state) => state.saveSessionViolations);
+  
   // Tracking functions - now from eventStore
   const isSessionTracked = useEventStore((state) => state.isSessionTracked);
   const recordSessionAdjacency = useEventStore((state) => state.recordSessionAdjacency);
@@ -60,7 +70,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const sessionData = getSessionById(currentSessionId);
     if (!sessionData) return;
 
-    const { tables, chunks, selectedMealPlanIndex } = useSeatStore.getState();
+    const { tables, chunks, selectedMealPlanIndex, violations, proximityRules } = useSeatStore.getState();
 
     // Collect all assigned guest IDs from seats
     const activeGuestIds = new Set<string>();
@@ -81,6 +91,30 @@ export const useSessionLoader = (sessionId: string | null) => {
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
     });
+
+    // 🆕 Save violations to session
+    if (violations && violations.length > 0) {
+      const storedViolations: StoredProximityViolation[] = violations.map(v => ({
+        type: v.type,
+        guest1Id: v.guest1Id,
+        guest2Id: v.guest2Id,
+        guest1Name: v.guest1Name,
+        guest2Name: v.guest2Name,
+        tableId: v.tableId,
+        tableLabel: v.tableLabel,
+        seat1Id: v.seat1Id,
+        seat2Id: v.seat2Id,
+        reason: v.reason,
+      }));
+      saveSessionViolations(sessionData.eventId, sessionData.dayId, currentSessionId, storedViolations);
+      console.log(`Saved ${storedViolations.length} violations to session`);
+    } else {
+      // Clear violations if none exist
+      saveSessionViolations(sessionData.eventId, sessionData.dayId, currentSessionId, []);
+    }
+
+    // 🆕 Note: Rules are saved in AutoFillModal when user confirms autofill
+    // We don't overwrite rules here to preserve intentionally configured rules
 
     // Check if this session is tracked (using eventStore as source of truth)
     const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
@@ -103,6 +137,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   }, [
     getSessionById, 
     saveSessionSeatPlan, 
+    saveSessionViolations,
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
@@ -147,24 +182,67 @@ export const useSessionLoader = (sessionId: string | null) => {
       });
     }
 
-    // Build guest lookup and trigger violation detection
+    // Build guest lookup for violation detection
     const guestLookup: Record<string, any> = {};
     allLoadedGuests.forEach(g => {
       guestLookup[g.id] = g;
     });
+
+    // 🆕 Load session rules if they exist
+    const savedRules = loadSessionRules(newSessionId);
+    if (savedRules) {
+      console.log('Loading saved session rules');
+      
+      // Set proximity rules in seatStore for violation detection
+      if (savedRules.proximityRules) {
+        const seatStore = useSeatStore.getState();
+        seatStore.setProximityRules(savedRules.proximityRules);
+      }
+    }
     
     // Update the seatStore with guest lookup for violation detection
     const seatStoreState = useSeatStore.getState();
     seatStoreState.setGuestLookup(guestLookup);
+
+    // 🆕 Load stored violations OR detect new ones
+    const storedViolations = loadSessionViolations(newSessionId);
     
-    // Trigger violation detection (will use existing proximityRules if any)
-    seatStoreState.detectViolations();
-    console.log('Session loaded, violation detection triggered');
+    if (storedViolations && storedViolations.length > 0) {
+      // Use stored violations - this shows violations that existed when user left
+      console.log(`Loading ${storedViolations.length} stored violations`);
+      useSeatStore.setState({ violations: storedViolations });
+    } else if (savedRules?.proximityRules && seatPlan && seatPlan.tables.length > 0) {
+      // No stored violations but we have rules - detect violations
+      console.log('Detecting violations based on saved rules');
+      const detectedViolations = detectProximityViolations(
+        seatPlan.tables,
+        savedRules.proximityRules,
+        guestLookup
+      );
+      useSeatStore.setState({ violations: detectedViolations });
+      console.log(`Detected ${detectedViolations.length} violations`);
+    } else {
+      // No rules or no tables - clear violations
+      useSeatStore.setState({ violations: [] });
+    }
+    
+    console.log('Session loaded with rules and violations');
 
     setActiveSession(newSessionId);
     lastSessionIdRef.current = newSessionId;
     hasLoadedRef.current = true;
-  }, [getSessionById, loadSessionSeatPlan, getSessionGuests, setSeatStoreState, resetGuests, addGuest, setActiveSession, resetTables]);
+  }, [
+    getSessionById, 
+    loadSessionSeatPlan, 
+    loadSessionRules,
+    loadSessionViolations,
+    getSessionGuests, 
+    setSeatStoreState, 
+    resetGuests, 
+    addGuest, 
+    setActiveSession, 
+    resetTables
+  ]);
 
   // Handle session changes - ONLY after hydration is complete
   useEffect(() => {

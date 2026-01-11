@@ -1,4 +1,5 @@
 // SeatingStatsPanel.tsx - WITH BOSS ADJACENCY TRACKING
+// FIXED: Added EnhancedAdjacency type import and proper typing for adj parameters
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -39,7 +40,8 @@ import {
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
-import { getEnhancedAdjacentSeats } from '@/utils/adjacencyHelper';
+// FIXED: Import EnhancedAdjacency type along with the function
+import { getEnhancedAdjacentSeats, EnhancedAdjacency } from '@/utils/adjacencyHelper';
 // Note: violations are now read directly from seatStore
 
 interface SeatingStats {
@@ -66,6 +68,45 @@ interface SeatingStats {
 
   // Proximity violations
   proximityViolations: any[];
+}
+
+// ADDED: Interface for current adjacency item with guest details
+interface CurrentAdjacencyItem {
+  guestId: string;
+  guest: any;
+  adjacencyType: 'side' | 'opposite' | 'edge';
+}
+
+// ADDED: Interface for current session adjacency data
+interface CurrentSessionAdjacency {
+  trackedGuestId: string;
+  trackedGuest: any;
+  isSeated: boolean;
+  adjacencies: CurrentAdjacencyItem[];
+  totalAdjacencies: number;
+  showingGuestType: 'external' | 'host';
+}
+
+// ADDED: Interface for historical adjacency item
+interface HistoricalAdjacencyItem {
+  guestId: string;
+  guest: any;
+  count: number;
+  byType: {
+    side?: number;
+    opposite?: number;
+    edge?: number;
+  };
+}
+
+// ADDED: Interface for historical adjacency data
+interface HistoricalAdjacencyData {
+  trackedGuestId: string;
+  trackedGuest: any;
+  adjacencies: HistoricalAdjacencyItem[];
+  totalAdjacencies: number;
+  uniqueGuests: number;
+  showingGuestType: 'external' | 'host';
 }
 
 type DetailView = 'overview' | 'vips' | 'violations' | 'adjacency';
@@ -103,7 +144,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
 
   // Calculate adjacency history for tracked guests
   // Now filtered to show only opposite guest type with adjacency type breakdown
-  const adjacencyHistory = useMemo(() => {
+  const adjacencyHistory = useMemo((): HistoricalAdjacencyData[] => {
     if (!sessionTracked || trackedGuestIds.length === 0) {
       return [];
     }
@@ -122,7 +163,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
       );
 
       // Convert to array with guest details and adjacency type breakdown
-      const adjacencies = history
+      const adjacencies: HistoricalAdjacencyItem[] = history
         .map(item => ({
           guestId: item.guestId,
           guest: guestLookup[item.guestId],
@@ -141,13 +182,13 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
         uniqueGuests: adjacencies.length,
         // Info about what type of guests are shown
         showingGuestType: guest.fromHost ? 'external' : 'host',
-      };
-    }).filter(Boolean);
+      } as HistoricalAdjacencyData;
+    }).filter((item): item is HistoricalAdjacencyData => item !== null);
   }, [sessionTracked, trackedGuestIds, eventId, sessionId, guestLookup, getFilteredTrackedGuestHistory]);
 
   // Calculate CURRENT session adjacencies (what would be recorded when saving)
   // This shows users what's being tracked right now without navigating to next session
-  const currentSessionAdjacencies = useMemo(() => {
+  const currentSessionAdjacencies = useMemo((): CurrentSessionAdjacency[] => {
     if (!sessionTracked || trackedGuestIds.length === 0) {
       return [];
     }
@@ -180,7 +221,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
           adjacencies: [],
           totalAdjacencies: 0,
           showingGuestType: trackedGuest.fromHost ? 'external' : 'host',
-        };
+        } as CurrentSessionAdjacency;
       }
 
       const { seatId, table } = guestSeatData;
@@ -191,19 +232,20 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
       // Filter to only show opposite guest type and exclude locked seats
       const oppositeFromHost = !trackedGuest.fromHost; // If tracked is host, show external (fromHost=false)
       
-      const adjacencies = enhancedAdjacencies
-        .filter(adj => {
+      // FIXED: Properly typed adj parameter using EnhancedAdjacency
+      const adjacencies: CurrentAdjacencyItem[] = enhancedAdjacencies
+        .filter((adj: EnhancedAdjacency) => {
           const adjGuest = guestLookup[adj.guestId];
           if (!adjGuest) return false;
           // Only include guests of the opposite type
           return adjGuest.fromHost === oppositeFromHost;
         })
-        .filter(adj => {
+        .filter((adj: EnhancedAdjacency) => {
           // Exclude locked seats
           const adjSeat = table.seats.find((s: any) => s.id === adj.seatId);
           return adjSeat && !adjSeat.locked;
         })
-        .map(adj => ({
+        .map((adj: EnhancedAdjacency) => ({
           guestId: adj.guestId,
           guest: guestLookup[adj.guestId],
           adjacencyType: adj.adjacencyType,
@@ -216,8 +258,8 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
         adjacencies,
         totalAdjacencies: adjacencies.length,
         showingGuestType: trackedGuest.fromHost ? 'external' : 'host',
-      };
-    }).filter(Boolean);
+      } as CurrentSessionAdjacency;
+    }).filter((item): item is CurrentSessionAdjacency => item !== null);
   }, [sessionTracked, trackedGuestIds, tables, guestLookup]);
 
   // Calculate statistics
@@ -505,104 +547,94 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                   >
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
                       <Typography variant="body2" fontWeight="bold">
-                        {stats.proximityViolations.length} Proximity Rule Violations
+                        {stats.proximityViolations.length} Proximity Violation/s
                       </Typography>
                       <Typography variant="caption">View</Typography>
                     </Stack>
                   </Box>
                 )}
 
-                {/* Boss Adjacency Info */}
+                {/* Boss Tracking Info */}
                 {sessionTracked && trackedGuestIds.length > 0 && (
                   <Box
                     sx={{
                       p: 1.5,
-                      bgcolor: '#e3f2fd',
+                      bgcolor: 'info.light',
                       borderRadius: 1,
                       cursor: 'pointer',
-                      '&:hover': { bgcolor: '#2196f3', color: 'white' },
+                      '&:hover': { bgcolor: 'info.main', color: 'white' },
                     }}
                     onClick={() => setDetailView('adjacency')}
                   >
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
-                      <Stack direction="row" spacing={1} alignItems="center">
+                      <Stack direction="row" alignItems="center" spacing={1}>
                         <Visibility fontSize="small" />
                         <Typography variant="body2" fontWeight="bold">
-                          Boss Adjacency Tracked
+                          Tracking {trackedGuestIds.length} Guest{trackedGuestIds.length > 1 ? 's' : ''}
                         </Typography>
                       </Stack>
-                      <Typography variant="caption">View</Typography>
+                      <Typography variant="caption">View Adjacency</Typography>
                     </Stack>
                   </Box>
                 )}
 
                 <Divider />
 
-                {/* Host Guests */}
+                {/* Host Stats */}
                 <Box>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                     Host Guests
                   </Typography>
-                  <Stack spacing={1}>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Total:</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {stats.hostTotal}
-                      </Typography>
-                    </Stack>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Seated:</Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
+                    <Chip
+                      label={`${stats.hostSeated} / ${stats.hostTotal} Seated`}
+                      size="small"
+                      color={stats.hostUnseated === 0 ? 'success' : 'default'}
+                    />
+                    {stats.hostUnseated > 0 && (
                       <Chip
-                        label={stats.hostSeated}
+                        icon={<PersonOff fontSize="small" />}
+                        label={`${stats.hostUnseated} Unseated`}
                         size="small"
-                        color="success"
-                        sx={{ minWidth: 50 }}
+                        color="warning"
                       />
-                    </Stack>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Unseated:</Typography>
+                    )}
+                    {stats.hostVIPsUnseated.length > 0 && (
                       <Chip
-                        label={stats.hostUnseated}
+                        label={`${stats.hostVIPsUnseated.length} VIP Unseated`}
                         size="small"
-                        color={stats.hostUnseated > 0 ? 'warning' : 'default'}
-                        sx={{ minWidth: 50 }}
+                        color="error"
                       />
-                    </Stack>
+                    )}
                   </Stack>
                 </Box>
 
-                <Divider />
-
-                {/* External Guests */}
+                {/* External Stats */}
                 <Box>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
                     External Guests
                   </Typography>
-                  <Stack spacing={1}>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Total:</Typography>
-                      <Typography variant="body2" fontWeight="bold">
-                        {stats.externalTotal}
-                      </Typography>
-                    </Stack>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Seated:</Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
+                    <Chip
+                      label={`${stats.externalSeated} / ${stats.externalTotal} Seated`}
+                      size="small"
+                      color={stats.externalUnseated === 0 ? 'success' : 'default'}
+                    />
+                    {stats.externalUnseated > 0 && (
                       <Chip
-                        label={stats.externalSeated}
+                        icon={<PersonOff fontSize="small" />}
+                        label={`${stats.externalUnseated} Unseated`}
                         size="small"
-                        color="success"
-                        sx={{ minWidth: 50 }}
+                        color="warning"
                       />
-                    </Stack>
-                    <Stack direction="row" justifyContent="space-between">
-                      <Typography variant="body2">Unseated:</Typography>
+                    )}
+                    {stats.externalVIPsUnseated.length > 0 && (
                       <Chip
-                        label={stats.externalUnseated}
+                        label={`${stats.externalVIPsUnseated.length} VIP Unseated`}
                         size="small"
-                        color={stats.externalUnseated > 0 ? 'warning' : 'default'}
-                        sx={{ minWidth: 50 }}
+                        color="error"
                       />
-                    </Stack>
+                    )}
                   </Stack>
                 </Box>
               </Stack>
@@ -610,200 +642,99 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
 
             {detailView === 'vips' && (
               <Stack spacing={2}>
-                {stats.hostVIPsUnseated.length > 0 && (
-                  <Box>
-                    <Typography variant="subtitle2" color="error" gutterBottom>
-                      Host VIPs ({stats.hostVIPsUnseated.length})
-                    </Typography>
-                    <List dense disablePadding>
-                      {stats.hostVIPsUnseated.map((guestId) => {
-                        const guest = guestLookup[guestId];
-                        if (!guest) return null;
-                        return (
-                          <ListItem
-                            key={guestId}
-                            sx={{
-                              bgcolor: '#ffebee',
-                              mb: 1,
-                              borderRadius: 1,
-                              border: '1px solid #ef5350',
-                            }}
-                          >
-                            <ListItemText
-                              primary={
-                                <Stack direction="row" spacing={1} alignItems="center">
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {guest.salutation} {guest.name}
-                                  </Typography>
-                                  <Chip
-                                    label={`Rank ${guest.ranking}`}
-                                    size="small"
-                                    color="error"
-                                  />
-                                </Stack>
-                              }
-                              secondary={
-                                <Typography variant="caption" color="text.secondary">
-                                  {guest.title} - {guest.company} - {guest.country}
-                                </Typography>
-                              }
-                            />
-                          </ListItem>
-                        );
-                      })}
-                    </List>
-                  </Box>
-                )}
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Unseated VIPs (Ranking 1-4)
+                </Typography>
 
-                {stats.externalVIPsUnseated.length > 0 && (
-                  <Box>
-                    <Typography variant="subtitle2" color="error" gutterBottom>
-                      External VIPs ({stats.externalVIPsUnseated.length})
-                    </Typography>
-                    <List dense disablePadding>
-                      {stats.externalVIPsUnseated.map((guestId) => {
-                        const guest = guestLookup[guestId];
-                        if (!guest) return null;
-                        return (
-                          <ListItem
-                            key={guestId}
-                            sx={{
-                              bgcolor: '#ffebee',
-                              mb: 1,
-                              borderRadius: 1,
-                              border: '1px solid #ef5350',
-                            }}
-                          >
-                            <ListItemText
-                              primary={
-                                <Stack direction="row" spacing={1} alignItems="center">
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {guest.salutation} {guest.name}
-                                  </Typography>
-                                  <Chip
-                                    label={`Rank ${guest.ranking}`}
-                                    size="small"
-                                    color="error"
-                                  />
-                                </Stack>
-                              }
-                              secondary={
-                                <Typography variant="caption" color="text.secondary">
-                                  {guest.title} - {guest.company} - {guest.country}
-                                </Typography>
-                              }
-                            />
-                          </ListItem>
-                        );
-                      })}
-                    </List>
-                  </Box>
-                )}
-
-                {stats.totalVIPsUnseated === 0 && (
+                {stats.totalVIPsUnseated === 0 ? (
                   <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <CheckCircle sx={{ fontSize: 48, color: 'success.main', mb: 2 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      All VIPs are seated
-                    </Typography>
-                  </Box>
-                )}
-              </Stack>
-            )}
-
-            {detailView === 'violations' && (
-              <Stack spacing={2}>
-                {stats.proximityViolations.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <CheckCircle sx={{ fontSize: 48, color: 'success.main', mb: 2 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      No proximity rule violations
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      Run autofill with proximity rules to see violations
+                    <CheckCircle color="success" sx={{ fontSize: 48, mb: 1 }} />
+                    <Typography variant="body1" color="text.secondary">
+                      All VIPs are seated!
                     </Typography>
                   </Box>
                 ) : (
                   <>
-                    {/* Sit Together Violations */}
-                    {stats.proximityViolations.filter((v: any) => v.type === 'sit-together').length > 0 && (
+                    {/* Host VIPs */}
+                    {stats.hostVIPsUnseated.length > 0 && (
                       <Box>
-                        <Typography variant="subtitle2" color="error" gutterBottom>
-                          Sit Together Violations
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                          Host VIPs ({stats.hostVIPsUnseated.length})
                         </Typography>
                         <List dense disablePadding>
-                          {stats.proximityViolations
-                            .filter((v: any) => v.type === 'sit-together')
-                            .map((violation: any, idx: number) => (
+                          {stats.hostVIPsUnseated.map((id) => {
+                            const guest = guestLookup[id];
+                            if (!guest) return null;
+                            return (
                               <ListItem
-                                key={idx}
+                                key={id}
                                 sx={{
                                   bgcolor: '#fff3e0',
-                                  mb: 1,
                                   borderRadius: 1,
-                                  border: '1px solid #ff9800',
-                                  flexDirection: 'column',
-                                  alignItems: 'flex-start',
+                                  mb: 0.5,
                                 }}
                               >
-                                <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
-                                  <GroupAdd fontSize="small" color="warning" />
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {violation.guest1Name} & {violation.guest2Name}
-                                  </Typography>
-                                </Stack>
-                                <Typography variant="caption" color="text.secondary">
-                                  Should sit together but are not adjacent
-                                </Typography>
-                                <Chip
-                                  label={`${violation.tableLabel}`}
-                                  size="small"
-                                  sx={{ mt: 0.5 }}
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                      <Chip
+                                        label={`#${guest.ranking}`}
+                                        size="small"
+                                        color="primary"
+                                        sx={{ fontWeight: 'bold' }}
+                                      />
+                                      <Typography variant="body2" fontWeight="bold">
+                                        {guest.salutation} {guest.name}
+                                      </Typography>
+                                    </Stack>
+                                  }
+                                  secondary={`${guest.title} - ${guest.company}`}
                                 />
                               </ListItem>
-                            ))}
+                            );
+                          })}
                         </List>
                       </Box>
                     )}
 
-                    {/* Sit Away Violations */}
-                    {stats.proximityViolations.filter((v: any) => v.type === 'sit-away').length > 0 && (
+                    {/* External VIPs */}
+                    {stats.externalVIPsUnseated.length > 0 && (
                       <Box>
-                        <Typography variant="subtitle2" color="error" gutterBottom>
-                          Sit Away Violations
+                        <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                          External VIPs ({stats.externalVIPsUnseated.length})
                         </Typography>
                         <List dense disablePadding>
-                          {stats.proximityViolations
-                            .filter((v: any) => v.type === 'sit-away')
-                            .map((violation: any, idx: number) => (
+                          {stats.externalVIPsUnseated.map((id) => {
+                            const guest = guestLookup[id];
+                            if (!guest) return null;
+                            return (
                               <ListItem
-                                key={idx}
+                                key={id}
                                 sx={{
                                   bgcolor: '#ffebee',
-                                  mb: 1,
                                   borderRadius: 1,
-                                  border: '1px solid #ef5350',
-                                  flexDirection: 'column',
-                                  alignItems: 'flex-start',
+                                  mb: 0.5,
                                 }}
                               >
-                                <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
-                                  <PersonOff fontSize="small" color="error" />
-                                  <Typography variant="body2" fontWeight="bold">
-                                    {violation.guest1Name} & {violation.guest2Name}
-                                  </Typography>
-                                </Stack>
-                                <Typography variant="caption" color="text.secondary">
-                                  Should not sit together but are adjacent
-                                </Typography>
-                                <Chip
-                                  label={`Table: ${violation.tableLabel}`}
-                                  size="small"
-                                  color="error"
-                                  sx={{ mt: 0.5 }}
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                      <Chip
+                                        label={`#${guest.ranking}`}
+                                        size="small"
+                                        color="error"
+                                        sx={{ fontWeight: 'bold' }}
+                                      />
+                                      <Typography variant="body2" fontWeight="bold">
+                                        {guest.salutation} {guest.name}
+                                      </Typography>
+                                    </Stack>
+                                  }
+                                  secondary={`${guest.title} - ${guest.company}`}
                                 />
                               </ListItem>
-                            ))}
+                            );
+                          })}
                         </List>
                       </Box>
                     )}
@@ -812,48 +743,88 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
               </Stack>
             )}
 
+            {detailView === 'violations' && (
+              <Stack spacing={2}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Proximity Violations
+                </Typography>
+
+                {stats.proximityViolations.length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <CheckCircle color="success" sx={{ fontSize: 48, mb: 1 }} />
+                    <Typography variant="body1" color="text.secondary">
+                      No proximity violations!
+                    </Typography>
+                  </Box>
+                ) : (
+                  <List dense disablePadding>
+                    {stats.proximityViolations.map((violation: any, index: number) => (
+                      <ListItem
+                        key={index}
+                        sx={{
+                          bgcolor: violation.type === 'sit-together' ? '#fff3e0' : '#ffebee',
+                          borderRadius: 1,
+                          mb: 0.5,
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                        }}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="center" width="100%">
+                          <Chip
+                            label={violation.type === 'sit-together' ? 'Should Sit Together' : 'Should Sit Apart'}
+                            size="small"
+                            color={violation.type === 'sit-together' ? 'warning' : 'error'}
+                          />
+                          <Typography variant="caption" color="text.secondary">
+                            {violation.tableLabel}
+                          </Typography>
+                        </Stack>
+                        <Typography variant="body2" sx={{ mt: 0.5 }}>
+                          <strong>{violation.guest1Name}</strong> & <strong>{violation.guest2Name}</strong>
+                        </Typography>
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+              </Stack>
+            )}
+
             {detailView === 'adjacency' && (
               <Stack spacing={2}>
-                {!sessionTracked || trackedGuestIds.length === 0 ? (
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Boss Adjacency Tracking
+                </Typography>
+
+                {!sessionTracked ? (
                   <Box sx={{ textAlign: 'center', py: 4 }}>
-                    <Visibility sx={{ fontSize: 48, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
                     <Typography variant="body2" color="text.secondary">
-                      No tracked guests in this session
+                      This session is not being tracked.
+                    </Typography>
+                  </Box>
+                ) : trackedGuestIds.length === 0 ? (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      No guests are being tracked for this event.
                     </Typography>
                   </Box>
                 ) : (
                   <>
-                    {/* ==================== CURRENT SESSION TRACKLIST ==================== */}
-                    <Box sx={{ 
-                      bgcolor: '#e3f2fd', 
-                      borderRadius: 1, 
-                      p: 1.5,
-                      border: '1px solid #90caf9'
-                    }}>
-                      <Typography variant="subtitle2" fontWeight={600} color="primary" gutterBottom>
-                        Current Session Tracklist
-                      </Typography>
-                      {currentSessionAdjacencies.map((current: any) => (
-                        <Box 
-                          key={current.trackedGuestId} 
-                          sx={{ 
-                            bgcolor: 'white', 
-                            borderRadius: 1, 
-                            p: 1.5, 
-                            mb: 1,
-                            border: '1px solid #e0e0e0'
-                          }}
-                        >
-                          <Stack direction="row" spacing={2} alignItems="center" mb={1}>
+                    {/* ==================== CURRENT SESSION ADJACENCY ==================== */}
+                    <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                      Current Session Adjacency
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                      Shows opposite guest type adjacencies that will be recorded when saving
+                    </Typography>
+
+                    <Box sx={{ mb: 2 }}>
+                      {currentSessionAdjacencies.map((current: CurrentSessionAdjacency) => (
+                        <Box key={current.trackedGuestId} sx={{ mb: 1.5, p: 1, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                          <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
                             <Visibility color="primary" fontSize="small" />
-                            <Box flexGrow={1}>
-                              <Typography variant="body2" fontWeight={600}>
-                                {current.trackedGuest.salutation} {current.trackedGuest.name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {current.trackedGuest.company} • {current.trackedGuest.fromHost ? 'Host' : 'External'}
-                              </Typography>
-                            </Box>
+                            <Typography variant="subtitle2" fontWeight={600}>
+                              {current.trackedGuest.salutation} {current.trackedGuest.name}
+                            </Typography>
                             {!current.isSeated ? (
                               <Chip
                                 label="Not Seated"
@@ -878,7 +849,8 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
 
                           {current.isSeated && current.adjacencies.length > 0 && (
                             <Stack spacing={0.5} sx={{ pl: 4 }}>
-                              {current.adjacencies.map((adj: any) => (
+                              {/* FIXED: Properly typed adj parameter */}
+                              {current.adjacencies.map((adj: CurrentAdjacencyItem) => (
                                 <Stack 
                                   key={adj.guestId} 
                                   direction="row" 
@@ -925,7 +897,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                         </Typography>
                       </Box>
                     ) : (
-                      adjacencyHistory.map((history: any) => (
+                      adjacencyHistory.map((history: HistoricalAdjacencyData) => (
                         <Accordion key={history.trackedGuestId} defaultExpanded={adjacencyHistory.length === 1}>
                           <AccordionSummary expandIcon={<ExpandMore />}>
                             <Stack direction="row" spacing={2} alignItems="center" width="100%">
@@ -969,7 +941,8 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                  {history.adjacencies.map((adj: any) => (
+                                  {/* FIXED: Properly typed adj parameter */}
+                                  {history.adjacencies.map((adj: HistoricalAdjacencyItem) => (
                                     <TableRow
                                       key={adj.guestId}
                                       sx={{
@@ -998,7 +971,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                       </TableCell>
                                       <TableCell align="center">
                                         <Stack direction="row" spacing={0.5} justifyContent="center" flexWrap="wrap">
-                                          {adj.byType?.side > 0 && (
+                                          {adj.byType?.side && adj.byType.side > 0 && (
                                             <Chip
                                               label={`Side: ${adj.byType.side}`}
                                               size="small"
@@ -1006,7 +979,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                               sx={{ fontSize: '0.65rem', height: 18 }}
                                             />
                                           )}
-                                          {adj.byType?.opposite > 0 && (
+                                          {adj.byType?.opposite && adj.byType.opposite > 0 && (
                                             <Chip
                                               label={`Opp: ${adj.byType.opposite}`}
                                               size="small"
@@ -1015,7 +988,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                               sx={{ fontSize: '0.65rem', height: 18 }}
                                             />
                                           )}
-                                          {adj.byType?.edge > 0 && (
+                                          {adj.byType?.edge && adj.byType.edge > 0 && (
                                             <Chip
                                               label={`Edge: ${adj.byType.edge}`}
                                               size="small"

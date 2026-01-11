@@ -9,7 +9,7 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- Ã°Å¸â€œÅ  ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- 📜 ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Type of adjacency relationship for Boss Tracking
@@ -62,7 +62,154 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- Ã°Å¸â€œâ€¦ SESSION & DAY TYPES -------------------- */
+/* -------------------- 🎯 AUTOFILL RULES TYPES -------------------- */
+
+/**
+ * Sort field options for guest ordering
+ */
+export type SortField = "name" | "country" | "organization" | "ranking";
+
+/**
+ * Sort direction
+ */
+export type SortDirection = "asc" | "desc";
+
+/**
+ * A single sorting rule
+ */
+export interface SortRule {
+  field: SortField;
+  direction: SortDirection;
+}
+
+/**
+ * Table ratio rule configuration
+ */
+export interface RatioRule {
+  enabled: boolean;
+  hostRatio: number;
+  externalRatio: number;
+}
+
+/**
+ * Table spacing rule configuration
+ */
+export interface SpacingRule {
+  enabled: boolean;
+  spacing: number;
+  startWithExternal: boolean;
+}
+
+/**
+ * Combined table assignment rules
+ */
+export interface TableRules {
+  ratioRule: RatioRule;
+  spacingRule: SpacingRule;
+}
+
+/**
+ * Sit together proximity rule
+ */
+export interface SitTogetherRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
+  isFromRecommendation?: boolean;
+}
+
+/**
+ * Sit away proximity rule
+ */
+export interface SitAwayRule {
+  id: string;
+  guest1Id: string;
+  guest2Id: string;
+}
+
+/**
+ * Combined proximity rules
+ */
+export interface ProximityRules {
+  sitTogether: SitTogetherRule[];
+  sitAway: SitAwayRule[];
+}
+
+/**
+ * Guest list selection configuration
+ */
+export interface GuestListSelection {
+  includeHost: boolean;
+  includeExternal: boolean;
+}
+
+/**
+ * Complete session rules configuration - stored with each session
+ * This allows rules to persist when navigating between sessions
+ */
+export interface SessionRulesConfig {
+  /** Which guest lists to include in autofill */
+  guestListSelection: GuestListSelection;
+  
+  /** Sorting rules for guest ordering */
+  sortRules: SortRule[];
+  
+  /** Table assignment rules (ratio, spacing) */
+  tableRules: TableRules;
+  
+  /** Proximity rules (sit together, sit away) */
+  proximityRules: ProximityRules;
+  
+  /** Timestamp when rules were last modified */
+  lastModified?: string;
+}
+
+/**
+ * Default session rules configuration
+ */
+export const DEFAULT_SESSION_RULES: SessionRulesConfig = {
+  guestListSelection: {
+    includeHost: true,
+    includeExternal: true,
+  },
+  sortRules: [
+    { field: 'ranking', direction: 'asc' },
+  ],
+  tableRules: {
+    ratioRule: {
+      enabled: false,
+      hostRatio: 50,
+      externalRatio: 50,
+    },
+    spacingRule: {
+      enabled: false,
+      spacing: 1,
+      startWithExternal: false,
+    },
+  },
+  proximityRules: {
+    sitTogether: [],
+    sitAway: [],
+  },
+};
+
+/**
+ * Proximity violation stored with session
+ */
+export interface StoredProximityViolation {
+  type: 'sit-together' | 'sit-away';
+  guest1Id: string;
+  guest2Id: string;
+  guest1Name: string;
+  guest2Name: string;
+  tableId: string;
+  tableLabel: string;
+  seat1Id?: string;
+  seat2Id?: string;
+  reason?: string;
+}
+
+/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
@@ -72,7 +219,7 @@ export interface Session {
   startTime: string;      // ISO string
   endTime: string;        // ISO string
   
-  // Ã°Å¸â€ â€¢ Session-level guest inheritance
+  // 🎯 Session-level guest inheritance
   inheritedHostGuestIds: string[];     // IDs from masterHostGuests
   inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
@@ -80,7 +227,7 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // Ã°Å¸â€ â€¢ Boss Adjacency Tracking Metadata
+  // 🎯 Boss Adjacency Tracking Metadata
   isTrackedForAdjacency?: boolean;  // Whether this session is tracked
   planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
   needsAdjacencyReview?: boolean;   // Flag if upstream session changed
@@ -91,6 +238,12 @@ export interface Session {
     activeGuestIds: string[];
     selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
   };
+  
+  // 🆕 Session Rules Configuration - persists autofill settings
+  rulesConfig?: SessionRulesConfig;
+  
+  // 🆕 Stored violations - persists violations for display on session load
+  storedViolations?: StoredProximityViolation[];
 }
 
 export interface EventDay {
@@ -99,7 +252,7 @@ export interface EventDay {
   sessions: Session[];
 }
 
-/* -------------------- Ã°Å¸Å½Â¯ EVENT TYPE -------------------- */
+/* -------------------- 🏯 EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
@@ -112,7 +265,7 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // Ã°Å¸â€ â€¢ Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  // 🎯 Boss Adjacency Tracking Configuration (CONSOLIDATED)
   trackedGuestIds?: string[];                    // IDs of guests being tracked
   trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
   adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data
@@ -131,5 +284,29 @@ export function ensureTrackingFields(event: Event): Event {
     trackingEnabled: event.trackingEnabled ?? DEFAULT_EVENT_TRACKING.trackingEnabled,
     adjacencyRecords: event.adjacencyRecords ?? DEFAULT_EVENT_TRACKING.adjacencyRecords,
     planningOrderTracker: event.planningOrderTracker ?? DEFAULT_EVENT_TRACKING.planningOrderTracker,
+  };
+}
+
+/**
+ * Helper to ensure a session has rules config (for migration)
+ */
+export function ensureSessionRulesConfig(session: Session): Session {
+  return {
+    ...session,
+    rulesConfig: session.rulesConfig ?? { ...DEFAULT_SESSION_RULES },
+    storedViolations: session.storedViolations ?? [],
+  };
+}
+
+/**
+ * Helper to migrate all sessions in an event to have rules config
+ */
+export function migrateEventSessionRules(event: Event): Event {
+  return {
+    ...event,
+    days: event.days.map(day => ({
+      ...day,
+      sessions: day.sessions.map(session => ensureSessionRulesConfig(session)),
+    })),
   };
 }
