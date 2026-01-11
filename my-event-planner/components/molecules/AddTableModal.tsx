@@ -120,6 +120,102 @@ function TemplateCard({
   const seatCount = getTotalSeatCountV2(template.config);
   const isCircle = isCircleConfigV2(template.config);
 
+  // Generate seat modes from template's mode pattern
+  const templateSeatModes = useMemo((): SeatMode[] => {
+    const modePattern = template.config.modePattern;
+    const count = seatCount;
+    
+    // Handle manual modes first
+    if (modePattern.type === 'manual' && modePattern.manualModes) {
+      // Ensure array matches seat count
+      if (modePattern.manualModes.length === count) {
+        return modePattern.manualModes;
+      }
+      // Pad or truncate if needed
+      const modes = [...modePattern.manualModes];
+      while (modes.length < count) {
+        modes.push(modePattern.defaultMode || 'default');
+      }
+      return modes.slice(0, count);
+    }
+    
+    // Handle uniform pattern
+    if (modePattern.type === 'uniform') {
+      return Array(count).fill(modePattern.defaultMode || 'default');
+    }
+    
+    // Handle alternating pattern
+    if (modePattern.type === 'alternating' && modePattern.alternatingModes) {
+      return Array(count).fill(0).map((_, i) => 
+        modePattern.alternatingModes![i % 2]
+      );
+    }
+    
+    // Handle repeating pattern
+    if (modePattern.type === 'repeating' && modePattern.repeatingSequence) {
+      const seq = modePattern.repeatingSequence;
+      return Array(count).fill(0).map((_, i) => 
+        seq[i % seq.length]
+      );
+    }
+    
+    // Handle ratio pattern
+    if (modePattern.type === 'ratio' && modePattern.ratios) {
+      const modes: SeatMode[] = [];
+      const hostCount = Math.round(count * (modePattern.ratios['host-only'] || 0));
+      const externalCount = Math.round(count * (modePattern.ratios['external-only'] || 0));
+      
+      for (let i = 0; i < hostCount; i++) modes.push('host-only');
+      for (let i = 0; i < externalCount; i++) modes.push('external-only');
+      while (modes.length < count) modes.push('default');
+      
+      return modes;
+    }
+    
+    // Handle per-side pattern for rectangles
+    if (modePattern.type === 'per-side' && isRectangleConfigV2(template.config)) {
+      const sides = template.config.sides;
+      const modes: SeatMode[] = [];
+      
+      // Collect modes from each enabled side in order: top, right, bottom, left
+      const sideOrder: ('top' | 'right' | 'bottom' | 'left')[] = ['top', 'right', 'bottom', 'left'];
+      for (const sideKey of sideOrder) {
+        const side = sides[sideKey];
+        if (side.enabled && side.seatCount > 0) {
+          if (side.manualSideModes && side.manualSideModes.length === side.seatCount) {
+            modes.push(...side.manualSideModes);
+          } else {
+            // Default to the pattern's default mode for this side
+            for (let i = 0; i < side.seatCount; i++) {
+              modes.push(modePattern.defaultMode || 'default');
+            }
+          }
+        }
+      }
+      
+      return modes;
+    }
+    
+    // Default fallback
+    return Array(count).fill('default' as SeatMode);
+  }, [template.config, seatCount]);
+
+  // Generate seat ordering from template's ordering pattern
+  const templateSeatOrdering = useMemo((): number[] => {
+    const orderingPattern = template.config.orderingPattern;
+    const count = seatCount;
+    
+    // Handle manual ordering
+    if (orderingPattern.type === 'manual' && orderingPattern.manualOrdering) {
+      if (orderingPattern.manualOrdering.length === count) {
+        return orderingPattern.manualOrdering;
+      }
+    }
+    
+    // Default sequential ordering
+    return Array(count).fill(0).map((_, i) => i + 1);
+  }, [template.config.orderingPattern, seatCount]);
+
   const previewData = useMemo(() => {
     if (isCircleConfigV2(template.config)) {
       return {
@@ -141,6 +237,9 @@ function TemplateCard({
       };
     }
   }, [template.config]);
+
+  // Check if template has non-default seat modes
+  const hasCustomModes = templateSeatModes.some(m => m !== 'default');
 
   return (
     <Paper
@@ -172,7 +271,7 @@ function TemplateCard({
           )}
         </Stack>
 
-        {/* Table Preview */}
+        {/* Table Preview - Now with actual seat modes from template */}
         <Box
           sx={{
             display: 'flex',
@@ -186,8 +285,8 @@ function TemplateCard({
             type={previewData.type}
             roundSeats={previewData.roundSeats}
             rectangleSeats={previewData.rectangleSeats}
-            seatOrdering={Array(seatCount).fill(0).map((_, i) => i + 1)}
-            seatModes={Array(seatCount).fill('default' as SeatMode)}
+            seatOrdering={templateSeatOrdering}
+            seatModes={templateSeatModes}
             size="small"
             showLabels={false}
           />
@@ -212,9 +311,20 @@ function TemplateCard({
           )}
         </Stack>
 
-        <Typography variant="caption" color="text.secondary">
-          {seatCount} seats (base)
-        </Typography>
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            {seatCount} seats (base)
+          </Typography>
+          {hasCustomModes && (
+            <Chip 
+              label="Custom Modes" 
+              size="small" 
+              sx={{ height: 16, fontSize: 9 }} 
+              color="secondary"
+              variant="outlined"
+            />
+          )}
+        </Stack>
 
         {/* Actions */}
         <Stack

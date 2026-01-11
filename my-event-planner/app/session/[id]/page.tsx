@@ -29,13 +29,13 @@ import {
 } from '@mui/icons-material';
 import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
 import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
-import GuestManagementModal from '@/components/molecules/GuestManagementModal';
 import ExportModal from '@/components/molecules/ExportModal';
 import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
 import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
+import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
@@ -224,7 +224,7 @@ export default function SessionDetailPage() {
       )}
 
       {/* Unified Guest Management Modal */}
-      <GuestManagementModal
+      <SessionGuestListModal
         open={guestModalOpen}
         onClose={() => setGuestModalOpen(false)}
         eventId={eventId}
