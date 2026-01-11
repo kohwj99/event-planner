@@ -105,7 +105,16 @@ function makeComparator(rules: SortRule[]) {
       if (sa > sb) return direction === "asc" ? 1 : -1;
     }
 
-    return String((a && a.id) || "").localeCompare(String((b && b.id) || ""));
+    // Tiebreaker 1: Host guests come before external guests
+    const aIsHost = a?.fromHost === true;
+    const bIsHost = b?.fromHost === true;
+    if (aIsHost && !bIsHost) return -1; // a is host, b is external → a first
+    if (!aIsHost && bIsHost) return 1;  // a is external, b is host → b first
+
+    // Tiebreaker 2: Alphabetical by name (for guests of the same type)
+    const aName = String(a?.name || "").toLowerCase();
+    const bName = String(b?.name || "").toLowerCase();
+    return aName.localeCompare(bName);
   };
 }
 
@@ -1523,7 +1532,7 @@ function applySitAwayOptimization(
 
         if (newViolations < baselineViolations) {
           // Improvement! Keep the swap
-          console.log(`  Swap ${guestToMove.name} <-> ${targetGuest.name}: violations ${baselineViolations} -> ${newViolations} ✓`);
+          console.log(`  Swap ${guestToMove.name} <-> ${targetGuest.name}: violations ${baselineViolations} -> ${newViolations} âœ“`);
           resolved = true;
           break;
         } else {
@@ -1545,7 +1554,7 @@ function applySitAwayOptimization(
 
         if (newViolations < baselineViolations) {
           // Improvement! Keep the move
-          console.log(`  Move ${guestToMove.name} to empty seat: violations ${baselineViolations} -> ${newViolations} ✓`);
+          console.log(`  Move ${guestToMove.name} to empty seat: violations ${baselineViolations} -> ${newViolations} âœ“`);
           resolved = true;
           break;
         } else {
@@ -1893,7 +1902,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   if (proximityViolations.length > 0) {
     console.log('Violation details:');
     for (const v of proximityViolations) {
-      const icon = v.type === 'sit-together' ? '🤝' : '🚫';
+      const icon = v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«';
       console.log(`  ${icon} ${v.guest1Name} & ${v.guest2Name}: ${v.reason}`);
     }
   }
