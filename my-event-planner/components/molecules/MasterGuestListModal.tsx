@@ -21,17 +21,17 @@ import {
   Alert,
   LinearProgress,
   Switch,
-  Tooltip, Grid
+  Tooltip,
 } from '@mui/material';
 import { useState, useMemo, useCallback } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
-import {
-  Delete,
-  Search,
-  UploadFile,
-  Edit,
-  Save,
+import { 
+  Delete, 
+  Search, 
+  UploadFile, 
+  Edit, 
+  Save, 
   Cancel,
   Download,
   Add,
@@ -77,11 +77,11 @@ export default function MasterGuestListModal({
   const [uploadError, setUploadError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Guest>>({});
-
+  
   // Meal Plan Modal state
   const [mealPlanModalOpen, setMealPlanModalOpen] = useState(false);
   const [selectedGuestForMealPlan, setSelectedGuestForMealPlan] = useState<Guest | null>(null);
-
+  
   const [addForm, setAddForm] = useState<Omit<Guest, 'id' | 'fromHost'>>({
     name: '',
     gender: 'Male',
@@ -126,7 +126,7 @@ export default function MasterGuestListModal({
     return max;
   }, [event]);
 
-  /* -------------------- 📥 FILE UPLOAD HANDLERS -------------------- */
+  /* -------------------- FILE UPLOAD HANDLERS -------------------- */
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -176,14 +176,14 @@ export default function MasterGuestListModal({
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data);
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-
+    
     // Get headers from the first row
     const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
     const headers = jsonData[0] as string[];
-
+    
     // Convert to objects with headers
     const dataWithHeaders = XLSX.utils.sheet_to_json(firstSheet) as any[];
-
+    
     const guests = parseGuestData(dataWithHeaders, headers);
     importGuests(guests);
   };
@@ -195,10 +195,10 @@ export default function MasterGuestListModal({
   const parseGuestData = (data: any[], headers: string[]): Omit<Guest, 'id' | 'fromHost'>[] => {
     // Normalize headers to lowercase for comparison
     const normalizedHeaders = headers.map(h => (h || '').toLowerCase().trim());
-
+    
     // Find the index of the Ranking column
     const rankingIndex = normalizedHeaders.findIndex(h => h === 'ranking');
-
+    
     // Get additional columns after Ranking (these are meal plans)
     const mealPlanHeaders: string[] = [];
     if (rankingIndex !== -1) {
@@ -208,7 +208,7 @@ export default function MasterGuestListModal({
         }
       }
     }
-
+    
     return data.map((row: any) => {
       // Extract meal plans from additional columns
       const mealPlans: string[] = [];
@@ -221,7 +221,7 @@ export default function MasterGuestListModal({
           mealPlans.push('');
         }
       });
-
+      
       // Filter out trailing empty meal plans but keep ones in between
       let lastNonEmptyIndex = -1;
       for (let i = mealPlans.length - 1; i >= 0; i--) {
@@ -230,9 +230,14 @@ export default function MasterGuestListModal({
           break;
         }
       }
-      const trimmedMealPlans = lastNonEmptyIndex >= 0
-        ? mealPlans.slice(0, lastNonEmptyIndex + 1)
+      const trimmedMealPlans = lastNonEmptyIndex >= 0 
+        ? mealPlans.slice(0, lastNonEmptyIndex + 1) 
         : [];
+
+      // Parse ranking - use parseFloat to preserve decimals like 1.5, 2.3, etc.
+      const rawRanking = row.Ranking ?? row.ranking;
+      const parsedRanking = parseFloat(String(rawRanking));
+      const ranking = !isNaN(parsedRanking) && parsedRanking > 0 ? parsedRanking : 10;
 
       return {
         name: row.Name || row.name || '',
@@ -241,7 +246,7 @@ export default function MasterGuestListModal({
         country: row.Country || row.country || 'Singapore',
         company: row.Company || row.company || '',
         title: row.Title || row.title || '',
-        ranking: parseInt(row.Ranking || row.ranking || '10', 10),
+        ranking,
         mealPlans: trimmedMealPlans,
       };
     }).filter(g => g.name.trim() !== '');
@@ -258,7 +263,7 @@ export default function MasterGuestListModal({
     });
   };
 
-  /* -------------------- 📤 EXPORT TEMPLATE -------------------- */
+  /* -------------------- EXPORT TEMPLATE -------------------- */
   const handleExportTemplate = () => {
     const template = [
       {
@@ -302,12 +307,12 @@ export default function MasterGuestListModal({
         Title: g.title,
         Ranking: g.ranking,
       };
-
+      
       // Add meal plan columns
       for (let i = 0; i < maxMealPlansInExport; i++) {
         base[`Meal Plan ${i + 1}`] = g.mealPlans?.[i] || '';
       }
-
+      
       return base;
     });
 
@@ -317,7 +322,7 @@ export default function MasterGuestListModal({
     XLSX.writeFile(wb, `${tab}_guests_${event.name.replace(/\s+/g, '_')}.xlsx`);
   };
 
-  /* -------------------- ✏️ EDIT HANDLERS -------------------- */
+  /* -------------------- EDIT HANDLERS -------------------- */
   const startEdit = (guest: Guest) => {
     setEditingId(guest.id);
     setEditForm({ ...guest });
@@ -332,7 +337,7 @@ export default function MasterGuestListModal({
     if (!editingId) return;
 
     const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
-    const updatedList = guests.map(g =>
+    const updatedList = guests.map(g => 
       g.id === editingId ? { ...g, ...editForm } : g
     );
 
@@ -344,18 +349,18 @@ export default function MasterGuestListModal({
     setEditForm({});
   };
 
-  /* -------------------- ➕ ADD GUEST -------------------- */
+  /* -------------------- âž• ADD GUEST -------------------- */
   const handleAddGuest = () => {
     if (!addForm.name.trim()) return;
-
+    
     const newGuest: Guest = {
       ...addForm,
       id: uuidv4(),
       fromHost,
     };
-
+    
     addMasterGuest(eventId, newGuest);
-
+    
     setAddForm({
       name: '',
       gender: 'Male',
@@ -368,7 +373,7 @@ export default function MasterGuestListModal({
     });
   };
 
-  /* -------------------- 🗑️ DELETE GUEST -------------------- */
+  /* -------------------- DELETE GUEST -------------------- */
   const handleDeleteGuest = (guestId: string) => {
     const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
     const updatedList = guests.filter(g => g.id !== guestId);
@@ -378,7 +383,7 @@ export default function MasterGuestListModal({
     });
   };
 
-  /* -------------------- 🍽️ MEAL PLAN HANDLERS -------------------- */
+  /* -------------------- MEAL PLAN HANDLERS -------------------- */
   const handleOpenMealPlanModal = (guest: Guest) => {
     setSelectedGuestForMealPlan(guest);
     setMealPlanModalOpen(true);
@@ -386,7 +391,7 @@ export default function MasterGuestListModal({
 
   const handleSaveMealPlans = (guestId: string, mealPlans: string[]) => {
     const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
-    const updatedList = guests.map(g =>
+    const updatedList = guests.map(g => 
       g.id === guestId ? { ...g, mealPlans } : g
     );
 
@@ -409,7 +414,7 @@ export default function MasterGuestListModal({
               )}
               {maxMealPlans > 0 && (
                 <Typography variant="caption" color="secondary" sx={{ ml: 2 }}>
-                  • Up to {maxMealPlans} meal plan{maxMealPlans > 1 ? 's' : ''} imported
+                  Up to {maxMealPlans} meal plan{maxMealPlans > 1 ? 's' : ''} imported
                 </Typography>
               )}
             </Box>
@@ -437,13 +442,13 @@ export default function MasterGuestListModal({
 
         <DialogContent dividers sx={{ bgcolor: '#fafafa' }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-            <Tab
-              label={`Host Company (${event.masterHostGuests.length})`}
-              value="host"
+            <Tab 
+              label={`Host Company (${event.masterHostGuests.length})`} 
+              value="host" 
             />
-            <Tab
-              label={`External Guests (${event.masterExternalGuests.length})`}
-              value="external"
+            <Tab 
+              label={`External Guests (${event.masterExternalGuests.length})`} 
+              value="external" 
             />
           </Tabs>
 
@@ -475,144 +480,106 @@ export default function MasterGuestListModal({
             <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
               Required columns: Name, Salutation, Gender, Country, Company, Title, Ranking
             </Typography>
+            <Typography variant="caption" display="block" color="text.secondary">
+              Ranking supports decimals (e.g., 1.5, 2.3) for finer priority control
+            </Typography>
             <Typography variant="caption" display="block" color="primary">
-              💡 Any columns after Ranking will be imported as Meal Plan 1, 2, 3, etc.
+              Any columns after Ranking will be imported as Meal Plan 1, 2, 3, etc.
             </Typography>
           </Box>
 
           <Divider sx={{ my: 2 }} />
 
           {/* Add Guest Form */}
-          {/* Add Guest Form - Styled to match Dashboard Reference */}
-          <Box
-            mb={4}
-            p={3}
-            sx={{
-              bgcolor: 'white',
-              borderRadius: 3,
-              border: '1px solid',
-              borderColor: 'divider',
-              transition: '0.3s',
-              '&:hover': { boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }
-            }}
-          >
-            <Typography variant="subtitle1" fontWeight="700" color="text.primary" gutterBottom>
+          <Box mb={2} p={2} bgcolor="white" borderRadius={1} border="1px solid #ddd">
+            <Typography variant="subtitle2" mb={2} fontWeight={600}>
               Add New Guest
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Enter the details below to manually add a guest to the {tab} list.
-            </Typography>
+            <Stack direction="row" flexWrap="wrap" spacing={1.5}>
+              <TextField
+                size="small"
+                label="Salutation"
+                select
+                value={addForm.salutation}
+                onChange={(e) => setAddForm({ ...addForm, salutation: e.target.value })}
+                sx={{ minWidth: 100 }}
+              >
+                {salutations.map((s) => (
+                  <MenuItem key={s} value={s}>{s}</MenuItem>
+                ))}
+              </TextField>
 
-            <Grid container spacing={2}>
-              {/* Row 1: Personal Details */}
-              <Grid size={{ xs: 12, sm: 2 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Salutation"
-                  select
-                  value={addForm.salutation}
-                  onChange={(e) => setAddForm({ ...addForm, salutation: e.target.value })}
-                >
-                  {salutations.map((s) => (
-                    <MenuItem key={s} value={s}>{s}</MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
+              <TextField
+                size="small"
+                label="Name"
+                value={addForm.name}
+                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
 
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Full Name"
-                  placeholder="e.g. John Doe"
-                  value={addForm.name}
-                  onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-                />
-              </Grid>
+              <TextField
+                size="small"
+                label="Gender"
+                select
+                value={addForm.gender}
+                onChange={(e) => setAddForm({ ...addForm, gender: e.target.value as Guest['gender'] })}
+                sx={{ minWidth: 100 }}
+              >
+                {genders.map((g) => (
+                  <MenuItem key={g} value={g}>{g}</MenuItem>
+                ))}
+              </TextField>
 
-              <Grid size={{ xs: 12, sm: 3 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Gender"
-                  select
-                  value={addForm.gender}
-                  onChange={(e) => setAddForm({ ...addForm, gender: e.target.value as Guest['gender'] })}
-                >
-                  {genders.map((g) => (
-                    <MenuItem key={g} value={g}>{g}</MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
+              <TextField
+                size="small"
+                label="Country"
+                select
+                value={addForm.country}
+                onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
+                sx={{ minWidth: 140 }}
+              >
+                {countries.map((c) => (
+                  <MenuItem key={c} value={c}>{c}</MenuItem>
+                ))}
+              </TextField>
 
-              <Grid size={{ xs: 12, sm: 3 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Country"
-                  select
-                  value={addForm.country}
-                  onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
-                >
-                  {countries.map((c) => (
-                    <MenuItem key={c} value={c}>{c}</MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
+              <TextField
+                size="small"
+                label="Company"
+                value={addForm.company}
+                onChange={(e) => setAddForm({ ...addForm, company: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
 
-              {/* Row 2: Professional Details & Actions */}
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Company"
-                  value={addForm.company}
-                  onChange={(e) => setAddForm({ ...addForm, company: e.target.value })}
-                />
-              </Grid>
+              <TextField
+                size="small"
+                label="Title"
+                value={addForm.title}
+                onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
+                sx={{ minWidth: 180 }}
+              />
 
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Job Title"
-                  value={addForm.title}
-                  onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
-                />
-              </Grid>
+              <TextField
+                size="small"
+                label="Ranking"
+                type="number"
+                value={addForm.ranking}
+                onChange={(e) =>
+                  setAddForm({ ...addForm, ranking: Math.min(10, Math.max(0.1, Number(e.target.value))) })
+                }
+                inputProps={{ step: '0.1', min: '0.1', max: '10' }}
+                sx={{ minWidth: 100 }}
+              />
 
-              <Grid size={{ xs: 12, sm: 2 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Rank (1-10)"
-                  type="number"
-                  value={addForm.ranking}
-                  onChange={(e) =>
-                    setAddForm({ ...addForm, ranking: Math.min(10, Math.max(1, Number(e.target.value))) })
-                  }
-                />
-              </Grid>
-
-              <Grid size={{ xs: 12, sm: 2 }} sx={{ display: 'flex' }}>
-                <Button
-                  fullWidth
-                  variant="contained"
-                  startIcon={<Add />}
-                  onClick={handleAddGuest}
-                  sx={{
-                    borderRadius: 2,
-                    textTransform: 'none',
-                    fontWeight: '600',
-                    boxShadow: 'none',
-                    height: 40
-                  }}
-                >
-                  Add Guest
-                </Button>
-              </Grid>
-            </Grid>
+              <Button
+                variant="contained"
+                onClick={handleAddGuest}
+                startIcon={<Add />}
+                sx={{ height: 40 }}
+              >
+                Add
+              </Button>
+            </Stack>
           </Box>
 
           <Divider sx={{ my: 2 }} />
@@ -755,6 +722,7 @@ export default function MasterGuestListModal({
                           type="number"
                           value={editForm.ranking ?? guest.ranking}
                           onChange={(e) => setEditForm({ ...editForm, ranking: Number(e.target.value) })}
+                          inputProps={{ step: '0.1', min: '0.1', max: '10' }}
                         />
 
                         {/* Meal Plans - not editable inline */}
@@ -806,12 +774,12 @@ export default function MasterGuestListModal({
                         {/* Boss Adjacency Tracking Toggle */}
                         <Tooltip title={isTracked ? "Tracked for Boss Adjacency" : "Track for Boss Adjacency"}>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Visibility
-                              fontSize="small"
-                              sx={{
+                            <Visibility 
+                              fontSize="small" 
+                              sx={{ 
                                 color: isTracked ? 'primary.main' : 'text.disabled',
-                                mr: 0.5
-                              }}
+                                mr: 0.5 
+                              }} 
                             />
                             <Switch
                               size="small"
@@ -825,8 +793,8 @@ export default function MasterGuestListModal({
                           <IconButton size="small" onClick={() => startEdit(guest)}>
                             <Edit fontSize="small" />
                           </IconButton>
-                          <IconButton
-                            size="small"
+                          <IconButton 
+                            size="small" 
                             color="error"
                             onClick={() => handleDeleteGuest(guest.id)}
                           >

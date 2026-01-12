@@ -67,6 +67,47 @@ const COLUMNS: { field: SortField; label: string; width: number }[] = [
   { field: 'ranking', label: 'Rank', width: 70 },
 ];
 
+// Common styles for truncated text cells
+const truncatedCellSx = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+// Helper component for truncated text with tooltip
+function TruncatedCell({ 
+  text, 
+  width, 
+  fontWeight = 400, 
+  color = 'text.secondary',
+  textDecoration,
+}: { 
+  text: string; 
+  width: number; 
+  fontWeight?: number; 
+  color?: string;
+  textDecoration?: string;
+}) {
+  return (
+    <Tooltip title={text || ''} placement="top" arrow enterDelay={500}>
+      <Typography
+        variant="body2"
+        fontWeight={fontWeight}
+        color={color}
+        sx={{
+          width,
+          maxWidth: width,
+          flexShrink: 0,
+          ...truncatedCellSx,
+          textDecoration,
+        }}
+      >
+        {text}
+      </Typography>
+    </Tooltip>
+  );
+}
+
 export default function SessionGuestListModal({
   open,
   onClose,
@@ -218,102 +259,85 @@ export default function SessionGuestListModal({
   // Current attendees tab data
   const attendeesMasterGuests = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
   const attendeesSelectedIds = attendeesGuestTypeTab === 'host' ? selectedHostIds : selectedExternalIds;
-  const setAttendeesSelectedIds = attendeesGuestTypeTab === 'host' ? setSelectedHostIds : setSelectedExternalIds;
 
-  // Current seating tab data
+  // Current seating tab data - from guest store (active in planner)
   const seatingActiveGuests = seatingGuestTypeTab === 'host' ? hostGuests : externalGuests;
 
-  // Filter and sort guests for attendees tab (master list)
+  // Filter and sort master guests for attendees tab
   const filteredSortedMasterGuests = useMemo(() => {
     let result = attendeesMasterGuests;
     
-    // Apply filter
     if (filter.trim()) {
       const q = filter.toLowerCase();
-      result = result.filter(
-        (g) =>
-          (g.name ?? '').toLowerCase().includes(q) ||
-          (g.gender ?? '').toLowerCase().includes(q) ||
-          (g.company ?? '').toLowerCase().includes(q) ||
-          (g.country ?? '').toLowerCase().includes(q) ||
-          (g.title ?? '').toLowerCase().includes(q) ||
-          String(g.ranking ?? '').includes(q)
+      result = result.filter(g => 
+        (g.name ?? '').toLowerCase().includes(q) ||
+        (g.gender ?? '').toLowerCase().includes(q) ||
+        (g.company ?? '').toLowerCase().includes(q) ||
+        (g.country ?? '').toLowerCase().includes(q) ||
+        (g.title ?? '').toLowerCase().includes(q) ||
+        String(g.ranking ?? '').includes(q)
       );
     }
     
-    // Apply sort
     return sortGuests(result, attendeesSort);
-  }, [filter, attendeesMasterGuests, attendeesSort]);
+  }, [attendeesMasterGuests, filter, attendeesSort]);
 
-  // Filter and sort guests for seating tab (active guests)
+  // Filter and sort active guests for seating tab
   const filteredSortedActiveGuests = useMemo(() => {
     let result = seatingActiveGuests;
     
-    // Apply filter
     if (filter.trim()) {
       const q = filter.toLowerCase();
-      result = result.filter(
-        (g) =>
-          (g.name ?? '').toLowerCase().includes(q) ||
-          (g.gender ?? '').toLowerCase().includes(q) ||
-          (g.company ?? '').toLowerCase().includes(q) ||
-          (g.country ?? '').toLowerCase().includes(q) ||
-          (g.title ?? '').toLowerCase().includes(q) ||
-          String(g.ranking ?? '').includes(q)
+      result = result.filter(g => 
+        (g.name ?? '').toLowerCase().includes(q) ||
+        (g.gender ?? '').toLowerCase().includes(q) ||
+        (g.company ?? '').toLowerCase().includes(q) ||
+        (g.country ?? '').toLowerCase().includes(q) ||
+        (g.title ?? '').toLowerCase().includes(q) ||
+        String(g.ranking ?? '').includes(q)
       );
     }
     
-    // Apply sort
     return sortGuests(result, seatingSort);
-  }, [filter, seatingActiveGuests, seatingSort]);
+  }, [seatingActiveGuests, filter, seatingSort]);
 
+  // Toggle individual guest selection
   const handleToggleGuest = (guestId: string) => {
-    const newSet = new Set(attendeesSelectedIds);
-    if (newSet.has(guestId)) {
-      newSet.delete(guestId);
+    const setSelected = attendeesGuestTypeTab === 'host' ? setSelectedHostIds : setSelectedExternalIds;
+    const selected = attendeesGuestTypeTab === 'host' ? selectedHostIds : selectedExternalIds;
+    const masterList = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
+    const setSelectAll = attendeesGuestTypeTab === 'host' ? setSelectAllHost : setSelectAllExternal;
+    
+    const newSelected = new Set(selected);
+    if (newSelected.has(guestId)) {
+      newSelected.delete(guestId);
     } else {
-      newSet.add(guestId);
+      newSelected.add(guestId);
     }
-    setAttendeesSelectedIds(newSet);
+    
+    setSelected(newSelected);
+    setSelectAll(newSelected.size === masterList.length);
     setHasChanges(true);
-
-    // Update select all checkbox
-    if (attendeesGuestTypeTab === 'host') {
-      setSelectAllHost(newSet.size === event.masterHostGuests.length);
-    } else {
-      setSelectAllExternal(newSet.size === event.masterExternalGuests.length);
-    }
   };
 
+  // Select/deselect all
   const handleSelectAll = (checked: boolean) => {
-    if (attendeesGuestTypeTab === 'host') {
-      if (checked) {
-        setSelectedHostIds(new Set(event.masterHostGuests.map(g => g.id)));
-      } else {
-        setSelectedHostIds(new Set());
-      }
-      setSelectAllHost(checked);
+    const setSelected = attendeesGuestTypeTab === 'host' ? setSelectedHostIds : setSelectedExternalIds;
+    const masterList = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
+    const setSelectAllState = attendeesGuestTypeTab === 'host' ? setSelectAllHost : setSelectAllExternal;
+    
+    if (checked) {
+      setSelected(new Set(masterList.map(g => g.id)));
     } else {
-      if (checked) {
-        setSelectedExternalIds(new Set(event.masterExternalGuests.map(g => g.id)));
-      } else {
-        setSelectedExternalIds(new Set());
-      }
-      setSelectAllExternal(checked);
+      setSelected(new Set());
     }
+    
+    setSelectAllState(checked);
     setHasChanges(true);
   };
 
-  // Handle visibility toggle (soft delete) for seating tab
-  const handleToggleVisibility = (guestId: string) => {
-    const guest = allActiveGuests.find((g) => g.id === guestId);
-    if (guest) {
-      updateGuest(guestId, { deleted: !guest.deleted });
-    }
-  };
-
+  // Save changes
   const handleSave = () => {
-    // Update session guest list in event store
     setSessionGuests(
       eventId,
       dayId,
@@ -321,128 +345,123 @@ export default function SessionGuestListModal({
       Array.from(selectedHostIds),
       Array.from(selectedExternalIds)
     );
-
-    // Reload active guests in planner
+    
+    // Sync to guest store
     resetGuests();
     
-    const allMasterGuests = [
-      ...(event?.masterHostGuests || []),
-      ...(event?.masterExternalGuests || []),
-    ];
-
-    const allSelectedIds = new Set([...selectedHostIds, ...selectedExternalIds]);
+    // Add selected host guests
+    event.masterHostGuests
+      .filter(g => selectedHostIds.has(g.id))
+      .forEach(g => addGuest({ ...g, fromHost: true }));
     
-    allMasterGuests
-      .filter((g) => allSelectedIds.has(g.id))
-      .forEach((g) => addGuest(g));
-
+    // Add selected external guests
+    event.masterExternalGuests
+      .filter(g => selectedExternalIds.has(g.id))
+      .forEach(g => addGuest({ ...g, fromHost: false }));
+    
     setHasChanges(false);
-    onClose();
   };
 
-  const totalSelected = selectedHostIds.size + selectedExternalIds.size;
-  const seatedCount = allActiveGuests.filter((g) => findGuestSeat(g.id) !== null).length;
-  const activeCount = allActiveGuests.filter((g) => !g.deleted).length;
+  // Toggle guest visibility (hide/show from auto-fill)
+  const handleToggleVisibility = (guestId: string) => {
+    const guest = allActiveGuests.find(g => g.id === guestId);
+    if (guest) {
+      updateGuest(guestId, { deleted: !guest.deleted });
+    }
+  };
 
-  // Get ranking color
-  const getRankingColor = (ranking: number): 'error' | 'warning' | 'info' | 'default' => {
-    if (ranking === 1) return 'error';
-    if (ranking === 2) return 'warning';
-    if (ranking <= 4) return 'info';
+  // Calculate stats
+  const totalSelected = selectedHostIds.size + selectedExternalIds.size;
+  const seatedCount = allActiveGuests.filter(g => findGuestSeat(g.id)).length;
+
+  // Ranking color helper
+  const getRankingColor = (ranking: number): 'error' | 'warning' | 'primary' | 'default' => {
+    if (ranking <= 2) return 'error';
+    if (ranking <= 4) return 'warning';
+    if (ranking <= 6) return 'primary';
     return 'default';
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg">
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
-        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
           <Box>
-            <Typography variant="h6">Manage Session Attendees</Typography>
+            <Typography variant="h6">Session Guest List</Typography>
             <Typography variant="body2" color="text.secondary">
               {sessionName}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>
-            <Chip
-              icon={<Groups />}
-              label={`${totalSelected} Selected`}
-              color="primary"
+            <Chip 
+              icon={<Groups />} 
+              label={`${totalSelected} Attendees`} 
+              color="primary" 
               variant="outlined"
             />
-            {mainTab === 'seating' && (
-              <Chip
-                icon={<EventSeat />}
-                label={`${seatedCount} Seated`}
-                color="success"
-                variant="outlined"
-              />
-            )}
+            <Chip 
+              icon={<EventSeat />} 
+              label={`${seatedCount} Seated`} 
+              color="success" 
+              variant="outlined"
+            />
           </Stack>
         </Stack>
       </DialogTitle>
 
-      <DialogContent dividers sx={{ bgcolor: '#fafafa' }}>
-        {/* Main Tabs: Attendees vs Seating Status */}
-        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-          <Tabs value={mainTab} onChange={(_, val) => setMainTab(val)}>
-            <Tab
-              icon={<PersonAdd />}
-              iconPosition="start"
-              label="Manage Attendees"
-              value="attendees"
-            />
-            <Tab
-              icon={<EventSeat />}
-              iconPosition="start"
-              label="Seating Status"
-              value="seating"
-            />
-          </Tabs>
-        </Box>
+      <DialogContent dividers sx={{ bgcolor: '#fafafa', p: 0 }}>
+        {/* Main Tabs */}
+        <Tabs 
+          value={mainTab} 
+          onChange={(_, v) => { setMainTab(v); setFilter(''); }}
+          sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', px: 2 }}
+        >
+          <Tab 
+            icon={<PersonAdd />} 
+            iconPosition="start" 
+            label="Manage Attendees" 
+            value="attendees" 
+          />
+          <Tab 
+            icon={<EventSeat />} 
+            iconPosition="start" 
+            label="Seating Status" 
+            value="seating" 
+          />
+        </Tabs>
 
-        {/* ===================== ATTENDEES TAB ===================== */}
+        {/* Attendees Tab */}
         {mainTab === 'attendees' && (
-          <>
-            <Alert severity="info" sx={{ mb: 2 }} icon={<Groups />}>
-              Select guests from the master guest lists to attend this session. 
-              Only selected guests will appear in the seat planner.
-            </Alert>
-
-            {hasChanges && (
-              <Alert severity="warning" sx={{ mb: 2 }}>
-                You have unsaved changes. Click "Save Attendees" to apply.
-              </Alert>
-            )}
-
-            {/* Guest Type Tabs (Host/External) */}
+          <Box sx={{ p: 2 }}>
+            {/* Guest Type Tabs */}
             <Tabs 
               value={attendeesGuestTypeTab} 
-              onChange={(_, v) => setAttendeesGuestTypeTab(v)} 
+              onChange={(_, v) => setAttendeesGuestTypeTab(v)}
               sx={{ mb: 2 }}
             >
               <Tab 
                 label={
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
                     <span>Host Company</span>
                     <Chip 
-                      label={`${selectedHostIds.size}/${event.masterHostGuests.length}`} 
-                      size="small" 
-                      color={selectedHostIds.size > 0 ? "primary" : "default"}
+                      label={`${selectedHostIds.size}/${event.masterHostGuests.length}`}
+                      size="small"
+                      color={selectedHostIds.size > 0 ? 'primary' : 'default'}
                     />
-                  </Box>
+                  </Stack>
                 } 
                 value="host" 
               />
               <Tab 
                 label={
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
                     <span>External Guests</span>
                     <Chip 
-                      label={`${selectedExternalIds.size}/${event.masterExternalGuests.length}`} 
-                      size="small" 
-                      color={selectedExternalIds.size > 0 ? "primary" : "default"}
+                      label={`${selectedExternalIds.size}/${event.masterExternalGuests.length}`}
+                      size="small"
+                      color={selectedExternalIds.size > 0 ? 'primary' : 'default'}
                     />
-                  </Box>
+                  </Stack>
                 } 
                 value="external" 
               />
@@ -502,6 +521,7 @@ export default function SessionGuestListModal({
                 sx={{
                   maxHeight: 450,
                   overflowY: 'auto',
+                  overflowX: 'auto',
                   bgcolor: 'white',
                   borderRadius: 1,
                   border: '1px solid #ddd',
@@ -519,15 +539,18 @@ export default function SessionGuestListModal({
                     position: 'sticky',
                     top: 0,
                     zIndex: 1,
+                    minWidth: 'fit-content',
                   }}
                 >
-                  <Box sx={{ width: 42 }} /> {/* Checkbox space */}
+                  <Box sx={{ width: 42, flexShrink: 0 }} /> {/* Checkbox space */}
                   {COLUMNS.map((col) => (
                     <Box
                       key={col.field}
                       onClick={() => handleSortClick(col.field, false)}
                       sx={{
-                        minWidth: col.width,
+                        width: col.width,
+                        maxWidth: col.width,
+                        flexShrink: 0,
                         display: 'flex',
                         alignItems: 'center',
                         cursor: 'pointer',
@@ -554,6 +577,7 @@ export default function SessionGuestListModal({
                 ) : (
                   filteredSortedMasterGuests.map((guest) => {
                     const isSelected = attendeesSelectedIds.has(guest.id);
+                    const fullName = `${guest.salutation} ${guest.name}`.trim();
 
                     return (
                       <Stack
@@ -566,293 +590,338 @@ export default function SessionGuestListModal({
                           borderBottom: '1px solid #eee',
                           cursor: 'pointer',
                           bgcolor: isSelected ? '#e3f2fd' : 'white',
+                          minWidth: 'fit-content',
                           '&:hover': {
                             bgcolor: isSelected ? '#bbdefb' : '#f9f9f9',
                           },
                         }}
                         onClick={() => handleToggleGuest(guest.id)}
                       >
-                        <Checkbox
-                          checked={isSelected}
-                          onChange={() => handleToggleGuest(guest.id)}
-                          icon={<Circle />}
-                          checkedIcon={<CheckCircle />}
-                          onClick={(e) => e.stopPropagation()}
+                        <Box sx={{ width: 42, flexShrink: 0 }}>
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={() => handleToggleGuest(guest.id)}
+                            icon={<Circle />}
+                            checkedIcon={<CheckCircle />}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </Box>
+
+                        <TruncatedCell 
+                          text={fullName} 
+                          width={180} 
+                          fontWeight={500} 
+                          color="text.primary" 
                         />
 
-                        <Typography variant="body2" fontWeight={500} sx={{ minWidth: 180 }}>
-                          {guest.salutation} {guest.name}
-                        </Typography>
-
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
-                          {guest.gender}
-                        </Typography>
-
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 150 }}>
-                          {guest.company}
-                        </Typography>
-
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 100 }}>
-                          {guest.country}
-                        </Typography>
-
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 150 }}>
-                          {guest.title}
-                        </Typography>
-
-                        <Chip 
-                          label={`${guest.ranking}`} 
-                          size="small" 
-                          color={getRankingColor(guest.ranking)}
-                          sx={{ minWidth: 70 }}
+                        <TruncatedCell 
+                          text={guest.gender || ''} 
+                          width={80} 
                         />
+
+                        <TruncatedCell 
+                          text={guest.company || ''} 
+                          width={150} 
+                        />
+
+                        <TruncatedCell 
+                          text={guest.country || ''} 
+                          width={100} 
+                        />
+
+                        <TruncatedCell 
+                          text={guest.title || ''} 
+                          width={150} 
+                        />
+
+                        <Box sx={{ width: 70, maxWidth: 70, flexShrink: 0 }}>
+                          <Chip 
+                            label={`${guest.ranking}`} 
+                            size="small" 
+                            color={getRankingColor(guest.ranking)}
+                          />
+                        </Box>
                       </Stack>
                     );
                   })
                 )}
               </Box>
             )}
-          </>
+          </Box>
         )}
 
-        {/* ===================== SEATING STATUS TAB ===================== */}
+        {/* Seating Status Tab */}
         {mainTab === 'seating' && (
           <>
-            <Alert severity="info" icon={<Info />} sx={{ mb: 2 }}>
-              Hide guests to exclude them from auto-fill. Hidden guests can still be manually
-              assigned to seats. View current seat assignments below.
-            </Alert>
-
-            {/* Guest Type Tabs (Host/External) for Seating */}
+            {/* Guest Type Tabs for Seating */}
             <Tabs 
               value={seatingGuestTypeTab} 
-              onChange={(_, v) => setSeatingGuestTypeTab(v)} 
-              sx={{ mb: 2 }}
+              onChange={(_, v) => setSeatingGuestTypeTab(v)}
+              sx={{ px: 2, pt: 2 }}
             >
               <Tab 
                 label={
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
                     <span>Host Company</span>
                     <Chip 
-                      label={`${hostGuests.filter(g => findGuestSeat(g.id)).length}/${hostGuests.length}`} 
-                      size="small" 
-                      color={hostGuests.length > 0 ? "primary" : "default"}
+                      label={hostGuests.filter(g => !g.deleted).length}
+                      size="small"
+                      color="primary"
                     />
-                  </Box>
+                  </Stack>
                 } 
                 value="host" 
               />
               <Tab 
                 label={
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
                     <span>External Guests</span>
                     <Chip 
-                      label={`${externalGuests.filter(g => findGuestSeat(g.id)).length}/${externalGuests.length}`} 
-                      size="small" 
-                      color={externalGuests.length > 0 ? "primary" : "default"}
+                      label={externalGuests.filter(g => !g.deleted).length}
+                      size="small"
+                      color="primary"
                     />
-                  </Box>
+                  </Stack>
                 } 
                 value="external" 
               />
             </Tabs>
 
-            <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-              <Chip
-                label={`${seatingActiveGuests.filter(g => !g.deleted).length} Active`}
-                color="success"
-                size="small"
-              />
-              <Chip
-                label={`${seatingActiveGuests.filter(g => g.deleted).length} Hidden`}
-                color="default"
-                size="small"
-              />
-              <Chip
-                label={`${seatingActiveGuests.filter(g => findGuestSeat(g.id)).length}/${seatingActiveGuests.length} Seated`}
-                color="primary"
-                size="small"
-                variant="outlined"
-              />
-            </Stack>
-
-            {/* Search */}
-            <TextField
-              size="small"
-              fullWidth
-              placeholder="Search by name, gender, company, country, title, or rank..."
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              sx={{ mb: 2 }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" />
-                  </InputAdornment>
-                ),
-              }}
-            />
-
-            {seatingActiveGuests.length === 0 ? (
-              <Box 
-                sx={{ 
-                  p: 6, 
-                  bgcolor: 'white', 
-                  borderRadius: 1, 
-                  border: '1px solid #ddd',
-                  textAlign: 'center' 
-                }}
-              >
-                <Typography color="text.secondary">
-                  No {seatingGuestTypeTab === 'host' ? 'host' : 'external'} guests in this session yet.
+            <Box sx={{ p: 2 }}>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <Typography variant="body2">
+                  <strong>Tip:</strong> Use the visibility toggle to hide guests from auto-fill. 
+                  Hidden guests won't be automatically assigned but can still be manually seated.
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  Select guests from the "Manage Attendees" tab first.
-                </Typography>
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  maxHeight: 450,
-                  overflowY: 'auto',
-                  bgcolor: 'white',
-                  borderRadius: 1,
-                  border: '1px solid #ddd',
+              </Alert>
+
+              {/* Status chips */}
+              <Stack direction="row" spacing={1} mb={2}>
+                <Chip
+                  label={`${seatingActiveGuests.filter(g => !g.deleted).length} Active`}
+                  color="success"
+                  size="small"
+                />
+                <Chip
+                  label={`${seatingActiveGuests.filter(g => g.deleted).length} Hidden`}
+                  color="default"
+                  size="small"
+                />
+                <Chip
+                  label={`${seatingActiveGuests.filter(g => findGuestSeat(g.id)).length}/${seatingActiveGuests.length} Seated`}
+                  color="primary"
+                  size="small"
+                  variant="outlined"
+                />
+              </Stack>
+
+              {/* Search */}
+              <TextField
+                size="small"
+                fullWidth
+                placeholder="Search by name, gender, company, country, title, or rank..."
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                sx={{ mb: 2 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search fontSize="small" />
+                    </InputAdornment>
+                  ),
                 }}
-              >
-                {/* Sortable Header Row */}
-                <Stack
-                  direction="row"
-                  spacing={2}
-                  alignItems="center"
-                  sx={{
-                    p: 1.5,
-                    borderBottom: '2px solid #ddd',
-                    bgcolor: '#f5f5f5',
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 1,
+              />
+
+              {seatingActiveGuests.length === 0 ? (
+                <Box 
+                  sx={{ 
+                    p: 6, 
+                    bgcolor: 'white', 
+                    borderRadius: 1, 
+                    border: '1px solid #ddd',
+                    textAlign: 'center' 
                   }}
                 >
-                  {COLUMNS.map((col) => (
-                    <Box
-                      key={col.field}
-                      onClick={() => handleSortClick(col.field, true)}
-                      sx={{
-                        minWidth: col.width,
-                        display: 'flex',
-                        alignItems: 'center',
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        '&:hover': { color: 'primary.main' },
-                      }}
-                    >
-                      <Typography variant="caption" fontWeight={600}>
-                        {col.label}
-                      </Typography>
-                      {seatingSort.field === col.field && (
-                        seatingSort.direction === 'asc' 
-                          ? <ArrowUpward sx={{ fontSize: 14, ml: 0.5 }} />
-                          : <ArrowDownward sx={{ fontSize: 14, ml: 0.5 }} />
-                      )}
-                    </Box>
-                  ))}
-                  <Typography variant="caption" fontWeight={600} sx={{ minWidth: 150 }}>
-                    Seat Assignment
+                  <Typography color="text.secondary">
+                    No {seatingGuestTypeTab === 'host' ? 'host' : 'external'} guests in this session yet.
                   </Typography>
-                  <Typography variant="caption" fontWeight={600} sx={{ minWidth: 60 }}>
-                    Visible
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    Select guests from the "Manage Attendees" tab first.
                   </Typography>
-                </Stack>
-
-                {filteredSortedActiveGuests.length === 0 ? (
-                  <Typography align="center" py={4} color="text.secondary">
-                    No matching guests found.
-                  </Typography>
-                ) : (
-                  filteredSortedActiveGuests.map((guest) => {
-                    const seatInfo = getGuestSeatInfo(guest.id);
-                    const isHidden = guest.deleted;
-
-                    return (
-                      <Stack
-                        key={guest.id}
-                        direction="row"
-                        spacing={2}
-                        alignItems="center"
+                </Box>
+              ) : (
+                <Box
+                  sx={{
+                    maxHeight: 450,
+                    overflowY: 'auto',
+                    overflowX: 'auto',
+                    bgcolor: 'white',
+                    borderRadius: 1,
+                    border: '1px solid #ddd',
+                  }}
+                >
+                  {/* Sortable Header Row */}
+                  <Stack
+                    direction="row"
+                    spacing={2}
+                    alignItems="center"
+                    sx={{
+                      p: 1.5,
+                      borderBottom: '2px solid #ddd',
+                      bgcolor: '#f5f5f5',
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      minWidth: 'fit-content',
+                    }}
+                  >
+                    {COLUMNS.map((col) => (
+                      <Box
+                        key={col.field}
+                        onClick={() => handleSortClick(col.field, true)}
                         sx={{
-                          p: 1.5,
-                          borderBottom: '1px solid #eee',
-                          opacity: isHidden ? 0.5 : 1,
-                          bgcolor: isHidden ? '#fafafa' : 'white',
+                          width: col.width,
+                          maxWidth: col.width,
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          '&:hover': { color: 'primary.main' },
                         }}
                       >
-                        <Typography 
-                          variant="body2" 
-                          fontWeight={500} 
-                          sx={{ 
-                            minWidth: 180,
-                            textDecoration: isHidden ? 'line-through' : 'none',
+                        <Typography variant="caption" fontWeight={600}>
+                          {col.label}
+                        </Typography>
+                        {seatingSort.field === col.field && (
+                          seatingSort.direction === 'asc' 
+                            ? <ArrowUpward sx={{ fontSize: 14, ml: 0.5 }} />
+                            : <ArrowDownward sx={{ fontSize: 14, ml: 0.5 }} />
+                        )}
+                      </Box>
+                    ))}
+                    <Typography 
+                      variant="caption" 
+                      fontWeight={600} 
+                      sx={{ width: 150, maxWidth: 150, flexShrink: 0 }}
+                    >
+                      Seat Assignment
+                    </Typography>
+                    <Typography 
+                      variant="caption" 
+                      fontWeight={600} 
+                      sx={{ width: 60, maxWidth: 60, flexShrink: 0, textAlign: 'center' }}
+                    >
+                      Visible
+                    </Typography>
+                  </Stack>
+
+                  {filteredSortedActiveGuests.length === 0 ? (
+                    <Typography align="center" py={4} color="text.secondary">
+                      No matching guests found.
+                    </Typography>
+                  ) : (
+                    filteredSortedActiveGuests.map((guest) => {
+                      const seatInfo = getGuestSeatInfo(guest.id);
+                      const isHidden = guest.deleted;
+                      const fullName = `${guest.salutation} ${guest.name}`.trim();
+                      const seatLabel = seatInfo ? `${seatInfo.tableName} - Seat ${seatInfo.seatNumber}` : '';
+
+                      return (
+                        <Stack
+                          key={guest.id}
+                          direction="row"
+                          spacing={2}
+                          alignItems="center"
+                          sx={{
+                            p: 1.5,
+                            borderBottom: '1px solid #eee',
+                            opacity: isHidden ? 0.5 : 1,
+                            bgcolor: isHidden ? '#fafafa' : 'white',
+                            minWidth: 'fit-content',
                           }}
                         >
-                          {guest.salutation} {guest.name}
-                        </Typography>
+                          <TruncatedCell 
+                            text={fullName} 
+                            width={180} 
+                            fontWeight={500} 
+                            color="text.primary"
+                            textDecoration={isHidden ? 'line-through' : undefined}
+                          />
 
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 80 }}>
-                          {guest.gender}
-                        </Typography>
+                          <TruncatedCell 
+                            text={guest.gender || ''} 
+                            width={80} 
+                          />
 
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 150 }}>
-                          {guest.company}
-                        </Typography>
+                          <TruncatedCell 
+                            text={guest.company || ''} 
+                            width={150} 
+                          />
 
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 100 }}>
-                          {guest.country}
-                        </Typography>
+                          <TruncatedCell 
+                            text={guest.country || ''} 
+                            width={100} 
+                          />
 
-                        <Typography variant="body2" color="text.secondary" sx={{ minWidth: 150 }}>
-                          {guest.title}
-                        </Typography>
+                          <TruncatedCell 
+                            text={guest.title || ''} 
+                            width={150} 
+                          />
 
-                        <Chip 
-                          label={`${guest.ranking}`} 
-                          size="small" 
-                          color={getRankingColor(guest.ranking)}
-                          sx={{ minWidth: 70 }}
-                        />
-
-                        <Box sx={{ minWidth: 150 }}>
-                          {seatInfo ? (
-                            <Chip
-                              icon={<EventSeat />}
-                              label={`${seatInfo.tableName} - Seat ${seatInfo.seatNumber}`}
-                              size="small"
-                              color="success"
+                          <Box sx={{ width: 70, maxWidth: 70, flexShrink: 0 }}>
+                            <Chip 
+                              label={`${guest.ranking}`} 
+                              size="small" 
+                              color={getRankingColor(guest.ranking)}
                             />
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              Not seated
-                            </Typography>
-                          )}
-                        </Box>
+                          </Box>
 
-                        <Tooltip
-                          title={isHidden ? 'Show (enable auto-fill)' : 'Hide (disable auto-fill)'}
-                        >
-                          <IconButton
-                            size="small"
-                            onClick={() => handleToggleVisibility(guest.id)}
-                            color={isHidden ? 'default' : 'primary'}
-                          >
-                            {isHidden ? <VisibilityOff /> : <Visibility />}
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
-                    );
-                  })
-                )}
-              </Box>
-            )}
+                          <Box sx={{ width: 150, maxWidth: 150, flexShrink: 0 }}>
+                            {seatInfo ? (
+                              <Tooltip title={seatLabel} placement="top" arrow>
+                                <Chip
+                                  icon={<EventSeat />}
+                                  label={seatLabel}
+                                  size="small"
+                                  color="success"
+                                  sx={{
+                                    maxWidth: '100%',
+                                    '& .MuiChip-label': {
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    },
+                                  }}
+                                />
+                              </Tooltip>
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                Not seated
+                              </Typography>
+                            )}
+                          </Box>
+
+                          <Box sx={{ width: 60, maxWidth: 60, flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+                            <Tooltip
+                              title={isHidden ? 'Show (enable auto-fill)' : 'Hide (disable auto-fill)'}
+                            >
+                              <IconButton
+                                size="small"
+                                onClick={() => handleToggleVisibility(guest.id)}
+                                color={isHidden ? 'default' : 'primary'}
+                              >
+                                {isHidden ? <VisibilityOff /> : <Visibility />}
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </Stack>
+                      );
+                    })
+                  )}
+                </Box>
+              )}
+            </Box>
           </>
         )}
       </DialogContent>

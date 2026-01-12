@@ -1006,7 +1006,7 @@ export function getScaleRangeV2(template: TableTemplateV2): { min: number; max: 
           maxSeats += sideConfig.seatCount;
         } else {
           minSeats += 0; // Scalable sides can go to 0
-          maxSeats += 15; // Max per side
+          maxSeats += 20; // Max per side
         }
       }
     }

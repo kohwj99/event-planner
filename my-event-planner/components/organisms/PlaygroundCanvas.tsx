@@ -236,7 +236,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     merged.select('text.chunk-label')
       .attr('x', (c) => c.col * CHUNK_WIDTH + 16)
       .attr('y', (c) => c.row * CHUNK_HEIGHT + 28)
-      .text((c) => `R${c.row + 1}C${c.col + 1}`);
+      .text((c) => `Row:${c.row + 1} Col:${c.col + 1}`);
     
     chunkGroups.exit().remove();
   }, [chunks]);

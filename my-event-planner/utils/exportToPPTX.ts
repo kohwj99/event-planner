@@ -108,7 +108,7 @@ export const exportToPPTX = async () => {
     const slide = pptx.addSlide();
     
     // Add a discreet label for the chunk
-    slide.addText(`Chunk R${chunk.row + 1}C${chunk.col + 1}`, {
+    slide.addText(`Row:${chunk.row + 1} Col:${chunk.col + 1}`, {
       x: 0.2,
       y: 0.1,
       w: 3,

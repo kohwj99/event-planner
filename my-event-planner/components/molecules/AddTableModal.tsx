@@ -124,7 +124,7 @@ function TemplateCard({
   const templateSeatModes = useMemo((): SeatMode[] => {
     const modePattern = template.config.modePattern;
     const count = seatCount;
-    
+
     // Handle manual modes first
     if (modePattern.type === 'manual' && modePattern.manualModes) {
       // Ensure array matches seat count
@@ -138,45 +138,45 @@ function TemplateCard({
       }
       return modes.slice(0, count);
     }
-    
+
     // Handle uniform pattern
     if (modePattern.type === 'uniform') {
       return Array(count).fill(modePattern.defaultMode || 'default');
     }
-    
+
     // Handle alternating pattern
     if (modePattern.type === 'alternating' && modePattern.alternatingModes) {
-      return Array(count).fill(0).map((_, i) => 
+      return Array(count).fill(0).map((_, i) =>
         modePattern.alternatingModes![i % 2]
       );
     }
-    
+
     // Handle repeating pattern
     if (modePattern.type === 'repeating' && modePattern.repeatingSequence) {
       const seq = modePattern.repeatingSequence;
-      return Array(count).fill(0).map((_, i) => 
+      return Array(count).fill(0).map((_, i) =>
         seq[i % seq.length]
       );
     }
-    
+
     // Handle ratio pattern
     if (modePattern.type === 'ratio' && modePattern.ratios) {
       const modes: SeatMode[] = [];
       const hostCount = Math.round(count * (modePattern.ratios['host-only'] || 0));
       const externalCount = Math.round(count * (modePattern.ratios['external-only'] || 0));
-      
+
       for (let i = 0; i < hostCount; i++) modes.push('host-only');
       for (let i = 0; i < externalCount; i++) modes.push('external-only');
       while (modes.length < count) modes.push('default');
-      
+
       return modes;
     }
-    
+
     // Handle per-side pattern for rectangles
     if (modePattern.type === 'per-side' && isRectangleConfigV2(template.config)) {
       const sides = template.config.sides;
       const modes: SeatMode[] = [];
-      
+
       // Collect modes from each enabled side in order: top, right, bottom, left
       const sideOrder: ('top' | 'right' | 'bottom' | 'left')[] = ['top', 'right', 'bottom', 'left'];
       for (const sideKey of sideOrder) {
@@ -192,10 +192,10 @@ function TemplateCard({
           }
         }
       }
-      
+
       return modes;
     }
-    
+
     // Default fallback
     return Array(count).fill('default' as SeatMode);
   }, [template.config, seatCount]);
@@ -204,14 +204,14 @@ function TemplateCard({
   const templateSeatOrdering = useMemo((): number[] => {
     const orderingPattern = template.config.orderingPattern;
     const count = seatCount;
-    
+
     // Handle manual ordering
     if (orderingPattern.type === 'manual' && orderingPattern.manualOrdering) {
       if (orderingPattern.manualOrdering.length === count) {
         return orderingPattern.manualOrdering;
       }
     }
-    
+
     // Default sequential ordering
     return Array(count).fill(0).map((_, i) => i + 1);
   }, [template.config.orderingPattern, seatCount]);
@@ -271,25 +271,42 @@ function TemplateCard({
           )}
         </Stack>
 
-        {/* Table Preview - Now with actual seat modes from template */}
         <Box
           sx={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            py: 1,
             minHeight: 90,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
           }}
         >
-          <TablePreview
-            type={previewData.type}
-            roundSeats={previewData.roundSeats}
-            rectangleSeats={previewData.rectangleSeats}
-            seatOrdering={templateSeatOrdering}
-            seatModes={templateSeatModes}
-            size="small"
-            showLabels={false}
-          />
+          <Box
+            sx={{
+              width: 120,
+              height: 120,
+              maxWidth: '90%',
+              maxHeight: '90%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+
+              '& svg': {
+                width: '100%',
+                height: '100%',
+                preserveAspectRatio: 'xMidYMid meet',
+              },
+            }}
+          >
+            <TablePreview
+              type={previewData.type}
+              roundSeats={previewData.roundSeats}
+              rectangleSeats={previewData.rectangleSeats}
+              seatOrdering={templateSeatOrdering}
+              seatModes={templateSeatModes}
+              size="small"
+              showLabels={false}
+            />
+          </Box>
         </Box>
 
         <Stack direction="row" spacing={0.5} flexWrap="wrap">
@@ -316,10 +333,10 @@ function TemplateCard({
             {seatCount} seats (base)
           </Typography>
           {hasCustomModes && (
-            <Chip 
-              label="Custom Modes" 
-              size="small" 
-              sx={{ height: 16, fontSize: 9 }} 
+            <Chip
+              label="Custom Modes"
+              size="small"
+              sx={{ height: 16, fontSize: 9 }}
               color="secondary"
               variant="outlined"
             />
