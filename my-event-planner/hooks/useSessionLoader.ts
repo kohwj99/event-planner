@@ -12,8 +12,9 @@ import { StoredProximityViolation } from '@/types/Event';
  * 1. Loading session seat plans when navigating to a session
  * 2. Saving seat plans when navigating away
  * 3. Recording adjacency data for tracked sessions
- * 4. 🆕 Loading and saving session rules (proximity rules, sort order, table rules)
- * 5. 🆕 Loading and saving violations
+ * 4. Loading and saving session rules (proximity rules, sort order, table rules)
+ * 5. Loading and saving violations
+ * 6. CRITICAL: Syncing guestStore with eventStore session guests
  * 
  * NOTE: All tracking functionality is now in eventStore.
  * No separate trackingStore import is needed.
@@ -43,7 +44,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   const getSessionGuests = useEventStore((state) => state.getSessionGuests);
   const setActiveSession = useEventStore((state) => state.setActiveSession);
   
-  // 🆕 Session rules methods
+  // Session rules methods
   const loadSessionRules = useEventStore((state) => state.loadSessionRules);
   const saveSessionRules = useEventStore((state) => state.saveSessionRules);
   const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
@@ -58,9 +59,8 @@ export const useSessionLoader = (sessionId: string | null) => {
   const setSeatStoreState = useSeatStore.setState;
   const resetTables = useSeatStore((state) => state.resetTables);
 
-  // Guest Store
-  const resetGuests = useGuestStore((state) => state.resetGuests);
-  const addGuest = useGuestStore((state) => state.addGuest);
+  // Guest Store - now using setGuests for bulk sync
+  const setGuests = useGuestStore((state) => state.setGuests);
 
   // Save current session before switching
   const saveCurrentSession = useCallback(() => {
@@ -92,7 +92,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       selectedMealPlanIndex,
     });
 
-    // 🆕 Save violations to session
+    // Save violations to session
     if (violations && violations.length > 0) {
       const storedViolations: StoredProximityViolation[] = violations.map(v => ({
         type: v.type,
@@ -113,7 +113,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       saveSessionViolations(sessionData.eventId, sessionData.dayId, currentSessionId, []);
     }
 
-    // 🆕 Note: Rules are saved in AutoFillModal when user confirms autofill
+    // Note: Rules are saved in AutoFillModal when user confirms autofill
     // We don't overwrite rules here to preserve intentionally configured rules
 
     // Check if this session is tracked (using eventStore as source of truth)
@@ -171,15 +171,26 @@ export const useSessionLoader = (sessionId: string | null) => {
       resetTables();
     }
 
-    // Load guests
-    resetGuests();
+    // CRITICAL FIX: Use the new setGuests function for bulk sync
+    // This ensures all guests from the session are properly synced to guestStore
+    // and preserves the deleted status for existing guests
     const sessionGuests = getSessionGuests(newSessionId);
     let allLoadedGuests: any[] = [];
+    
     if (sessionGuests) {
-      allLoadedGuests = [...sessionGuests.hostGuests, ...sessionGuests.externalGuests];
-      allLoadedGuests.forEach(guest => {
-        addGuest(guest);
+      const { hostGuests, externalGuests } = sessionGuests;
+      allLoadedGuests = [...hostGuests, ...externalGuests];
+      
+      console.log('Syncing session guests to guestStore:', {
+        hostCount: hostGuests.length,
+        externalCount: externalGuests.length,
       });
+      
+      // Use setGuests for atomic bulk sync (preserves deleted status)
+      setGuests(hostGuests, externalGuests);
+    } else {
+      console.log('No session guests found, clearing guestStore');
+      setGuests([], []);
     }
 
     // Build guest lookup for violation detection
@@ -188,7 +199,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       guestLookup[g.id] = g;
     });
 
-    // 🆕 Load session rules if they exist
+    // Load session rules if they exist
     const savedRules = loadSessionRules(newSessionId);
     if (savedRules) {
       console.log('Loading saved session rules');
@@ -204,7 +215,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const seatStoreState = useSeatStore.getState();
     seatStoreState.setGuestLookup(guestLookup);
 
-    // 🆕 Load stored violations OR detect new ones
+    // Load stored violations OR detect new ones
     const storedViolations = loadSessionViolations(newSessionId);
     
     if (storedViolations && storedViolations.length > 0) {
@@ -238,11 +249,40 @@ export const useSessionLoader = (sessionId: string | null) => {
     loadSessionViolations,
     getSessionGuests, 
     setSeatStoreState, 
-    resetGuests, 
-    addGuest, 
+    setGuests, 
     setActiveSession, 
     resetTables
   ]);
+
+  /**
+   * Force re-sync guests from eventStore to guestStore.
+   * This is useful when guests are added/modified in the master list
+   * and need to be reflected in the current session without full reload.
+   */
+  const resyncGuests = useCallback(() => {
+    if (!sessionId) return false;
+    
+    const sessionGuests = getSessionGuests(sessionId);
+    if (!sessionGuests) return false;
+    
+    const { hostGuests, externalGuests } = sessionGuests;
+    
+    console.log('useSessionLoader.resyncGuests: Force syncing guests', {
+      hostCount: hostGuests.length,
+      externalCount: externalGuests.length,
+    });
+    
+    setGuests(hostGuests, externalGuests);
+    
+    // Update guest lookup in seatStore
+    const guestLookup: Record<string, any> = {};
+    [...hostGuests, ...externalGuests].forEach(g => {
+      guestLookup[g.id] = g;
+    });
+    useSeatStore.getState().setGuestLookup(guestLookup);
+    
+    return true;
+  }, [sessionId, getSessionGuests, setGuests]);
 
   // Handle session changes - ONLY after hydration is complete
   useEffect(() => {
@@ -285,6 +325,7 @@ export const useSessionLoader = (sessionId: string | null) => {
 
   return {
     saveCurrentSession,
+    resyncGuests,
     isHydrated: isReady,
   };
 };

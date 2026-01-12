@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -77,7 +77,7 @@ interface VIPRecommendation {
 }
 
 export default function AutoFillModal({ open, onClose, eventId, sessionId }: AutoFillModalProps) {
-  const { hostGuests, externalGuests } = useGuestStore();
+  const { hostGuests, externalGuests, setGuests } = useGuestStore();
   const allGuests = [...hostGuests, ...externalGuests].filter((g) => !g.deleted);
 
   // Event store for tracking data and session rules
@@ -85,8 +85,9 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
   const getFilteredHistoricalAdjacencyCount = useEventStore((s) => s.getFilteredHistoricalAdjacencyCount);
   const isSessionTracked = useEventStore((s) => s.isSessionTracked);
   const getSessionById = useEventStore((s) => s.getSessionById);
+  const getSessionGuests = useEventStore((s) => s.getSessionGuests);
   
-  // 🆕 Session rules methods
+  // Session rules methods
   const loadSessionRules = useEventStore((s) => s.loadSessionRules);
   const saveSessionRules = useEventStore((s) => s.saveSessionRules);
   const saveSessionViolations = useEventStore((s) => s.saveSessionViolations);
@@ -153,7 +154,37 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     setAcceptedRecommendations(new Set());
   };
 
-  // 🆕 Load saved rules when modal opens with a valid session
+  /**
+   * CRITICAL FIX: Sync guestStore with eventStore's session guests.
+   * This ensures that any new guests added to the master list and inherited
+   * by the session are reflected in the guestStore before autofill runs.
+   */
+  const syncGuestsFromSession = useCallback(() => {
+    if (!sessionId) {
+      console.log('syncGuestsFromSession: No session ID, skipping sync');
+      return false;
+    }
+
+    const sessionGuests = getSessionGuests(sessionId);
+    if (!sessionGuests) {
+      console.log('syncGuestsFromSession: No session guests found, skipping sync');
+      return false;
+    }
+
+    const { hostGuests: sessionHostGuests, externalGuests: sessionExternalGuests } = sessionGuests;
+    
+    console.log('syncGuestsFromSession: Syncing guests from eventStore to guestStore', {
+      hostCount: sessionHostGuests.length,
+      externalCount: sessionExternalGuests.length,
+    });
+
+    // Use the new setGuests function to bulk sync while preserving deleted status
+    setGuests(sessionHostGuests, sessionExternalGuests);
+    
+    return true;
+  }, [sessionId, getSessionGuests, setGuests]);
+
+  // Load saved rules when modal opens with a valid session
   // This effect handles both initial load and session switching
   useEffect(() => {
     if (open && sessionId) {
@@ -453,7 +484,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
 
   const validationErrors = getValidationErrors();
 
-  // 🆕 Build the current rules config for saving
+  // Build the current rules config for saving
   const buildCurrentRulesConfig = (): SessionRulesConfig => {
     return {
       guestListSelection: {
@@ -477,6 +508,15 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     
     setIsProcessing(true);
     try {
+      // CRITICAL FIX: Sync guests from eventStore to guestStore before autofill
+      // This ensures any newly added guests to the master list that were inherited
+      // by this session are reflected in the guestStore that autoFillSeats reads from
+      console.log('AutoFillModal: Syncing guests before autofill...');
+      syncGuestsFromSession();
+      
+      // Small delay to ensure state has propagated
+      await new Promise(resolve => setTimeout(resolve, 50));
+
       const proximityRules: ProximityRules = {
         sitTogether: sitTogetherRules.filter(r => r.guest1Id && r.guest2Id),
         sitAway: sitAwayRules.filter(r => r.guest1Id && r.guest2Id),
@@ -490,7 +530,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
         proximityRules,
       });
 
-      // 🆕 After autofill completes, save the rules and violations to the session
+      // After autofill completes, save the rules and violations to the session
       if (eventId && sessionId) {
         const sessionData = getSessionById(sessionId);
         if (sessionData) {

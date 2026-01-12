@@ -249,7 +249,7 @@ function getNextCompatibleGuest(
   assignedGuests: Set<string>,
   seat: any
 ): any | null {
-  const available = allCandidates.filter(g => 
+  const available = allCandidates.filter(g =>
     !assignedGuests.has(g.id) && canPlaceGuestInSeat(g, seat)
   );
   if (available.length === 0) return null;
@@ -263,8 +263,8 @@ function getNextCompatibleGuestOfType(
   seat: any
 ): any | null {
   const available = allCandidates.filter(g =>
-    !assignedGuests.has(g.id) && 
-    g.fromHost === isHost && 
+    !assignedGuests.has(g.id) &&
+    g.fromHost === isHost &&
     canPlaceGuestInSeat(g, seat)
   );
   if (available.length === 0) return null;
@@ -391,7 +391,7 @@ function getOptimalClusterOrder(
   const sorted = [...clusterGuestIds].sort((a, b) => {
     const countDiff = (connectionCount.get(b) || 0) - (connectionCount.get(a) || 0);
     if (countDiff !== 0) return countDiff;
-    
+
     const guestA = guestLookup.get(a);
     const guestB = guestLookup.get(b);
     if (!guestA || !guestB) return 0;
@@ -404,7 +404,7 @@ function getOptimalClusterOrder(
     const result: string[] = [];
     const center = sorted[0]; // Most connected goes in center
     const others = sorted.slice(1);
-    
+
     // Distribute others around center
     for (let i = 0; i < others.length; i++) {
       if (i % 2 === 0) {
@@ -413,11 +413,11 @@ function getOptimalClusterOrder(
         result.unshift(others[i]);
       }
     }
-    
+
     // Insert center in the middle
     const middleIndex = Math.floor(result.length / 2);
     result.splice(middleIndex, 0, center);
-    
+
     return result;
   }
 
@@ -436,12 +436,12 @@ function buildPrioritizedGuestPools(
   totalAvailableSeats: number
 ): { prioritizedHost: any[]; prioritizedExternal: any[] } {
   const guestsInProximityRules = new Set<string>();
-  
+
   proximityRules.sitTogether.forEach(rule => {
     guestsInProximityRules.add(rule.guest1Id);
     guestsInProximityRules.add(rule.guest2Id);
   });
-  
+
   proximityRules.sitAway.forEach(rule => {
     guestsInProximityRules.add(rule.guest1Id);
     guestsInProximityRules.add(rule.guest2Id);
@@ -450,7 +450,7 @@ function buildPrioritizedGuestPools(
   function prioritizeGuests(candidates: any[]) {
     const mustInclude: any[] = [];
     const regular: any[] = [];
-    
+
     candidates.forEach(guest => {
       if (guestsInProximityRules.has(guest.id)) {
         mustInclude.push(guest);
@@ -458,26 +458,26 @@ function buildPrioritizedGuestPools(
         regular.push(guest);
       }
     });
-    
+
     mustInclude.sort(comparator);
     regular.sort(comparator);
-    
+
     return { mustInclude, regular };
   }
 
   const hostGroups = prioritizeGuests(hostCandidates);
   const externalGroups = prioritizeGuests(externalCandidates);
-  
+
   const prioritizedHost: any[] = [
     ...hostGroups.mustInclude,
     ...hostGroups.regular
   ];
-  
+
   const prioritizedExternal: any[] = [
     ...externalGroups.mustInclude,
     ...externalGroups.regular
   ];
-  
+
   return {
     prioritizedHost,
     prioritizedExternal
@@ -570,13 +570,13 @@ function performInitialPlacement(
     if (tableRules?.spacingRule.enabled) {
       const spacing = tableRules.spacingRule.spacing;
       const startWithExternal = tableRules.spacingRule.startWithExternal ?? false;
-      
+
       const hasHostsRemaining = () => allCandidates.some(g => !assignedGuests.has(g.id) && g.fromHost === true);
       const hasExternalsRemaining = () => allCandidates.some(g => !assignedGuests.has(g.id) && g.fromHost === false);
-      
+
       let patternActive = hasHostsRemaining() && hasExternalsRemaining();
       let patternPosition = 0;
-      
+
       const isHostTurn = (pos: number) => {
         if (startWithExternal) {
           return pos === spacing;
@@ -584,21 +584,21 @@ function performInitialPlacement(
           return pos === 0;
         }
       };
-      
+
       for (let seatIdx = 0; seatIdx < unlockedSeats.length; seatIdx++) {
         const seat = unlockedSeats[seatIdx];
         const seatMode: SeatMode = seat.mode || 'default';
-        
+
         if (patternActive) {
           if (!hasHostsRemaining() || !hasExternalsRemaining()) {
             patternActive = false;
           }
         }
-        
+
         if (patternActive) {
           if (seatMode === 'host-only') {
             let nextHost = getNextCompatibleGuestOfType(allCandidates, assignedGuests, true, seat);
-            
+
             if (nextHost && proximityRules) {
               if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
                 const availableHosts = allCandidates.filter(g =>
@@ -609,7 +609,7 @@ function performInitialPlacement(
                 ) || nextHost;
               }
             }
-            
+
             if (nextHost) {
               seatToGuest.set(seat.id, nextHost.id);
               assignedGuests.add(nextHost.id);
@@ -617,7 +617,7 @@ function performInitialPlacement(
             continue;
           } else if (seatMode === 'external-only') {
             let nextExternal = getNextCompatibleGuestOfType(allCandidates, assignedGuests, false, seat);
-            
+
             if (nextExternal && proximityRules) {
               if (wouldViolateSitAwayWithLocked(nextExternal.id, seat, seats, lockedGuestMap, proximityRules)) {
                 const availableExternals = allCandidates.filter(g =>
@@ -628,17 +628,17 @@ function performInitialPlacement(
                 ) || nextExternal;
               }
             }
-            
+
             if (nextExternal) {
               seatToGuest.set(seat.id, nextExternal.id);
               assignedGuests.add(nextExternal.id);
             }
             continue;
           }
-          
+
           if (isHostTurn(patternPosition)) {
             let nextHost = getNextCompatibleGuestOfType(allCandidates, assignedGuests, true, seat);
-            
+
             if (nextHost && proximityRules) {
               if (wouldViolateSitAwayWithLocked(nextHost.id, seat, seats, lockedGuestMap, proximityRules)) {
                 const availableHosts = allCandidates.filter(g =>
@@ -649,7 +649,7 @@ function performInitialPlacement(
                 ) || nextHost;
               }
             }
-            
+
             if (nextHost) {
               seatToGuest.set(seat.id, nextHost.id);
               assignedGuests.add(nextHost.id);
@@ -663,7 +663,7 @@ function performInitialPlacement(
             }
           } else {
             let nextExternal = getNextCompatibleGuestOfType(allCandidates, assignedGuests, false, seat);
-            
+
             if (nextExternal && proximityRules) {
               if (wouldViolateSitAwayWithLocked(nextExternal.id, seat, seats, lockedGuestMap, proximityRules)) {
                 const availableExternals = allCandidates.filter(g =>
@@ -674,7 +674,7 @@ function performInitialPlacement(
                 ) || nextExternal;
               }
             }
-            
+
             if (nextExternal) {
               seatToGuest.set(seat.id, nextExternal.id);
               assignedGuests.add(nextExternal.id);
@@ -689,10 +689,10 @@ function performInitialPlacement(
           }
         } else {
           let nextGuest = getNextCompatibleGuest(allCandidates, assignedGuests, seat);
-          
+
           if (nextGuest && proximityRules) {
             if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
-              const availableGuests = allCandidates.filter(g => 
+              const availableGuests = allCandidates.filter(g =>
                 !assignedGuests.has(g.id) && canPlaceGuestInSeat(g, seat)
               );
               nextGuest = availableGuests.find(g =>
@@ -700,7 +700,7 @@ function performInitialPlacement(
               ) || nextGuest;
             }
           }
-          
+
           if (nextGuest) {
             seatToGuest.set(seat.id, nextGuest.id);
             assignedGuests.add(nextGuest.id);
@@ -714,7 +714,7 @@ function performInitialPlacement(
 
       for (const seat of unlockedSeats) {
         const seatMode: SeatMode = seat.mode || 'default';
-        
+
         if (seatMode === 'host-only') {
           let nextHost = getNextCompatibleGuestOfType(allCandidates, assignedGuests, true, seat);
 
@@ -756,7 +756,7 @@ function performInitialPlacement(
           }
           continue;
         }
-        
+
         const shouldPlaceHost = hostPlaced < targetHostCount;
         const shouldPlaceExternal = externalPlaced < targetExternalCount;
 
@@ -808,7 +808,7 @@ function performInitialPlacement(
 
         if (nextGuest && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
-            const availableGuests = allCandidates.filter(g => 
+            const availableGuests = allCandidates.filter(g =>
               !assignedGuests.has(g.id) && canPlaceGuestInSeat(g, seat)
             );
             nextGuest = availableGuests.find(g =>
@@ -829,7 +829,7 @@ function performInitialPlacement(
 
         if (nextGuest && proximityRules) {
           if (wouldViolateSitAwayWithLocked(nextGuest.id, seat, seats, lockedGuestMap, proximityRules)) {
-            const availableGuests = allCandidates.filter(g => 
+            const availableGuests = allCandidates.filter(g =>
               !assignedGuests.has(g.id) && canPlaceGuestInSeat(g, seat)
             );
             nextGuest = availableGuests.find(g =>
@@ -959,10 +959,10 @@ function applySitTogetherOptimization(
   if (proximityRules.sitTogether.length === 0) return;
 
   const guestLookup = new Map(allGuests.map(g => [g.id, g]));
-  
+
   // Build clusters of guests who should sit together
   const clusters = buildSitTogetherClusters(proximityRules.sitTogether);
-  
+
   console.log(`Processing ${clusters.size} sit-together clusters`);
 
   // Process each cluster
@@ -981,11 +981,11 @@ function applySitTogetherOptimization(
 
     // Find current locations of all cluster members
     const clusterLocations: { guestId: string; seat: any; table: any; isLocked: boolean }[] = [];
-    
+
     for (const guestId of orderedGuests) {
       const isLocked = lockedGuestMap.has(guestId);
       const location = findGuestSeat(guestId, tables, seatToGuest);
-      
+
       if (location) {
         clusterLocations.push({
           guestId,
@@ -1005,8 +1005,8 @@ function applySitTogetherOptimization(
 
     // Find the anchor: prioritize locked guests, then highest priority seated guest
     const lockedInCluster = clusterLocations.filter(loc => loc.isLocked);
-    let anchor = lockedInCluster.length > 0 
-      ? lockedInCluster[0] 
+    let anchor = lockedInCluster.length > 0
+      ? lockedInCluster[0]
       : clusterLocations[0];
 
     if (!anchor) continue;
@@ -1016,24 +1016,24 @@ function applySitTogetherOptimization(
 
     // Try to arrange cluster members around the anchor
     const adjacentToAnchor = getAdjacentSeats(anchor.seat, allSeats);
-    
+
     // For each guest in ordered cluster (except anchor), try to place adjacent
     for (let i = 0; i < orderedGuests.length; i++) {
       const guestId = orderedGuests[i];
       const guest = guestLookup.get(guestId);
-      
+
       if (!guest) continue;
       if (lockedGuestMap.has(guestId)) continue; // Can't move locked guests
 
       // Get all partners this guest should be adjacent to
       const partners = getAllSitTogetherPartners(guestId, proximityRules.sitTogether);
-      
+
       // Find a seat that maximizes adjacency to partners
       const currentLocation = findGuestSeat(guestId, tables, seatToGuest);
       if (!currentLocation || currentLocation.table.id !== table.id) continue;
 
       // Count how many partners are currently adjacent
-      const currentAdjacentPartners = partners.filter(partnerId => 
+      const currentAdjacentPartners = partners.filter(partnerId =>
         areGuestsAdjacent(guestId, partnerId, tables, seatToGuest, lockedGuestMap)
       );
 
@@ -1076,8 +1076,8 @@ function applySitTogetherOptimization(
         for (const partnerId of partners) {
           const partnerLoc = findGuestSeat(partnerId, tables, seatToGuest);
           if (partnerLoc) {
-            const isAdjacent = adjacentToCandidateSeats.some(s => 
-              s.id === partnerLoc.seat.id || 
+            const isAdjacent = adjacentToCandidateSeats.some(s =>
+              s.id === partnerLoc.seat.id ||
               seatToGuest.get(s.id) === partnerId ||
               (s.locked && s.assignedGuestId === partnerId)
             );
@@ -1099,14 +1099,14 @@ function applySitTogetherOptimization(
         if (currentGuestInBestSeat) {
           // Need to swap
           const otherGuest = guestLookup.get(currentGuestInBestSeat);
-          
+
           // Check if other guest can sit in current seat
           if (otherGuest && canPlaceGuestInSeat(otherGuest, guestCurrentSeat)) {
             // Check if this swap wouldn't break other sit-together rules
             const otherGuestPartners = getAllSitTogetherPartners(currentGuestInBestSeat, proximityRules.sitTogether);
-            
+
             // Count how many partners the other guest is currently adjacent to
-            const otherCurrentAdj = otherGuestPartners.filter(pid => 
+            const otherCurrentAdj = otherGuestPartners.filter(pid =>
               areGuestsAdjacent(currentGuestInBestSeat, pid, tables, seatToGuest, lockedGuestMap)
             ).length;
 
@@ -1124,7 +1124,7 @@ function applySitTogetherOptimization(
               seatToGuest.delete(bestSeat.id);
               seatToGuest.set(bestSeat.id, guestId);
               seatToGuest.set(guestCurrentSeat.id, currentGuestInBestSeat);
-              
+
               console.log(`Swapped ${guest.name} to improve cluster adjacency`);
             }
           }
@@ -1132,7 +1132,7 @@ function applySitTogetherOptimization(
           // Empty seat - just move
           seatToGuest.delete(guestCurrentSeat.id);
           seatToGuest.set(bestSeat.id, guestId);
-          
+
           console.log(`Moved ${guest.name} to empty adjacent seat`);
         }
       }
@@ -1143,7 +1143,7 @@ function applySitTogetherOptimization(
   for (const rule of proximityRules.sitTogether) {
     const guest1 = guestLookup.get(rule.guest1Id);
     const guest2 = guestLookup.get(rule.guest2Id);
-    
+
     if (!guest1 || !guest2) continue;
     if (lockedGuestMap.has(rule.guest1Id) && lockedGuestMap.has(rule.guest2Id)) continue;
 
@@ -1156,7 +1156,7 @@ function applySitTogetherOptimization(
     const cmp = comparator(guest1, guest2);
     const guestToMove = cmp <= 0 ? guest2 : guest1;
     const anchorGuest = cmp <= 0 ? guest1 : guest2;
-    
+
     if (lockedGuestMap.has(guestToMove.id)) continue;
 
     const anchorLoc = findGuestSeat(anchorGuest.id, tables, seatToGuest);
@@ -1168,9 +1168,9 @@ function applySitTogetherOptimization(
     const adjacentToAnchor = getAdjacentSeats(anchorLoc.seat, anchorLoc.table.seats);
 
     // Try to find an empty adjacent seat
-    const emptyAdjacent = adjacentToAnchor.find(s => 
-      !s.locked && 
-      !seatToGuest.get(s.id) && 
+    const emptyAdjacent = adjacentToAnchor.find(s =>
+      !s.locked &&
+      !seatToGuest.get(s.id) &&
       canPlaceGuestInSeat(guestToMove, s)
     );
 
@@ -1195,7 +1195,7 @@ function applySitTogetherOptimization(
 
       // Check if adjacent guest has their own sit-together rules
       const adjGuestPartners = getAllSitTogetherPartners(adjGuestId, proximityRules.sitTogether);
-      
+
       // Don't swap if it would break the adjacent guest's sit-together rule with anchor
       if (adjGuestPartners.includes(anchorGuest.id)) continue;
 
@@ -1204,7 +1204,7 @@ function applySitTogetherOptimization(
       seatToGuest.delete(adjSeat.id);
       seatToGuest.set(adjSeat.id, guestToMove.id);
       seatToGuest.set(movingLoc.seat.id, adjGuestId);
-      
+
       console.log(`Swap: ${guestToMove.name} <-> ${adjGuest.name} to satisfy sit-together`);
       break;
     }
@@ -1305,12 +1305,12 @@ function isSeatAdjacentToGuest(
   lockedGuestMap: Map<string, LockedGuestLocation>
 ): boolean {
   const adjacentSeats = getAdjacentSeats(seat, table.seats);
-  
+
   for (const adjSeat of adjacentSeats) {
     const guestInAdjSeat = seatToGuest.get(adjSeat.id) || (adjSeat.locked ? adjSeat.assignedGuestId : null);
     if (guestInAdjSeat === guestId) return true;
   }
-  
+
   return false;
 }
 
@@ -1333,13 +1333,13 @@ function getCandidateSeatsNotAdjacentTo(
     for (const seat of table.seats) {
       // Skip locked seats
       if (seat.locked) continue;
-      
+
       // Skip current seat
       if (seat.id === currentSeatId) continue;
-      
+
       // Check seat mode compatibility
       if (!canPlaceGuestInSeat(guestToMove, seat)) continue;
-      
+
       // CRITICAL: Skip if this seat is adjacent to the guest we want to avoid
       if (isSeatAdjacentToGuest(seat, table, guestIdToAvoid, seatToGuest, lockedGuestMap)) {
         continue;
@@ -1348,7 +1348,7 @@ function getCandidateSeatsNotAdjacentTo(
       // Calculate priority (lower = better)
       // Same table gets priority 0, other tables get priority 1
       const priority = (preferredTableId && table.id === preferredTableId) ? 0 : 1;
-      
+
       candidates.push({ seat, table, priority });
     }
   }
@@ -1507,7 +1507,7 @@ function applySitAwayOptimization(
       if (targetGuestId) {
         // Need to swap with another guest
         const targetGuest = guestLookup.get(targetGuestId);
-        
+
         // Check if target guest can sit in moving guest's current seat
         if (!targetGuest || !canPlaceGuestInSeat(targetGuest, movingLoc.seat)) {
           continue; // Can't do this swap
@@ -1515,7 +1515,7 @@ function applySitAwayOptimization(
 
         // Check if swapping would put target guest adjacent to someone they should avoid
         const targetSitAwayGuests = getSitAwayGuests(targetGuestId, proximityRules.sitAway);
-        const wouldCreateNewViolation = targetSitAwayGuests.some(avoidId => 
+        const wouldCreateNewViolation = targetSitAwayGuests.some(avoidId =>
           isSeatAdjacentToGuest(movingLoc.seat, movingLoc.table, avoidId, seatToGuest, lockedGuestMap)
         );
 
@@ -1596,7 +1596,7 @@ function performFinalViolationCheck(
 
   // Build a map of guestId -> seat location for quick lookup
   const guestLocationMap = new Map<string, { table: any; seat: any }>();
-  
+
   for (const table of tables) {
     for (const seat of table.seats || []) {
       const guestId = seat.assignedGuestId;
@@ -1611,7 +1611,7 @@ function performFinalViolationCheck(
   // =========================================================================
   for (const rule of proximityRules.sitTogether) {
     const { guest1Id, guest2Id } = rule;
-    
+
     // Create a unique pair key to avoid duplicate violations
     const pairKey = [guest1Id, guest2Id].sort().join('|') + '|together';
     if (processedPairs.has(pairKey)) continue;
@@ -1686,7 +1686,7 @@ function performFinalViolationCheck(
   // =========================================================================
   for (const rule of proximityRules.sitAway) {
     const { guest1Id, guest2Id } = rule;
-    
+
     // Create a unique pair key to avoid duplicate violations
     const pairKey = [guest1Id, guest2Id].sort().join('|') + '|away';
     if (processedPairs.has(pairKey)) continue;
@@ -1739,7 +1739,7 @@ function performFinalViolationCheck(
   }
 
   console.log(`=== FINAL CHECK COMPLETE: ${violations.length} violations found ===`);
-  
+
   return violations;
 }
 
@@ -1852,10 +1852,11 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   // ASSIGN GUESTS TO SEATS IN STORE
   // =========================================================================
   const seatStoreForAssign = useSeatStore.getState();
-  
+
   // Temporarily disable proximity rules during assignment to avoid mid-assignment checks
   seatStoreForAssign.setProximityRules(null);
-  
+  seatStoreForAssign.setGuestLookup(guestLookup);
+
   for (const [seatId, guestId] of seatToGuest.entries()) {
     for (const table of tablesAfterClear) {
       const seat = table.seats.find((s: any) => s.id === seatId);
@@ -1868,16 +1869,15 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
 
   // Re-enable proximity rules after all assignments
   seatStoreForAssign.setProximityRules(proximityRules);
-  seatStoreForAssign.setGuestLookup(guestLookup);
 
   // =========================================================================
   // FINAL COMPREHENSIVE VIOLATION CHECK
   // This ensures ALL violations are captured after all optimizations are done
   // =========================================================================
-  
+
   // Get the final state of tables after all assignments
   const finalTables = useSeatStore.getState().tables;
-  
+
   // Perform comprehensive violation check on final arrangement
   proximityViolations = performFinalViolationCheck(
     finalTables,
@@ -1892,13 +1892,13 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   console.log('========================================');
   console.log(`AUTOFILL COMPLETE`);
   console.log(`Total violations: ${proximityViolations.length}`);
-  
+
   const sitTogetherViolations = proximityViolations.filter(v => v.type === 'sit-together');
   const sitAwayViolations = proximityViolations.filter(v => v.type === 'sit-away');
-  
+
   console.log(`  - Sit-together violations: ${sitTogetherViolations.length}`);
   console.log(`  - Sit-away violations: ${sitAwayViolations.length}`);
-  
+
   if (proximityViolations.length > 0) {
     console.log('Violation details:');
     for (const v of proximityViolations) {

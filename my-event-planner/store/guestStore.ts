@@ -25,6 +25,11 @@ interface GuestStoreState {
   resetGuests: () => void;
   setSelectedMealPlanIndex: (index: number | null) => void;
   getMaxMealPlanCount: () => number;
+  /** 
+   * Bulk set guests - used for syncing with eventStore session guests.
+   * Preserves 'deleted' status for existing guests to maintain user's hide/show choices.
+   */
+  setGuests: (hostGuests: Guest[], externalGuests: Guest[]) => void;
 }
 
 export const useGuestStore = create<GuestStoreState>()(
@@ -78,6 +83,43 @@ export const useGuestStore = create<GuestStoreState>()(
           });
           return max;
         },
+
+        /**
+         * Bulk set guests from eventStore session.
+         * This preserves the 'deleted' flag for guests that already exist,
+         * so users don't lose their hide/show preferences.
+         */
+        setGuests: (newHostGuests, newExternalGuests) =>
+          set((state) => {
+            // Build lookup of existing deleted states
+            const existingDeletedMap = new Map<string, boolean>();
+            state.hostGuests.forEach(g => {
+              if (g.deleted !== undefined) {
+                existingDeletedMap.set(g.id, g.deleted);
+              }
+            });
+            state.externalGuests.forEach(g => {
+              if (g.deleted !== undefined) {
+                existingDeletedMap.set(g.id, g.deleted);
+              }
+            });
+
+            // Merge new guests with preserved deleted status
+            const mergedHostGuests = newHostGuests.map(g => ({
+              ...g,
+              deleted: existingDeletedMap.has(g.id) ? existingDeletedMap.get(g.id) : g.deleted,
+            }));
+
+            const mergedExternalGuests = newExternalGuests.map(g => ({
+              ...g,
+              deleted: existingDeletedMap.has(g.id) ? existingDeletedMap.get(g.id) : g.deleted,
+            }));
+
+            return {
+              hostGuests: mergedHostGuests,
+              externalGuests: mergedExternalGuests,
+            };
+          }),
       }),
       { name: "guest-list-store" }
     ),
