@@ -231,6 +231,7 @@ export default function SessionDetailPage() {
         dayId={dayId}
         sessionId={sessionId}
         sessionName={session.name}
+        showSeatingStatus={true}
       />
 
       {/* Export Modal */}

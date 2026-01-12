@@ -153,6 +153,90 @@ export function getRankStars(ranking: number | string | undefined): string {
   return '';
 }
 
+
+// ============================================================================
+// PHOTO MODE NAME WRAPPING HELPER
+// ============================================================================
+
+/**
+ * Maximum characters per line in photo box (approximate based on font-size and box width)
+ */
+const PHOTO_NAME_MAX_CHARS_PER_LINE = 14;
+
+/**
+ * Split a full name into multiple lines for photo box display.
+ * NO ELLIPSIS - displays the full name wrapped across lines.
+ * Tries to split intelligently at word boundaries.
+ * 
+ * @param fullName - The full name string (e.g., "Mr. John Smith")
+ * @param maxCharsPerLine - Maximum characters per line
+ * @returns Array of line strings
+ */
+export function wrapTextToLines(fullName: string, maxCharsPerLine: number = PHOTO_NAME_MAX_CHARS_PER_LINE): string[] {
+  const trimmed = fullName.trim();
+  
+  // If short enough, just use one line
+  if (trimmed.length <= maxCharsPerLine) {
+    return [trimmed];
+  }
+  
+  const words = trimmed.split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = '';
+  
+  for (const word of words) {
+    // If word itself is longer than max, we need to break it
+    if (word.length > maxCharsPerLine) {
+      // First, push current line if not empty
+      if (currentLine) {
+        lines.push(currentLine.trim());
+        currentLine = '';
+      }
+      
+      // Break the long word into chunks
+      let remaining = word;
+      while (remaining.length > maxCharsPerLine) {
+        lines.push(remaining.slice(0, maxCharsPerLine));
+        remaining = remaining.slice(maxCharsPerLine);
+      }
+      if (remaining) {
+        currentLine = remaining;
+      }
+    } else {
+      // Normal word - try to fit on current line
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      
+      if (testLine.length <= maxCharsPerLine) {
+        currentLine = testLine;
+      } else {
+        // Start new line
+        if (currentLine) {
+          lines.push(currentLine.trim());
+        }
+        currentLine = word;
+      }
+    }
+  }
+  
+  // Don't forget the last line
+  if (currentLine) {
+    lines.push(currentLine.trim());
+  }
+  
+  return lines;
+}
+
+/**
+ * Legacy function for backward compatibility - wraps to exactly 2 lines
+ */
+export function splitNameIntoLines(fullName: string): { line1: string; line2: string } {
+  const lines = wrapTextToLines(fullName, PHOTO_NAME_MAX_CHARS_PER_LINE);
+  return {
+    line1: lines[0] || '',
+    line2: lines.slice(1).join(' ') || '',
+  };
+}
+
 // ============================================================================
 // SEAT APPEARANCE HELPERS (using centralized colors)
 // ============================================================================
@@ -641,7 +725,7 @@ export function renderGuestBoxes(
     gbox.select('text.guest-stars').attr('x', b.x).attr('y', starsY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.starsColor).text(hasStars ? starsText.trim() : '');
     gbox.select('text.guest-name').attr('x', b.x).attr('y', nameY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colors.text).text(nameText);
     gbox.select('text.guest-meta').attr('x', b.x).attr('y', metaY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.metaText).text(metaText);
-    gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `🍽 ${mealPlanText}` : '');
+    gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `ðŸ½ ${mealPlanText}` : '');
 
     // Update connector
     group
@@ -672,7 +756,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // ROUND TABLE — UNCHANGED
+  // ROUND TABLE â€” UNCHANGED
   // ============================================================
   if (tableDatum.shape === 'round') {
     const seatsWithAngles = seats
@@ -702,7 +786,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // RECTANGLE TABLE — PHOTO MODE AUTO-SIZING (NEW)
+  // RECTANGLE TABLE â€” PHOTO MODE AUTO-SIZING (NEW)
   // ============================================================
 
   const w = tableDatum.width || 160;
@@ -847,8 +931,8 @@ function renderPhotoSeats(
     .attr('height', PHOTO_BOX_SIZE)
     .attr('rx', 6).attr('ry', 6);
 
-  // Content Text
-  enter.append('text').attr('class', 'photo-name').attr('text-anchor', 'middle').attr('font-size', 10).attr('font-weight', 'bold');
+  // Content Text - Name uses a text element that will contain tspans for multi-line
+  enter.append('text').attr('class', 'photo-name').attr('text-anchor', 'middle').attr('font-weight', 'bold');
   enter.append('text').attr('class', 'photo-meta-line1').attr('text-anchor', 'middle').attr('font-size', 9);
   enter.append('text').attr('class', 'photo-meta-line2').attr('text-anchor', 'middle').attr('font-size', 9);
   enter.append('text').attr('class', 'photo-stars').attr('text-anchor', 'middle').attr('font-size', 9);
@@ -895,25 +979,54 @@ function renderPhotoSeats(
         .attr('fill', colorScheme.ui.starsColor)
         .text(stars);
 
-      // Name (Center - slightly up)
-      grp.select('text.photo-name')
+      // Name (Multi-line with NO ellipsis - full name displayed)
+      const fullName = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+      const nameLines = wrapTextToLines(fullName, 14);
+      
+      // Calculate font size based on number of lines (smaller for more lines)
+      const nameFontSize = nameLines.length <= 2 ? 10 : (nameLines.length === 3 ? 9 : 8);
+      const lineHeight = nameFontSize + 2;
+      
+      // Calculate starting Y position to center the name block
+      // Name area is roughly from y=20 to y=45 (25px height)
+      const nameAreaTop = 22;
+      const nameAreaHeight = 28;
+      const totalNameHeight = nameLines.length * lineHeight;
+      const nameStartY = nameAreaTop + (nameAreaHeight - totalNameHeight) / 2 + nameFontSize;
+      
+      // Update the name text element with tspans
+      const nameText = grp.select('text.photo-name')
         .attr('x', cx)
-        .attr('y', PHOTO_BOX_SIZE / 2 - 10)
         .attr('fill', boxColors.text)
-        .text(`${guest.salutation || ''} ${guest.name || ''}`.trim());
+        .attr('font-size', nameFontSize);
+      
+      // Clear existing tspans
+      nameText.selectAll('tspan').remove();
+      
+      // Add tspan for each line
+      nameLines.forEach((line, i) => {
+        nameText.append('tspan')
+          .attr('x', cx)
+          .attr('y', nameStartY + i * lineHeight)
+          .text(line);
+      });
 
-      // Meta: split into 2 lines (Country below Company)
+      // Meta: split into 2 lines (Company above Country)
       const country = guest.country || '';
       const company = guest.company || '';
+      
+      // Adjust meta position based on name lines
+      const metaStartY = Math.max(PHOTO_BOX_SIZE / 2 + 6, nameStartY + nameLines.length * lineHeight + 2);
+      
       grp.select('text.photo-meta-line1')
         .attr('x', cx)
-        .attr('y', PHOTO_BOX_SIZE / 2 + 2)
+        .attr('y', metaStartY)
         .attr('fill', colorScheme.ui.metaText)
         .text(company);
 
       grp.select('text.photo-meta-line2')
         .attr('x', cx)
-        .attr('y', PHOTO_BOX_SIZE / 2 + 14)
+        .attr('y', metaStartY + 11)
         .attr('fill', colorScheme.ui.metaText)
         .text(country);
 
@@ -925,12 +1038,17 @@ function renderPhotoSeats(
 
     } else {
       // Empty Seat State
-      grp.select('text.photo-name')
+      const nameText = grp.select('text.photo-name')
+        .attr('x', cx)
+        .attr('font-size', 10)
+        .attr('fill', '#999');
+      
+      // Clear existing tspans and add empty text
+      nameText.selectAll('tspan').remove();
+      nameText.append('tspan')
         .attr('x', cx)
         .attr('y', PHOTO_BOX_SIZE / 2)
-        .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .attr('fill', '#999')
         .text('Empty');
 
       // Clear other text nodes

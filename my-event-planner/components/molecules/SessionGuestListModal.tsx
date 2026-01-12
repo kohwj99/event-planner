@@ -19,8 +19,9 @@ import {
   FormControlLabel,
   IconButton,
   Tooltip,
+  Collapse,
 } from '@mui/material';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   Search, 
   CheckCircle, 
@@ -33,6 +34,8 @@ import {
   Info,
   ArrowUpward,
   ArrowDownward,
+  FilterList,
+  Clear,
 } from '@mui/icons-material';
 import { useEventStore } from '@/store/eventStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
@@ -45,6 +48,12 @@ interface SessionGuestListModalProps {
   dayId: string;
   sessionId: string;
   sessionName: string;
+  /** 
+   * Whether to show the Seating Status tab. 
+   * Set to false when opened from event page, true when opened from session page.
+   * @default false
+   */
+  showSeatingStatus?: boolean;
 }
 
 type MainTabValue = 'attendees' | 'seating';
@@ -57,6 +66,12 @@ interface SortConfig {
   direction: SortDirection;
 }
 
+interface RankRangeFilter {
+  min: number;
+  max: number;
+  enabled: boolean;
+}
+
 // Column configuration for consistent ordering
 const COLUMNS: { field: SortField; label: string; width: number }[] = [
   { field: 'name', label: 'Name', width: 180 },
@@ -66,6 +81,10 @@ const COLUMNS: { field: SortField; label: string; width: number }[] = [
   { field: 'title', label: 'Title', width: 150 },
   { field: 'ranking', label: 'Rank', width: 70 },
 ];
+
+// Default rank range
+const DEFAULT_MIN_RANK = 0;
+const DEFAULT_MAX_RANK = 10;
 
 // Common styles for truncated text cells
 const truncatedCellSx = {
@@ -115,6 +134,7 @@ export default function SessionGuestListModal({
   dayId,
   sessionId,
   sessionName,
+  showSeatingStatus = false,
 }: SessionGuestListModalProps) {
   // Event Store
   const event = useEventStore((s) => s.events.find(e => e.id === eventId));
@@ -131,7 +151,7 @@ export default function SessionGuestListModal({
   const tables = useSeatStore((state) => state.tables);
   const findGuestSeat = useSeatStore((state) => state.findGuestSeat);
 
-  // Main tab state (Attendees vs Seating Status)
+  // Main tab state (Attendees vs Seating Status) - always starts on attendees
   const [mainTab, setMainTab] = useState<MainTabValue>('attendees');
   
   // Guest type tab state (Host vs External) - for attendees tab
@@ -143,6 +163,24 @@ export default function SessionGuestListModal({
   // Search/filter state
   const [filter, setFilter] = useState('');
   
+  // Rank range filter state for attendees tab
+  const [attendeesRankFilter, setAttendeesRankFilter] = useState<RankRangeFilter>({
+    min: DEFAULT_MIN_RANK,
+    max: DEFAULT_MAX_RANK,
+    enabled: false,
+  });
+  
+  // Rank range filter state for seating tab
+  const [seatingRankFilter, setSeatingRankFilter] = useState<RankRangeFilter>({
+    min: DEFAULT_MIN_RANK,
+    max: DEFAULT_MAX_RANK,
+    enabled: false,
+  });
+  
+  // Show/hide rank filter panel
+  const [showAttendeesRankFilter, setShowAttendeesRankFilter] = useState(false);
+  const [showSeatingRankFilter, setShowSeatingRankFilter] = useState(false);
+  
   // Sort state for attendees tab - default to ranking ascending (rank 1 first)
   const [attendeesSort, setAttendeesSort] = useState<SortConfig>({ field: 'ranking', direction: 'asc' });
   
@@ -152,42 +190,84 @@ export default function SessionGuestListModal({
   // Selection state
   const [selectedHostIds, setSelectedHostIds] = useState<Set<string>>(new Set());
   const [selectedExternalIds, setSelectedExternalIds] = useState<Set<string>>(new Set());
-  const [selectAllHost, setSelectAllHost] = useState(false);
-  const [selectAllExternal, setSelectAllExternal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+
+  // Get current session data
+  const currentSession = useMemo(() => {
+    if (!event) return null;
+    return event.days
+      .find(d => d.id === dayId)
+      ?.sessions.find(s => s.id === sessionId) || null;
+  }, [event, dayId, sessionId]);
+
+  // Get the inherited guest IDs for the current session
+  const inheritedHostGuestIds = useMemo(() => {
+    return new Set(currentSession?.inheritedHostGuestIds || []);
+  }, [currentSession]);
+
+  const inheritedExternalGuestIds = useMemo(() => {
+    return new Set(currentSession?.inheritedExternalGuestIds || []);
+  }, [currentSession]);
+
+  // FIXED: Filter guestStore guests to only show those belonging to this session
+  const sessionHostGuests = useMemo(() => {
+    return hostGuests.filter(g => inheritedHostGuestIds.has(g.id));
+  }, [hostGuests, inheritedHostGuestIds]);
+
+  const sessionExternalGuests = useMemo(() => {
+    return externalGuests.filter(g => inheritedExternalGuestIds.has(g.id));
+  }, [externalGuests, inheritedExternalGuestIds]);
+
+  // Calculate actual rank range from guests for reference
+  const getActualRankRange = useCallback((guests: Guest[]): { min: number; max: number } => {
+    if (guests.length === 0) return { min: DEFAULT_MIN_RANK, max: DEFAULT_MAX_RANK };
+    
+    const rankings = guests
+      .map(g => g.ranking ?? 999)
+      .filter(r => r !== 999);
+    
+    if (rankings.length === 0) return { min: DEFAULT_MIN_RANK, max: DEFAULT_MAX_RANK };
+    
+    return {
+      min: Math.min(...rankings),
+      max: Math.max(...rankings),
+    };
+  }, []);
 
   // Load existing session guests when modal opens
   useEffect(() => {
-    if (open && event) {
-      const session = event.days
-        .find(d => d.id === dayId)
-        ?.sessions.find(s => s.id === sessionId);
+    if (open && event && currentSession) {
+      setSelectedHostIds(new Set(currentSession.inheritedHostGuestIds || []));
+      setSelectedExternalIds(new Set(currentSession.inheritedExternalGuestIds || []));
       
-      if (session) {
-        setSelectedHostIds(new Set(session.inheritedHostGuestIds || []));
-        setSelectedExternalIds(new Set(session.inheritedExternalGuestIds || []));
-        
-        // Check if all are selected
-        const allHostSelected = 
-          (session.inheritedHostGuestIds?.length || 0) === event.masterHostGuests.length &&
-          event.masterHostGuests.length > 0;
-        const allExternalSelected = 
-          (session.inheritedExternalGuestIds?.length || 0) === event.masterExternalGuests.length &&
-          event.masterExternalGuests.length > 0;
-          
-        setSelectAllHost(allHostSelected);
-        setSelectAllExternal(allExternalSelected);
-      }
-      
+      // Reset filters and state
       setHasChanges(false);
       setFilter('');
+      // Always reset to attendees tab when opening
+      setMainTab('attendees');
+      
+      // Reset rank filters to default (disabled)
+      const hostRankRange = getActualRankRange(event.masterHostGuests);
+      
+      setAttendeesRankFilter({
+        min: DEFAULT_MIN_RANK,
+        max: Math.max(hostRankRange.max, DEFAULT_MAX_RANK),
+        enabled: false,
+      });
+      setSeatingRankFilter({
+        min: DEFAULT_MIN_RANK,
+        max: DEFAULT_MAX_RANK,
+        enabled: false,
+      });
+      setShowAttendeesRankFilter(false);
+      setShowSeatingRankFilter(false);
     }
-  }, [open, event, dayId, sessionId]);
+  }, [open, event, currentSession, getActualRankRange]);
 
-  // Get all active guests (currently in planner)
-  const allActiveGuests = useMemo(() => {
-    return [...hostGuests, ...externalGuests];
-  }, [hostGuests, externalGuests]);
+  // Get all active guests for this session (filtered by session's inherited IDs)
+  const allSessionActiveGuests = useMemo(() => {
+    return [...sessionHostGuests, ...sessionExternalGuests];
+  }, [sessionHostGuests, sessionExternalGuests]);
 
   // Get seat information for a guest
   const getGuestSeatInfo = (guestId: string) => {
@@ -241,6 +321,43 @@ export default function SessionGuestListModal({
     });
   };
 
+  // Filter guests by text search and rank range
+  const filterGuests = (
+    guests: Guest[], 
+    searchFilter: string, 
+    rankFilter: RankRangeFilter
+  ): Guest[] => {
+    let result = guests;
+    
+    // Apply text search filter
+    if (searchFilter.trim()) {
+      const q = searchFilter.toLowerCase();
+      result = result.filter(g => 
+        (g.name ?? '').toLowerCase().includes(q) ||
+        (g.gender ?? '').toLowerCase().includes(q) ||
+        (g.company ?? '').toLowerCase().includes(q) ||
+        (g.country ?? '').toLowerCase().includes(q) ||
+        (g.title ?? '').toLowerCase().includes(q) ||
+        String(g.ranking ?? '').includes(q)
+      );
+    }
+    
+    // Apply rank range filter if enabled
+    if (rankFilter.enabled) {
+      result = result.filter(g => {
+        const rank = g.ranking ?? 999;
+        // If min and max are the same, do exact match
+        if (rankFilter.min === rankFilter.max) {
+          return rank === rankFilter.min;
+        }
+        // Otherwise, do range match (inclusive)
+        return rank >= rankFilter.min && rank <= rankFilter.max;
+      });
+    }
+    
+    return result;
+  };
+
   // Handle sort click
   const handleSortClick = (field: SortField, isSeatingTab: boolean) => {
     if (isSeatingTab) {
@@ -256,57 +373,33 @@ export default function SessionGuestListModal({
     }
   };
 
-  // Current attendees tab data
-  const attendeesMasterGuests = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
+  // Current attendees tab data - from EVENT's master guest list
+  const attendeesMasterGuests = attendeesGuestTypeTab === 'host' 
+    ? event.masterHostGuests 
+    : event.masterExternalGuests;
   const attendeesSelectedIds = attendeesGuestTypeTab === 'host' ? selectedHostIds : selectedExternalIds;
 
-  // Current seating tab data - from guest store (active in planner)
-  const seatingActiveGuests = seatingGuestTypeTab === 'host' ? hostGuests : externalGuests;
+  // Current seating tab data - FILTERED to only show this session's guests
+  const seatingActiveGuests = seatingGuestTypeTab === 'host' 
+    ? sessionHostGuests 
+    : sessionExternalGuests;
 
   // Filter and sort master guests for attendees tab
   const filteredSortedMasterGuests = useMemo(() => {
-    let result = attendeesMasterGuests;
-    
-    if (filter.trim()) {
-      const q = filter.toLowerCase();
-      result = result.filter(g => 
-        (g.name ?? '').toLowerCase().includes(q) ||
-        (g.gender ?? '').toLowerCase().includes(q) ||
-        (g.company ?? '').toLowerCase().includes(q) ||
-        (g.country ?? '').toLowerCase().includes(q) ||
-        (g.title ?? '').toLowerCase().includes(q) ||
-        String(g.ranking ?? '').includes(q)
-      );
-    }
-    
-    return sortGuests(result, attendeesSort);
-  }, [attendeesMasterGuests, filter, attendeesSort]);
+    const filtered = filterGuests(attendeesMasterGuests, filter, attendeesRankFilter);
+    return sortGuests(filtered, attendeesSort);
+  }, [attendeesMasterGuests, filter, attendeesRankFilter, attendeesSort]);
 
   // Filter and sort active guests for seating tab
   const filteredSortedActiveGuests = useMemo(() => {
-    let result = seatingActiveGuests;
-    
-    if (filter.trim()) {
-      const q = filter.toLowerCase();
-      result = result.filter(g => 
-        (g.name ?? '').toLowerCase().includes(q) ||
-        (g.gender ?? '').toLowerCase().includes(q) ||
-        (g.company ?? '').toLowerCase().includes(q) ||
-        (g.country ?? '').toLowerCase().includes(q) ||
-        (g.title ?? '').toLowerCase().includes(q) ||
-        String(g.ranking ?? '').includes(q)
-      );
-    }
-    
-    return sortGuests(result, seatingSort);
-  }, [seatingActiveGuests, filter, seatingSort]);
+    const filtered = filterGuests(seatingActiveGuests, filter, seatingRankFilter);
+    return sortGuests(filtered, seatingSort);
+  }, [seatingActiveGuests, filter, seatingRankFilter, seatingSort]);
 
   // Toggle individual guest selection
   const handleToggleGuest = (guestId: string) => {
     const setSelected = attendeesGuestTypeTab === 'host' ? setSelectedHostIds : setSelectedExternalIds;
     const selected = attendeesGuestTypeTab === 'host' ? selectedHostIds : selectedExternalIds;
-    const masterList = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
-    const setSelectAll = attendeesGuestTypeTab === 'host' ? setSelectAllHost : setSelectAllExternal;
     
     const newSelected = new Set(selected);
     if (newSelected.has(guestId)) {
@@ -316,25 +409,48 @@ export default function SessionGuestListModal({
     }
     
     setSelected(newSelected);
-    setSelectAll(newSelected.size === masterList.length);
     setHasChanges(true);
   };
 
-  // Select/deselect all
-  const handleSelectAll = (checked: boolean) => {
+  // Select all FILTERED guests (only those currently displayed)
+  const handleSelectAllFiltered = (checked: boolean) => {
     const setSelected = attendeesGuestTypeTab === 'host' ? setSelectedHostIds : setSelectedExternalIds;
-    const masterList = attendeesGuestTypeTab === 'host' ? event.masterHostGuests : event.masterExternalGuests;
-    const setSelectAllState = attendeesGuestTypeTab === 'host' ? setSelectAllHost : setSelectAllExternal;
+    const currentSelected = attendeesGuestTypeTab === 'host' ? selectedHostIds : selectedExternalIds;
+    
+    const filteredIds = new Set(filteredSortedMasterGuests.map(g => g.id));
     
     if (checked) {
-      setSelected(new Set(masterList.map(g => g.id)));
+      // Add all filtered guests to selection
+      const newSelected = new Set(currentSelected);
+      filteredIds.forEach(id => newSelected.add(id));
+      setSelected(newSelected);
     } else {
-      setSelected(new Set());
+      // Remove all filtered guests from selection
+      const newSelected = new Set(currentSelected);
+      filteredIds.forEach(id => newSelected.delete(id));
+      setSelected(newSelected);
     }
     
-    setSelectAllState(checked);
     setHasChanges(true);
   };
+
+  // Check if all filtered guests are selected
+  const areAllFilteredSelected = useMemo(() => {
+    if (filteredSortedMasterGuests.length === 0) return false;
+    return filteredSortedMasterGuests.every(g => attendeesSelectedIds.has(g.id));
+  }, [filteredSortedMasterGuests, attendeesSelectedIds]);
+
+  // Check if some (but not all) filtered guests are selected
+  const areSomeFilteredSelected = useMemo(() => {
+    if (filteredSortedMasterGuests.length === 0) return false;
+    const selectedCount = filteredSortedMasterGuests.filter(g => attendeesSelectedIds.has(g.id)).length;
+    return selectedCount > 0 && selectedCount < filteredSortedMasterGuests.length;
+  }, [filteredSortedMasterGuests, attendeesSelectedIds]);
+
+  // Count how many filtered guests are selected
+  const filteredSelectedCount = useMemo(() => {
+    return filteredSortedMasterGuests.filter(g => attendeesSelectedIds.has(g.id)).length;
+  }, [filteredSortedMasterGuests, attendeesSelectedIds]);
 
   // Save changes
   const handleSave = () => {
@@ -364,15 +480,95 @@ export default function SessionGuestListModal({
 
   // Toggle guest visibility (hide/show from auto-fill)
   const handleToggleVisibility = (guestId: string) => {
-    const guest = allActiveGuests.find(g => g.id === guestId);
+    const guest = allSessionActiveGuests.find(g => g.id === guestId);
     if (guest) {
       updateGuest(guestId, { deleted: !guest.deleted });
     }
   };
 
+  // Handle rank min change for attendees
+  const handleAttendeesMinRankChange = (value: string) => {
+    const numValue = value === '' ? 0 : parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0) {
+      setAttendeesRankFilter(prev => ({
+        ...prev,
+        min: numValue,
+      }));
+    }
+  };
+
+  // Handle rank max change for attendees
+  const handleAttendeesMaxRankChange = (value: string) => {
+    const numValue = value === '' ? 0 : parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0) {
+      setAttendeesRankFilter(prev => ({
+        ...prev,
+        max: numValue,
+      }));
+    }
+  };
+
+  // Handle rank min change for seating
+  const handleSeatingMinRankChange = (value: string) => {
+    const numValue = value === '' ? 0 : parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0) {
+      setSeatingRankFilter(prev => ({
+        ...prev,
+        min: numValue,
+      }));
+    }
+  };
+
+  // Handle rank max change for seating
+  const handleSeatingMaxRankChange = (value: string) => {
+    const numValue = value === '' ? 0 : parseFloat(value);
+    if (!isNaN(numValue) && numValue >= 0) {
+      setSeatingRankFilter(prev => ({
+        ...prev,
+        max: numValue,
+      }));
+    }
+  };
+
+  // Toggle rank filter enabled state
+  const toggleAttendeesRankFilter = () => {
+    setAttendeesRankFilter(prev => ({
+      ...prev,
+      enabled: !prev.enabled,
+    }));
+  };
+
+  const toggleSeatingRankFilter = () => {
+    setSeatingRankFilter(prev => ({
+      ...prev,
+      enabled: !prev.enabled,
+    }));
+  };
+
+  // Reset rank filter
+  const resetAttendeesRankFilter = () => {
+    setAttendeesRankFilter({
+      min: DEFAULT_MIN_RANK,
+      max: DEFAULT_MAX_RANK,
+      enabled: false,
+    });
+  };
+
+  const resetSeatingRankFilter = () => {
+    setSeatingRankFilter({
+      min: DEFAULT_MIN_RANK,
+      max: DEFAULT_MAX_RANK,
+      enabled: false,
+    });
+  };
+
   // Calculate stats
   const totalSelected = selectedHostIds.size + selectedExternalIds.size;
-  const seatedCount = allActiveGuests.filter(g => findGuestSeat(g.id)).length;
+  const seatedCount = allSessionActiveGuests.filter(g => findGuestSeat(g.id)).length;
+
+  // Check if any filter is active
+  const isAttendeesFilterActive = filter.trim() !== '' || attendeesRankFilter.enabled;
+  const isSeatingFilterActive = filter.trim() !== '' || seatingRankFilter.enabled;
 
   // Ranking color helper
   const getRankingColor = (ranking: number): 'error' | 'warning' | 'primary' | 'default' => {
@@ -381,6 +577,155 @@ export default function SessionGuestListModal({
     if (ranking <= 6) return 'primary';
     return 'default';
   };
+
+  // Get filter description text
+  const getRankFilterDescription = (rankFilter: RankRangeFilter): string => {
+    if (rankFilter.min === rankFilter.max) {
+      return `Showing guests with exact rank ${rankFilter.min}`;
+    }
+    return `Showing guests with rank between ${rankFilter.min} and ${rankFilter.max} (inclusive)`;
+  };
+
+  // Get rank filter chip label
+  const getRankFilterChipLabel = (rankFilter: RankRangeFilter): string => {
+    if (rankFilter.min === rankFilter.max) {
+      return `=${rankFilter.min}`;
+    }
+    return `${rankFilter.min}-${rankFilter.max}`;
+  };
+
+  // Rank filter component
+  const RankFilterPanel = ({
+    rankFilter,
+    onMinChange,
+    onMaxChange,
+    onToggle,
+    onReset,
+    showPanel,
+    setShowPanel,
+  }: {
+    rankFilter: RankRangeFilter;
+    onMinChange: (value: string) => void;
+    onMaxChange: (value: string) => void;
+    onToggle: () => void;
+    onReset: () => void;
+    showPanel: boolean;
+    setShowPanel: (show: boolean) => void;
+  }) => (
+    <Box sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+        <Button
+          size="small"
+          variant={rankFilter.enabled ? 'contained' : 'outlined'}
+          startIcon={<FilterList />}
+          onClick={() => setShowPanel(!showPanel)}
+          color={rankFilter.enabled ? 'primary' : 'inherit'}
+        >
+          Rank Filter
+          {rankFilter.enabled && (
+            <Chip 
+              label={getRankFilterChipLabel(rankFilter)} 
+              size="small" 
+              sx={{ ml: 1, height: 20 }}
+              color="default"
+            />
+          )}
+        </Button>
+        {rankFilter.enabled && (
+          <Tooltip title="Clear rank filter">
+            <IconButton size="small" onClick={onReset}>
+              <Clear fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Stack>
+      
+      <Collapse in={showPanel}>
+        <Box
+          sx={{
+            p: 2,
+            bgcolor: 'white',
+            borderRadius: 1,
+            border: '1px solid #ddd',
+            mb: 2,
+          }}
+        >
+          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+            <Typography variant="body2" fontWeight={600}>
+              Filter by Rank Range
+            </Typography>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={rankFilter.enabled}
+                  onChange={onToggle}
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  Enable filter
+                </Typography>
+              }
+            />
+          </Stack>
+          
+          <Stack direction="row" spacing={2} alignItems="center">
+            <TextField
+              size="small"
+              type="number"
+              label="Min Rank"
+              value={rankFilter.min}
+              onChange={(e) => onMinChange(e.target.value)}
+              disabled={!rankFilter.enabled}
+              sx={{ width: 120 }}
+              inputProps={{ 
+                min: 0,
+                step: 0.1,
+              }}
+            />
+            
+            <Typography variant="body2" color="text.secondary">
+              to
+            </Typography>
+            
+            <TextField
+              size="small"
+              type="number"
+              label="Max Rank"
+              value={rankFilter.max}
+              onChange={(e) => onMaxChange(e.target.value)}
+              disabled={!rankFilter.enabled}
+              sx={{ width: 120 }}
+              inputProps={{ 
+                min: 0,
+                step: 0.1,
+              }}
+            />
+            
+            {rankFilter.enabled && rankFilter.min === rankFilter.max && (
+              <Chip 
+                label="Exact match" 
+                size="small" 
+                color="info" 
+                variant="outlined"
+              />
+            )}
+          </Stack>
+          
+          {rankFilter.enabled && (
+            <Typography 
+              variant="caption" 
+              color="text.secondary" 
+              sx={{ mt: 1.5, display: 'block' }}
+            >
+              {getRankFilterDescription(rankFilter)}
+            </Typography>
+          )}
+        </Box>
+      </Collapse>
+    </Box>
+  );
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -399,36 +744,50 @@ export default function SessionGuestListModal({
               color="primary" 
               variant="outlined"
             />
-            <Chip 
-              icon={<EventSeat />} 
-              label={`${seatedCount} Seated`} 
-              color="success" 
-              variant="outlined"
-            />
+            {showSeatingStatus && (
+              <Chip 
+                icon={<EventSeat />} 
+                label={`${seatedCount} Seated`} 
+                color="success" 
+                variant="outlined"
+              />
+            )}
           </Stack>
         </Stack>
       </DialogTitle>
 
       <DialogContent dividers sx={{ bgcolor: '#fafafa', p: 0 }}>
-        {/* Main Tabs */}
-        <Tabs 
-          value={mainTab} 
-          onChange={(_, v) => { setMainTab(v); setFilter(''); }}
-          sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', px: 2 }}
-        >
-          <Tab 
-            icon={<PersonAdd />} 
-            iconPosition="start" 
-            label="Manage Attendees" 
-            value="attendees" 
-          />
-          <Tab 
-            icon={<EventSeat />} 
-            iconPosition="start" 
-            label="Seating Status" 
-            value="seating" 
-          />
-        </Tabs>
+        {/* Main Tabs - Only show Seating Status tab if showSeatingStatus is true */}
+        {showSeatingStatus ? (
+          <Tabs 
+            value={mainTab} 
+            onChange={(_, v) => { setMainTab(v); setFilter(''); }}
+            sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', px: 2 }}
+          >
+            <Tab 
+              icon={<PersonAdd />} 
+              iconPosition="start" 
+              label="Manage Attendees" 
+              value="attendees" 
+            />
+            <Tab 
+              icon={<EventSeat />} 
+              iconPosition="start" 
+              label="Seating Status" 
+              value="seating" 
+            />
+          </Tabs>
+        ) : (
+          /* When showSeatingStatus is false, just show a header bar instead of tabs */
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'white', px: 2, py: 1.5 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <PersonAdd color="primary" />
+              <Typography variant="subtitle1" fontWeight={600}>
+                Manage Attendees
+              </Typography>
+            </Stack>
+          </Box>
+        )}
 
         {/* Attendees Tab */}
         {mainTab === 'attendees' && (
@@ -467,35 +826,76 @@ export default function SessionGuestListModal({
               />
             </Tabs>
 
-            {/* Controls: Select All + Search */}
+            {/* Search Field */}
+            <TextField
+              size="small"
+              fullWidth
+              placeholder="Search by name, gender, company, country, title, or rank..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              sx={{ mb: 2 }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+                endAdornment: filter && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setFilter('')}>
+                      <Clear fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+
+            {/* Rank Filter Panel */}
+            <RankFilterPanel
+              rankFilter={attendeesRankFilter}
+              onMinChange={handleAttendeesMinRankChange}
+              onMaxChange={handleAttendeesMaxRankChange}
+              onToggle={toggleAttendeesRankFilter}
+              onReset={resetAttendeesRankFilter}
+              showPanel={showAttendeesRankFilter}
+              setShowPanel={setShowAttendeesRankFilter}
+            />
+
+            {/* Controls: Select All + Filter Status */}
             <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={attendeesGuestTypeTab === 'host' ? selectAllHost : selectAllExternal}
-                    onChange={(e) => handleSelectAll(e.target.checked)}
-                    indeterminate={
-                      attendeesSelectedIds.size > 0 && attendeesSelectedIds.size < attendeesMasterGuests.length
-                    }
-                  />
-                }
-                label={<Typography variant="body2" fontWeight={600}>Select All</Typography>}
-              />
+              <Stack direction="row" alignItems="center" spacing={2}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={areAllFilteredSelected}
+                      onChange={(e) => handleSelectAllFiltered(e.target.checked)}
+                      indeterminate={areSomeFilteredSelected}
+                      disabled={filteredSortedMasterGuests.length === 0}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2" fontWeight={600}>
+                      Select All {isAttendeesFilterActive ? 'Filtered' : ''}
+                    </Typography>
+                  }
+                />
+                
+                {isAttendeesFilterActive && (
+                  <Tooltip title="Select All only affects the currently filtered/displayed guests">
+                    <Chip
+                      icon={<Info />}
+                      label={`${filteredSelectedCount}/${filteredSortedMasterGuests.length} filtered selected`}
+                      size="small"
+                      color="info"
+                      variant="outlined"
+                    />
+                  </Tooltip>
+                )}
+              </Stack>
               
-              <TextField
-                size="small"
-                placeholder="Search by name, gender, company, country, title, or rank..."
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                sx={{ width: 400 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <Search fontSize="small" />
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              <Typography variant="body2" color="text.secondary">
+                Showing {filteredSortedMasterGuests.length} of {attendeesMasterGuests.length} guests
+              </Typography>
             </Stack>
 
             {/* Guest List */}
@@ -519,7 +919,7 @@ export default function SessionGuestListModal({
             ) : (
               <Box
                 sx={{
-                  maxHeight: 450,
+                  maxHeight: 400,
                   overflowY: 'auto',
                   overflowX: 'auto',
                   bgcolor: 'white',
@@ -571,9 +971,23 @@ export default function SessionGuestListModal({
                 </Stack>
 
                 {filteredSortedMasterGuests.length === 0 ? (
-                  <Typography align="center" py={4} color="text.secondary">
-                    No matching guests found.
-                  </Typography>
+                  <Box sx={{ p: 4, textAlign: 'center' }}>
+                    <Typography color="text.secondary">
+                      No matching guests found.
+                    </Typography>
+                    {isAttendeesFilterActive && (
+                      <Button 
+                        size="small" 
+                        onClick={() => {
+                          setFilter('');
+                          resetAttendeesRankFilter();
+                        }}
+                        sx={{ mt: 1 }}
+                      >
+                        Clear all filters
+                      </Button>
+                    )}
+                  </Box>
                 ) : (
                   filteredSortedMasterGuests.map((guest) => {
                     const isSelected = attendeesSelectedIds.has(guest.id);
@@ -650,8 +1064,8 @@ export default function SessionGuestListModal({
           </Box>
         )}
 
-        {/* Seating Status Tab */}
-        {mainTab === 'seating' && (
+        {/* Seating Status Tab - Only rendered if showSeatingStatus is true */}
+        {showSeatingStatus && mainTab === 'seating' && (
           <>
             {/* Guest Type Tabs for Seating */}
             <Tabs 
@@ -664,7 +1078,7 @@ export default function SessionGuestListModal({
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <span>Host Company</span>
                     <Chip 
-                      label={hostGuests.filter(g => !g.deleted).length}
+                      label={sessionHostGuests.filter(g => !g.deleted).length}
                       size="small"
                       color="primary"
                     />
@@ -677,7 +1091,7 @@ export default function SessionGuestListModal({
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <span>External Guests</span>
                     <Chip 
-                      label={externalGuests.filter(g => !g.deleted).length}
+                      label={sessionExternalGuests.filter(g => !g.deleted).length}
                       size="small"
                       color="primary"
                     />
@@ -715,7 +1129,7 @@ export default function SessionGuestListModal({
                 />
               </Stack>
 
-              {/* Search */}
+              {/* Search Field */}
               <TextField
                 size="small"
                 fullWidth
@@ -729,8 +1143,33 @@ export default function SessionGuestListModal({
                       <Search fontSize="small" />
                     </InputAdornment>
                   ),
+                  endAdornment: filter && (
+                    <InputAdornment position="end">
+                      <IconButton size="small" onClick={() => setFilter('')}>
+                        <Clear fontSize="small" />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
                 }}
               />
+
+              {/* Rank Filter Panel for Seating */}
+              <RankFilterPanel
+                rankFilter={seatingRankFilter}
+                onMinChange={handleSeatingMinRankChange}
+                onMaxChange={handleSeatingMaxRankChange}
+                onToggle={toggleSeatingRankFilter}
+                onReset={resetSeatingRankFilter}
+                showPanel={showSeatingRankFilter}
+                setShowPanel={setShowSeatingRankFilter}
+              />
+
+              {/* Filter status for seating tab */}
+              {isSeatingFilterActive && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Showing {filteredSortedActiveGuests.length} of {seatingActiveGuests.length} guests
+                </Typography>
+              )}
 
               {seatingActiveGuests.length === 0 ? (
                 <Box 
@@ -752,7 +1191,7 @@ export default function SessionGuestListModal({
               ) : (
                 <Box
                   sx={{
-                    maxHeight: 450,
+                    maxHeight: 400,
                     overflowY: 'auto',
                     overflowX: 'auto',
                     bgcolor: 'white',
@@ -817,9 +1256,23 @@ export default function SessionGuestListModal({
                   </Stack>
 
                   {filteredSortedActiveGuests.length === 0 ? (
-                    <Typography align="center" py={4} color="text.secondary">
-                      No matching guests found.
-                    </Typography>
+                    <Box sx={{ p: 4, textAlign: 'center' }}>
+                      <Typography color="text.secondary">
+                        No matching guests found.
+                      </Typography>
+                      {isSeatingFilterActive && (
+                        <Button 
+                          size="small" 
+                          onClick={() => {
+                            setFilter('');
+                            resetSeatingRankFilter();
+                          }}
+                          sx={{ mt: 1 }}
+                        >
+                          Clear all filters
+                        </Button>
+                      )}
+                    </Box>
                   ) : (
                     filteredSortedActiveGuests.map((guest) => {
                       const seatInfo = getGuestSeatInfo(guest.id);
@@ -928,16 +1381,16 @@ export default function SessionGuestListModal({
 
       <DialogActions sx={{ justifyContent: 'space-between', px: 3 }}>
         <Typography variant="body2" color="text.secondary">
-          {mainTab === 'attendees' 
+          {mainTab === 'attendees' || !showSeatingStatus
             ? `Total selected: ${totalSelected} guest${totalSelected !== 1 ? 's' : ''}`
-            : `${seatedCount} of ${allActiveGuests.length} guests seated`
+            : `${seatedCount} of ${allSessionActiveGuests.length} guests seated`
           }
         </Typography>
         <Stack direction="row" spacing={1}>
           <Button onClick={onClose}>
             {hasChanges ? 'Cancel' : 'Close'}
           </Button>
-          {mainTab === 'attendees' && (
+          {(mainTab === 'attendees' || !showSeatingStatus) && (
             <Button 
               onClick={handleSave} 
               variant="contained"
