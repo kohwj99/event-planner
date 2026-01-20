@@ -66,10 +66,10 @@ export default function HomePage() {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5 }}>
               <Box>
                 <Typography variant="h4" fontWeight="800" color="text.primary" gutterBottom>
-                  Event Dashboard
+                  C-SIT
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                  Manage and track your upcoming corporate events.
+                  Manage and track your upcoming events.
                 </Typography>
               </Box>
               <Button

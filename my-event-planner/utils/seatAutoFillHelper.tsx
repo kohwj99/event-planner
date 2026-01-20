@@ -1902,8 +1902,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   if (proximityViolations.length > 0) {
     console.log('Violation details:');
     for (const v of proximityViolations) {
-      const icon = v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«';
-      console.log(`  ${icon} ${v.guest1Name} & ${v.guest2Name}: ${v.reason}`);
+      console.log(`  ${v.guest1Name} & ${v.guest2Name}: ${v.reason}`);
     }
   }
   console.log('========================================');

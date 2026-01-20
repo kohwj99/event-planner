@@ -725,7 +725,7 @@ export function renderGuestBoxes(
     gbox.select('text.guest-stars').attr('x', b.x).attr('y', starsY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.starsColor).text(hasStars ? starsText.trim() : '');
     gbox.select('text.guest-name').attr('x', b.x).attr('y', nameY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colors.text).text(nameText);
     gbox.select('text.guest-meta').attr('x', b.x).attr('y', metaY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.metaText).text(metaText);
-    gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `ðŸ½ ${mealPlanText}` : '');
+    gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `${mealPlanText}` : '');
 
     // Update connector
     group
@@ -756,7 +756,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // ROUND TABLE â€” UNCHANGED
+  // ROUND TABLE UNCHANGED
   // ============================================================
   if (tableDatum.shape === 'round') {
     const seatsWithAngles = seats
@@ -786,7 +786,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // RECTANGLE TABLE â€” PHOTO MODE AUTO-SIZING (NEW)
+  // RECTANGLE TABLE PHOTO MODE AUTO-SIZING (NEW)
   // ============================================================
 
   const w = tableDatum.width || 160;
