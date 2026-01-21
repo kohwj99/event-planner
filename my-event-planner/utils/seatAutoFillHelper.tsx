@@ -62,6 +62,30 @@ export interface AutoFillOptions {
   sortRules?: SortRule[];
   tableRules?: TableRules;
   proximityRules?: ProximityRules;
+  randomizeOrder?: RandomizeOrderConfig;
+}
+
+// ============================================================================
+// RANDOMIZE ORDER TYPES
+// ============================================================================
+
+/**
+ * Randomize partition for shuffling guests within rank ranges
+ * Uses formula: minRank <= rank < maxRank
+ */
+export interface RandomizePartition {
+  id: string;
+  minRank: number;
+  maxRank: number;
+}
+
+/**
+ * Randomize order configuration
+ * Only applicable when sortRules has exactly 1 rule that is ranking-based
+ */
+export interface RandomizeOrderConfig {
+  enabled: boolean;
+  partitions: RandomizePartition[];
 }
 
 // Store violations globally for access by stats panel
@@ -108,14 +132,89 @@ function makeComparator(rules: SortRule[]) {
     // Tiebreaker 1: Host guests come before external guests
     const aIsHost = a?.fromHost === true;
     const bIsHost = b?.fromHost === true;
-    if (aIsHost && !bIsHost) return -1; // a is host, b is external → a first
-    if (!aIsHost && bIsHost) return 1;  // a is external, b is host → b first
+    if (aIsHost && !bIsHost) return -1; // a is host, b is external -> a first
+    if (!aIsHost && bIsHost) return 1;  // a is external, b is host -> b first
 
     // Tiebreaker 2: Alphabetical by name (for guests of the same type)
     const aName = String(a?.name || "").toLowerCase();
     const bName = String(b?.name || "").toLowerCase();
     return aName.localeCompare(bName);
   };
+}
+
+// ============================================================================
+// RANDOMIZE ORDER WITHIN PARTITIONS
+// ============================================================================
+
+/**
+ * Fisher-Yates shuffle algorithm for randomizing an array
+ */
+function shuffleArray<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * Apply randomization within rank partitions to a sorted guest array.
+ * Uses formula: minRank <= rank < maxRank
+ */
+export function applyRandomizeOrder(
+  sortedGuests: any[],
+  randomizeConfig: RandomizeOrderConfig
+): any[] {
+  if (!randomizeConfig.enabled || randomizeConfig.partitions.length === 0) {
+    return sortedGuests;
+  }
+
+  console.log('=== APPLYING RANDOMIZE ORDER ===');
+  console.log('Partitions:', randomizeConfig.partitions);
+  console.log('Input guests count:', sortedGuests.length);
+
+  const result = [...sortedGuests];
+  
+  for (const partition of randomizeConfig.partitions) {
+    const { minRank, maxRank } = partition;
+    
+    const partitionIndices: number[] = [];
+    const partitionGuests: any[] = [];
+    
+    result.forEach((guest, index) => {
+      const guestRanking = Number(guest.ranking) || 0;
+      if (guestRanking >= minRank && guestRanking < maxRank) {
+        partitionIndices.push(index);
+        partitionGuests.push(guest);
+      }
+    });
+    
+    if (partitionGuests.length > 1) {
+      console.log(`Partition [${minRank}, ${maxRank}): Found ${partitionGuests.length} guests`);
+      partitionGuests.forEach(g => console.log(`  - ${g.name} (Rank: ${g.ranking})`));
+      
+      const shuffledGuests = shuffleArray(partitionGuests);
+      
+      console.log(`After shuffle:`);
+      shuffledGuests.forEach(g => console.log(`  - ${g.name} (Rank: ${g.ranking})`));
+      
+      partitionIndices.forEach((originalIndex, i) => {
+        result[originalIndex] = shuffledGuests[i];
+      });
+    }
+  }
+  
+  console.log('=== RANDOMIZE ORDER COMPLETE ===');
+  return result;
+}
+
+/**
+ * Check if randomize order is applicable for the given sort rules.
+ * Returns true only if there's exactly one sort rule and it's by ranking.
+ */
+export function isRandomizeOrderApplicable(sortRules: SortRule[]): boolean {
+  return sortRules.length === 1 && sortRules[0].field === 'ranking';
 }
 
 function getAdjacentSeats(seat: any, allSeats: any[]): any[] {
@@ -434,7 +533,7 @@ function buildPrioritizedGuestPools(
   proximityRules: ProximityRules,
   comparator: (a: any, b: any) => number,
   totalAvailableSeats: number
-): { prioritizedHost: any[]; prioritizedExternal: any[] } {
+): { prioritizedHost: any[]; prioritizedExternal: any[]; guestsInProximityRules: Set<string> } {
   const guestsInProximityRules = new Set<string>();
 
   proximityRules.sitTogether.forEach(rule => {
@@ -459,6 +558,7 @@ function buildPrioritizedGuestPools(
       }
     });
 
+    // Sort both arrays by comparator
     mustInclude.sort(comparator);
     regular.sort(comparator);
 
@@ -480,7 +580,8 @@ function buildPrioritizedGuestPools(
 
   return {
     prioritizedHost,
-    prioritizedExternal
+    prioritizedExternal,
+    guestsInProximityRules
   };
 }
 
@@ -533,13 +634,44 @@ function performInitialPlacement(
   lockedGuestMap: Map<string, LockedGuestLocation>,
   tableRules?: TableRules,
   comparator?: (a: any, b: any) => number,
-  proximityRules?: ProximityRules
+  proximityRules?: ProximityRules,
+  randomizeOrder?: RandomizeOrderConfig,
+  guestsInProximityRules?: Set<string>
 ): Map<string, string> {
   const seatToGuest = new Map<string, string>();
   const assignedGuests = new Set<string>(lockedGuestIds);
 
   const comparatorWithTieBreak = makeComparatorWithHostTieBreak(comparator || ((a, b) => 0));
-  const allCandidates = [...hostCandidates, ...externalCandidates].sort(comparatorWithTieBreak);
+  let allCandidates = [...hostCandidates, ...externalCandidates].sort(comparatorWithTieBreak);
+
+  // Apply randomization AFTER the sort, but only to non-proximity-rule guests
+  // This ensures proximity rules are still enforced properly
+  if (randomizeOrder && randomizeOrder.enabled && randomizeOrder.partitions.length > 0 && guestsInProximityRules) {
+    console.log('performInitialPlacement: Applying randomization after sort');
+    console.log(`  Total candidates: ${allCandidates.length}`);
+    console.log(`  Guests in proximity rules: ${guestsInProximityRules.size}`);
+    
+    // Separate guests into proximity-rule and regular
+    const proximityGuests: any[] = [];
+    const regularGuests: any[] = [];
+    
+    allCandidates.forEach(guest => {
+      if (guestsInProximityRules.has(guest.id)) {
+        proximityGuests.push(guest);
+      } else {
+        regularGuests.push(guest);
+      }
+    });
+    
+    console.log(`  Proximity guests (not randomized): ${proximityGuests.length}`);
+    console.log(`  Regular guests (will be randomized): ${regularGuests.length}`);
+    
+    // Randomize only the regular guests
+    const randomizedRegular = applyRandomizeOrder(regularGuests, randomizeOrder);
+    
+    // Recombine: proximity guests first (maintain their priority), then randomized regular
+    allCandidates = [...proximityGuests, ...randomizedRegular];
+  }
 
   const sortedTables = [...tables].sort((a, b) => {
     const aNum = typeof a.tableNumber === "number" ? a.tableNumber : parseInt(a.id, 10) || 0;
@@ -1532,7 +1664,7 @@ function applySitAwayOptimization(
 
         if (newViolations < baselineViolations) {
           // Improvement! Keep the swap
-          console.log(`  Swap ${guestToMove.name} <-> ${targetGuest.name}: violations ${baselineViolations} -> ${newViolations} âœ“`);
+          console.log(`  Swap ${guestToMove.name} <-> ${targetGuest.name}: violations ${baselineViolations} -> ${newViolations} Ã¢Å“â€œ`);
           resolved = true;
           break;
         } else {
@@ -1554,7 +1686,7 @@ function applySitAwayOptimization(
 
         if (newViolations < baselineViolations) {
           // Improvement! Keep the move
-          console.log(`  Move ${guestToMove.name} to empty seat: violations ${baselineViolations} -> ${newViolations} âœ“`);
+          console.log(`  Move ${guestToMove.name} to empty seat: violations ${baselineViolations} -> ${newViolations} Ã¢Å“â€œ`);
           resolved = true;
           break;
         } else {
@@ -1754,6 +1886,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     sortRules = [{ field: "ranking", direction: "asc" }],
     tableRules,
     proximityRules = { sitTogether: [], sitAway: [] },
+    randomizeOrder,
   } = options;
 
   const seatStore = useSeatStore.getState();
@@ -1763,6 +1896,19 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     console.warn("autoFillSeats: no guest lists selected; aborting.");
     return;
   }
+
+  // Check if randomize order should be applied
+  // Only applicable when there's exactly 1 sort rule that is by ranking
+  const shouldRandomize = randomizeOrder?.enabled && 
+    randomizeOrder.partitions.length > 0 &&
+    isRandomizeOrderApplicable(sortRules);
+
+  console.log('Randomize order config:', {
+    enabled: randomizeOrder?.enabled,
+    partitions: randomizeOrder?.partitions?.length || 0,
+    sortRulesApplicable: isRandomizeOrderApplicable(sortRules),
+    willApply: shouldRandomize
+  });
 
   proximityViolations = [];
 
@@ -1794,7 +1940,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
 
   const comparator = makeComparator(sortRules);
 
-  const { prioritizedHost, prioritizedExternal } = buildPrioritizedGuestPools(
+  const { prioritizedHost, prioritizedExternal, guestsInProximityRules } = buildPrioritizedGuestPools(
     hostCandidates,
     externalCandidates,
     proximityRules,
@@ -1807,7 +1953,8 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     hostPrioritized: prioritizedHost.length,
     externalTotal: externalCandidates.length,
     externalPrioritized: prioritizedExternal.length,
-    availableSeats: totalAvailableSeats
+    availableSeats: totalAvailableSeats,
+    guestsInProximityRules: guestsInProximityRules.size
   });
 
   for (const table of seatStore.tables) {
@@ -1827,7 +1974,9 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     lockedGuestMap,
     tableRules,
     comparator,
-    proximityRules
+    proximityRules,
+    shouldRandomize ? randomizeOrder : undefined,
+    guestsInProximityRules
   );
 
   applySitTogetherOptimization(

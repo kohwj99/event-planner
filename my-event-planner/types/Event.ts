@@ -9,7 +9,7 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- 📜 ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- ðŸ“œ ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Type of adjacency relationship for Boss Tracking
@@ -62,7 +62,7 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- 🎯 AUTOFILL RULES TYPES -------------------- */
+/* -------------------- ðŸŽ¯ AUTOFILL RULES TYPES -------------------- */
 
 /**
  * Sort field options for guest ordering
@@ -143,6 +143,35 @@ export interface GuestListSelection {
   includeExternal: boolean;
 }
 
+/* -------------------- 🎲 RANDOMIZE ORDER TYPES -------------------- */
+
+/**
+ * Randomize partition for shuffling guests within rank ranges
+ * Uses formula: minRank <= rank < maxRank
+ */
+export interface RandomizePartition {
+  id: string;
+  minRank: number;  // Inclusive lower bound (x <= rank)
+  maxRank: number;  // Exclusive upper bound (rank < y)
+}
+
+/**
+ * Randomize order configuration
+ * Only applicable when sortRules has exactly 1 rule that is ranking-based
+ */
+export interface RandomizeOrderConfig {
+  enabled: boolean;
+  partitions: RandomizePartition[];
+}
+
+/**
+ * Default randomize order configuration
+ */
+export const DEFAULT_RANDOMIZE_ORDER: RandomizeOrderConfig = {
+  enabled: false,
+  partitions: [],
+};
+
 /**
  * Complete session rules configuration - stored with each session
  * This allows rules to persist when navigating between sessions
@@ -159,6 +188,9 @@ export interface SessionRulesConfig {
   
   /** Proximity rules (sit together, sit away) */
   proximityRules: ProximityRules;
+  
+  /** Randomize order configuration for shuffling within rank partitions */
+  randomizeOrder?: RandomizeOrderConfig;
   
   /** Timestamp when rules were last modified */
   lastModified?: string;
@@ -191,6 +223,10 @@ export const DEFAULT_SESSION_RULES: SessionRulesConfig = {
     sitTogether: [],
     sitAway: [],
   },
+  randomizeOrder: {
+    enabled: false,
+    partitions: [],
+  },
 };
 
 /**
@@ -209,7 +245,7 @@ export interface StoredProximityViolation {
   reason?: string;
 }
 
-/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
+/* -------------------- ðŸ“… SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
@@ -219,7 +255,7 @@ export interface Session {
   startTime: string;      // ISO string
   endTime: string;        // ISO string
   
-  // 🎯 Session-level guest inheritance
+  // ðŸŽ¯ Session-level guest inheritance
   inheritedHostGuestIds: string[];     // IDs from masterHostGuests
   inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
@@ -227,7 +263,7 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // 🎯 Boss Adjacency Tracking Metadata
+  // ðŸŽ¯ Boss Adjacency Tracking Metadata
   isTrackedForAdjacency?: boolean;  // Whether this session is tracked
   planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
   needsAdjacencyReview?: boolean;   // Flag if upstream session changed
@@ -239,10 +275,10 @@ export interface Session {
     selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
   };
   
-  // 🆕 Session Rules Configuration - persists autofill settings
+  // ðŸ†• Session Rules Configuration - persists autofill settings
   rulesConfig?: SessionRulesConfig;
   
-  // 🆕 Stored violations - persists violations for display on session load
+  // ðŸ†• Stored violations - persists violations for display on session load
   storedViolations?: StoredProximityViolation[];
 }
 
@@ -252,7 +288,7 @@ export interface EventDay {
   sessions: Session[];
 }
 
-/* -------------------- 🏯 EVENT TYPE -------------------- */
+/* -------------------- ðŸ¯ EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
@@ -265,7 +301,7 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // 🎯 Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  // ðŸŽ¯ Boss Adjacency Tracking Configuration (CONSOLIDATED)
   trackedGuestIds?: string[];                    // IDs of guests being tracked
   trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
   adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data
