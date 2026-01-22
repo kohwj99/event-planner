@@ -8,24 +8,14 @@ import { useSeatStore } from '@/store/seatStore';
 import { useSessionLoader } from '@/hooks/useSessionLoader';
 import {
   Box,
-  Paper,
   Typography,
   Button,
-  IconButton,
-  Chip,
-  Alert,
   Stack,
   CircularProgress,
-  Divider,
 } from '@mui/material';
 import {
-  ArrowBack,
-  Save,
-  Groups,
   EventSeat,
-  Warning,
-  FileDownload,
-  RestartAlt,
+  Groups,
 } from '@mui/icons-material';
 import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
 import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
@@ -41,8 +31,15 @@ export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
   const router = useRouter();
 
-  // Use session loader hook for automatic save/load
-  const { saveCurrentSession } = useSessionLoader(sessionId);
+  // 🆕 Use session loader hook - now returns UI settings and lock state
+  const { 
+    saveCurrentSession,
+    isHydrated,
+    uiSettings, 
+    isLocked, 
+    handleUISettingsChange, 
+    handleToggleLock,
+  } = useSessionLoader(sessionId);
 
   // Event Store
   const getSessionById = useEventStore((s) => s.getSessionById);
@@ -52,8 +49,7 @@ export default function SessionDetailPage() {
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
 
-  // Seat Store - for reset and export
-  const tables = useSeatStore((s) => s.tables);
+  // Seat Store - for reset
   const resetTables = useSeatStore((s) => s.resetTables);
 
   const [guestModalOpen, setGuestModalOpen] = useState(false);
@@ -99,7 +95,13 @@ export default function SessionDetailPage() {
     }
   };
 
+  // 🆕 Check lock state before reset
   const handleReset = () => {
+    if (isLocked) {
+      alert('Cannot reset - session is locked. Unlock first to make changes.');
+      return;
+    }
+    
     if (confirm('Are you sure you want to reset all tables? This will clear all seating arrangements.')) {
       resetTables();
     }
@@ -114,7 +116,7 @@ export default function SessionDetailPage() {
   };
 
   // Show loading spinner during initial load
-  if (!isMounted || isLoading) {
+  if (!isMounted || isLoading || !isHydrated) {
     return (
       <Box
         sx={{
@@ -144,8 +146,6 @@ export default function SessionDetailPage() {
 
   const { session, eventId, dayId } = sessionData;
 
-  const totalGuests = (hostGuests.length || 0) + (externalGuests.length || 0);
-  const activeGuests = [...hostGuests, ...externalGuests].filter(g => !g.deleted).length;
   const sessionGuestCount =
     (session.inheritedHostGuestIds?.length || 0) +
     (session.inheritedExternalGuestIds?.length || 0);
@@ -168,11 +168,13 @@ export default function SessionDetailPage() {
           sessionType={session.sessionType}
           formattedDate={formattedDate}
           hasNoGuests={hasNoGuests}
+          isLocked={isLocked}
           onBack={handleBack}
           onSave={handleSave}
           onReset={handleReset}
           onManageGuests={() => setGuestModalOpen(true)}
           onExport={() => setExportModalOpen(true)}
+          onToggleLock={handleToggleLock}
         />
       }
     >
@@ -198,6 +200,7 @@ export default function SessionDetailPage() {
               size="large"
               startIcon={<Groups />}
               onClick={() => setGuestModalOpen(true)}
+              disabled={isLocked}
             >
               Manage Guests
             </Button>
@@ -207,7 +210,13 @@ export default function SessionDetailPage() {
         <div className="flex flex-1 overflow-hidden">
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden" id="playground-canvas">
-            <PlayGroundCanvas />
+            {/* 🆕 Pass UI settings and lock state to canvas */}
+            <PlayGroundCanvas 
+              sessionType={session.sessionType}
+              isLocked={isLocked}
+              initialUISettings={uiSettings}
+              onUISettingsChange={handleUISettingsChange}
+            />
 
             {/* Seating Stats Panel with Boss Adjacency */}
             <SeatingStatsPanel
@@ -216,9 +225,9 @@ export default function SessionDetailPage() {
             />
           </div>
 
-          {/* Right Panel */}
+          {/* Right Panel - 🆕 Pass lock state */}
           <div className="w-80 bg-gray-100 border-l border-gray-300 overflow-y-auto">
-            <PlaygroundRightConfigPanel />
+            <PlaygroundRightConfigPanel isLocked={isLocked} />
           </div>
         </div>
       )}

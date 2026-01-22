@@ -9,7 +9,43 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- ðŸ“œ ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- 🎨 SESSION UI SETTINGS -------------------- */
+
+/**
+ * UI Settings that are persisted per session
+ * These control the canvas display preferences
+ */
+export interface SessionUISettings {
+  /** Gap between table and connector lines */
+  connectorGap: number;
+  /** Whether to hide table body shapes */
+  hideTableBodies: boolean;
+  /** Photo mode - cleaner export view */
+  isPhotoMode: boolean;
+  /** Colorblind-friendly color scheme */
+  isColorblindMode: boolean;
+  /** Canvas zoom level */
+  zoomLevel: number;
+  /** Canvas pan X position */
+  panX?: number;
+  /** Canvas pan Y position */
+  panY?: number;
+}
+
+/**
+ * Default UI settings for new sessions
+ */
+export const DEFAULT_SESSION_UI_SETTINGS: SessionUISettings = {
+  connectorGap: 8,
+  hideTableBodies: false,
+  isPhotoMode: false,
+  isColorblindMode: false,
+  zoomLevel: 1,
+  panX: 0,
+  panY: 0,
+};
+
+/* -------------------- 📝 ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Type of adjacency relationship for Boss Tracking
@@ -62,7 +98,7 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- ðŸŽ¯ AUTOFILL RULES TYPES -------------------- */
+/* -------------------- 🎯 AUTOFILL RULES TYPES -------------------- */
 
 /**
  * Sort field options for guest ordering
@@ -245,7 +281,7 @@ export interface StoredProximityViolation {
   reason?: string;
 }
 
-/* -------------------- ðŸ“… SESSION & DAY TYPES -------------------- */
+/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
@@ -255,7 +291,7 @@ export interface Session {
   startTime: string;      // ISO string
   endTime: string;        // ISO string
   
-  // ðŸŽ¯ Session-level guest inheritance
+  // 🎯 Session-level guest inheritance
   inheritedHostGuestIds: string[];     // IDs from masterHostGuests
   inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
   
@@ -263,22 +299,28 @@ export interface Session {
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // ðŸŽ¯ Boss Adjacency Tracking Metadata
+  // 🎯 Boss Adjacency Tracking Metadata
   isTrackedForAdjacency?: boolean;  // Whether this session is tracked
   planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
   needsAdjacencyReview?: boolean;   // Flag if upstream session changed
+
+  // 🔒 Session Lock State
+  isLocked?: boolean;       // Whether the session is locked for editing
+  lockedAt?: string;        // ISO timestamp when locked
+  lockedBy?: string;        // User who locked (for future multi-user support)
 
   seatPlan: {
     tables: Table[];
     chunks: Record<string, Chunk>;
     activeGuestIds: string[];
     selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
+    uiSettings?: SessionUISettings;        // 🎨 UI display settings
   };
   
-  // ðŸ†• Session Rules Configuration - persists autofill settings
+  // ⚙️ Session Rules Configuration - persists autofill settings
   rulesConfig?: SessionRulesConfig;
   
-  // ðŸ†• Stored violations - persists violations for display on session load
+  // ⚙️ Stored violations - persists violations for display on session load
   storedViolations?: StoredProximityViolation[];
 }
 
@@ -288,7 +330,7 @@ export interface EventDay {
   sessions: Session[];
 }
 
-/* -------------------- ðŸ¯ EVENT TYPE -------------------- */
+/* -------------------- 🏛️ EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
@@ -301,7 +343,7 @@ export interface Event {
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // ðŸŽ¯ Boss Adjacency Tracking Configuration (CONSOLIDATED)
+  // 🎯 Boss Adjacency Tracking Configuration (CONSOLIDATED)
   trackedGuestIds?: string[];                    // IDs of guests being tracked
   trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
   adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data

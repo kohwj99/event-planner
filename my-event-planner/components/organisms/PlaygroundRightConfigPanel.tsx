@@ -1,5 +1,6 @@
 // components/organisms/PlaygroundRightConfigPanel.tsx
 // Enhanced with Lock Table, Delete Table, and Modify Table features
+// 🆕 UPDATED: Added isLocked prop to disable all editing when session is locked
 
 'use client';
 
@@ -13,6 +14,7 @@ import {
   Chip,
   Paper,
   Tooltip,
+  Alert,
 } from '@mui/material';
 import {
   SwapHoriz,
@@ -21,6 +23,7 @@ import {
   DeleteForever,
   Edit,
   TableRestaurant,
+  Info,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
@@ -31,7 +34,12 @@ import ModifyTableModal from '@/components/molecules/ModifyTableModal';
 import DeleteTableConfirmModal from '@/components/molecules/DeleteTableConfirmModal';
 import { Table } from '@/types/Table';
 
-export default function PlaygroundRightConfigPanel() {
+interface PlaygroundRightConfigPanelProps {
+  /** 🆕 When true, all editing actions are disabled */
+  isLocked?: boolean;
+}
+
+export default function PlaygroundRightConfigPanel({ isLocked = false }: PlaygroundRightConfigPanelProps) {
   const {
     tables,
     selectedTableId,
@@ -40,7 +48,6 @@ export default function PlaygroundRightConfigPanel() {
     lockSeat,
     clearSeat,
     findGuestSeat,
-    // NEW: Table-level operations
     lockAllSeatsInTable,
     unlockAllSeatsInTable,
     deleteTable,
@@ -64,7 +71,7 @@ export default function PlaygroundRightConfigPanel() {
     currentSeatId: string;
   } | null>(null);
 
-  // NEW: Table-level modals
+  // Table-level modals
   const [openModifyModal, setOpenModifyModal] = useState(false);
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
 
@@ -74,7 +81,7 @@ export default function PlaygroundRightConfigPanel() {
     ? guestLookup[selectedSeat.assignedGuestId]
     : null;
 
-  // NEW: Calculate table-level statistics
+  // Calculate table-level statistics
   const tableStats = useMemo(() => {
     if (!selectedTable) return null;
 
@@ -95,24 +102,21 @@ export default function PlaygroundRightConfigPanel() {
     };
   }, [selectedTable]);
 
-  // Seat assignment handlers
+  // Seat assignment handlers - 🆕 Check isLocked
   const handleAssignGuest = (guestId: string | null) => {
-    if (!selectedTableId || !selectedSeatId) return;
+    if (!selectedTableId || !selectedSeatId || isLocked) return;
 
-    // If clearing the seat
     if (guestId === null) {
       clearSeat(selectedTableId, selectedSeatId);
       return;
     }
 
-    // Check if guest is already seated elsewhere
     const currentLocation = findGuestSeat(guestId);
 
     if (
       currentLocation &&
       (currentLocation.tableId !== selectedTableId || currentLocation.seatId !== selectedSeatId)
     ) {
-      // Guest is already seated elsewhere - show confirmation
       setPendingAssignment({
         guestId,
         currentTableId: currentLocation.tableId,
@@ -120,21 +124,16 @@ export default function PlaygroundRightConfigPanel() {
       });
       setOpenReassignConfirm(true);
     } else {
-      // Guest not seated or same seat - proceed directly
       assignGuestToSeat(selectedTableId, selectedSeatId, guestId);
     }
   };
 
   const handleConfirmReassign = () => {
-    if (!pendingAssignment || !selectedTableId || !selectedSeatId) return;
+    if (!pendingAssignment || !selectedTableId || !selectedSeatId || isLocked) return;
 
-    // Clear from old location
     clearSeat(pendingAssignment.currentTableId, pendingAssignment.currentSeatId);
-
-    // Assign to new location
     assignGuestToSeat(selectedTableId, selectedSeatId, pendingAssignment.guestId);
 
-    // Close modal and reset
     setOpenReassignConfirm(false);
     setPendingAssignment(null);
   };
@@ -144,7 +143,6 @@ export default function PlaygroundRightConfigPanel() {
     setPendingAssignment(null);
   };
 
-  // Get info for reassign confirmation modal
   const getReassignInfo = () => {
     if (!pendingAssignment) return null;
 
@@ -163,67 +161,49 @@ export default function PlaygroundRightConfigPanel() {
 
   const reassignInfo = getReassignInfo();
 
-  // NEW: Table-level action handlers
-
-  /**
-   * Lock all seats in the selected table
-   */
+  // Table-level action handlers - 🆕 Check isLocked
   const handleLockTable = () => {
-    if (!selectedTableId) return;
+    if (!selectedTableId || isLocked) return;
     lockAllSeatsInTable(selectedTableId);
   };
 
-  /**
-   * Unlock all seats in the selected table
-   */
   const handleUnlockTable = () => {
-    if (!selectedTableId) return;
+    if (!selectedTableId || isLocked) return;
     unlockAllSeatsInTable(selectedTableId);
   };
 
-  /**
-   * Delete the selected table (opens confirmation modal)
-   */
   const handleDeleteTable = () => {
-    if (!selectedTableId) return;
+    if (!selectedTableId || isLocked) return;
     setOpenDeleteModal(true);
   };
 
-  /**
-   * Confirm table deletion
-   */
   const handleConfirmDeleteTable = () => {
-    if (!selectedTableId) return;
-    // The deleteTable action will:
-    // 1. Unseat all guests
-    // 2. Remove the table from chunks
-    // 3. Reorder subsequent tables
+    if (!selectedTableId || isLocked) return;
     deleteTable(selectedTableId);
     setOpenDeleteModal(false);
   };
 
-  /**
-   * Open the modify table modal
-   */
   const handleModifyTable = () => {
-    if (!selectedTableId) return;
+    if (!selectedTableId || isLocked) return;
     setOpenModifyModal(true);
   };
 
-  /**
-   * Confirm table modification
-   */
   const handleConfirmModifyTable = (newTable: Table) => {
-    if (!selectedTableId) return;
-    // Clear all guests first (modifying unseats all guests)
+    if (!selectedTableId || isLocked) return;
     clearAllSeatsInTable(selectedTableId);
-    // Replace the table with the new configuration
     replaceTable(selectedTableId, newTable);
     setOpenModifyModal(false);
   };
 
   return (
     <Box p={3} sx={{ width: 320 }}>
+      {/* 🆕 Lock Warning */}
+      {isLocked && (
+        <Alert severity="info" icon={<Info />} sx={{ mb: 2 }}>
+          Session is locked. Editing disabled.
+        </Alert>
+      )}
+
       {/* Table Selection Header */}
       <Stack direction="row" alignItems="center" spacing={1} mb={1}>
         <TableRestaurant color={selectedTable ? 'primary' : 'disabled'} />
@@ -282,7 +262,7 @@ export default function PlaygroundRightConfigPanel() {
         </Paper>
       )}
 
-      {/* NEW: Table Actions Section */}
+      {/* Table Actions Section */}
       {selectedTable && (
         <>
           <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -290,50 +270,59 @@ export default function PlaygroundRightConfigPanel() {
           </Typography>
 
           <Stack spacing={1} sx={{ mb: 2 }}>
-            {/* Lock/Unlock Table Button */}
+            {/* 🆕 All buttons disabled when isLocked */}
             <Tooltip
               title={
-                tableStats?.allLocked
+                isLocked
+                  ? 'Session is locked'
+                  : tableStats?.allLocked
                   ? 'Unlock all seats in this table'
                   : 'Lock all seats in this table'
               }
               placement="left"
             >
-              <Button
-                variant="outlined"
-                color={tableStats?.allLocked ? 'success' : 'warning'}
-                startIcon={tableStats?.allLocked ? <LockOpen /> : <Lock />}
-                onClick={tableStats?.allLocked ? handleUnlockTable : handleLockTable}
-                fullWidth
-              >
-                {tableStats?.allLocked ? 'Unlock Table' : 'Lock Table'}
-              </Button>
+              <span>
+                <Button
+                  variant="outlined"
+                  color={tableStats?.allLocked ? 'success' : 'warning'}
+                  startIcon={tableStats?.allLocked ? <LockOpen /> : <Lock />}
+                  onClick={tableStats?.allLocked ? handleUnlockTable : handleLockTable}
+                  fullWidth
+                  disabled={isLocked}
+                >
+                  {tableStats?.allLocked ? 'Unlock Table' : 'Lock Table'}
+                </Button>
+              </span>
             </Tooltip>
 
-            {/* Modify Table Button */}
-            <Tooltip title="Edit table configuration (seats, ordering, etc.)" placement="left">
-              <Button
-                variant="outlined"
-                color="primary"
-                startIcon={<Edit />}
-                onClick={handleModifyTable}
-                fullWidth
-              >
-                Modify Table
-              </Button>
+            <Tooltip title={isLocked ? 'Session is locked' : 'Edit table configuration'} placement="left">
+              <span>
+                <Button
+                  variant="outlined"
+                  color="primary"
+                  startIcon={<Edit />}
+                  onClick={handleModifyTable}
+                  fullWidth
+                  disabled={isLocked}
+                >
+                  Modify Table
+                </Button>
+              </span>
             </Tooltip>
 
-            {/* Delete Table Button */}
-            <Tooltip title="Delete this table and unseat all guests" placement="left">
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<DeleteForever />}
-                onClick={handleDeleteTable}
-                fullWidth
-              >
-                Delete Table
-              </Button>
+            <Tooltip title={isLocked ? 'Session is locked' : 'Delete this table'} placement="left">
+              <span>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<DeleteForever />}
+                  onClick={handleDeleteTable}
+                  fullWidth
+                  disabled={isLocked}
+                >
+                  Delete Table
+                </Button>
+              </span>
             </Tooltip>
           </Stack>
 
@@ -380,47 +369,68 @@ export default function PlaygroundRightConfigPanel() {
           </Typography>
 
           <Stack spacing={1}>
-            <Button
-              variant="contained"
-              disabled={selectedSeat.locked}
-              onClick={() => setOpenAssignModal(true)}
-            >
-              {guest ? 'Reassign Guest' : 'Assign Guest'}
-            </Button>
+            {/* 🆕 All seat actions disabled when isLocked */}
+            <Tooltip title={isLocked ? 'Session is locked' : ''}>
+              <span>
+                <Button
+                  variant="contained"
+                  disabled={selectedSeat.locked || isLocked}
+                  onClick={() => setOpenAssignModal(true)}
+                  fullWidth
+                >
+                  {guest ? 'Reassign Guest' : 'Assign Guest'}
+                </Button>
+              </span>
+            </Tooltip>
 
-            {/* Swap Seat Button */}
             {guest && (
-              <Button
-                variant="contained"
-                color="secondary"
-                disabled={selectedSeat.locked}
-                onClick={() => setOpenSwapModal(true)}
-                startIcon={<SwapHoriz />}
-              >
-                Swap Seat
-              </Button>
+              <Tooltip title={isLocked ? 'Session is locked' : ''}>
+                <span>
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    disabled={selectedSeat.locked || isLocked}
+                    onClick={() => setOpenSwapModal(true)}
+                    startIcon={<SwapHoriz />}
+                    fullWidth
+                  >
+                    Swap Seat
+                  </Button>
+                </span>
+              </Tooltip>
             )}
 
-            <Button
-              variant="outlined"
-              color="error"
-              disabled={!guest}
-              onClick={() => clearSeat(selectedTableId!, selectedSeatId!)}
-            >
-              Clear Seat
-            </Button>
+            <Tooltip title={isLocked ? 'Session is locked' : ''}>
+              <span>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={!guest || isLocked}
+                  onClick={() => clearSeat(selectedTableId!, selectedSeatId!)}
+                  fullWidth
+                >
+                  Clear Seat
+                </Button>
+              </span>
+            </Tooltip>
 
-            <Button
-              variant="outlined"
-              onClick={() => lockSeat(selectedTableId!, selectedSeatId!, !selectedSeat.locked)}
-            >
-              {selectedSeat.locked ? 'Unlock Seat' : 'Lock Seat'}
-            </Button>
+            <Tooltip title={isLocked ? 'Session is locked' : ''}>
+              <span>
+                <Button
+                  variant="outlined"
+                  onClick={() => lockSeat(selectedTableId!, selectedSeatId!, !selectedSeat.locked)}
+                  disabled={isLocked}
+                  fullWidth
+                >
+                  {selectedSeat.locked ? 'Unlock Seat' : 'Lock Seat'}
+                </Button>
+              </span>
+            </Tooltip>
           </Stack>
 
-          {/* Seat-level Modals */}
+          {/* Seat-level Modals - 🆕 Only open if not locked */}
           <AssignGuestModal
-            open={openAssignModal}
+            open={openAssignModal && !isLocked}
             onClose={() => setOpenAssignModal(false)}
             tableId={selectedTableId!}
             seatId={selectedSeatId!}
@@ -429,7 +439,7 @@ export default function PlaygroundRightConfigPanel() {
 
           {guest && (
             <SwapSeatModal
-              open={openSwapModal}
+              open={openSwapModal && !isLocked}
               onClose={() => setOpenSwapModal(false)}
               sourceTableId={selectedTableId!}
               sourceSeatId={selectedSeatId!}
@@ -438,7 +448,7 @@ export default function PlaygroundRightConfigPanel() {
 
           {reassignInfo && (
             <GuestReassignConfirmModal
-              open={openReassignConfirm}
+              open={openReassignConfirm && !isLocked}
               onClose={handleCancelReassign}
               onConfirm={handleConfirmReassign}
               guestName={reassignInfo.guestName}
@@ -459,16 +469,16 @@ export default function PlaygroundRightConfigPanel() {
         </Typography>
       )}
 
-      {/* Table-level Modals */}
+      {/* Table-level Modals - 🆕 Only open if not locked */}
       <ModifyTableModal
-        open={openModifyModal}
+        open={openModifyModal && !isLocked}
         onClose={() => setOpenModifyModal(false)}
         onConfirm={handleConfirmModifyTable}
         table={selectedTable || null}
       />
 
       <DeleteTableConfirmModal
-        open={openDeleteModal}
+        open={openDeleteModal && !isLocked}
         onClose={() => setOpenDeleteModal(false)}
         onConfirm={handleConfirmDeleteTable}
         table={selectedTable || null}

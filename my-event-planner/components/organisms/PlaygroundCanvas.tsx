@@ -2,12 +2,14 @@
 // Main canvas for seat planning with D3-based SVG rendering
 // Uses centralized color configuration from colorConfig.ts via colorModeStore
 //
-// NEW: Photography Mode Toggle
-// - Toggles between standard view (circles + floating boxes) and Photo view (unified square cards)
+// UPDATED: UI Settings Persistence & Session Lock Support
+// - Receives initialUISettings from parent (from useSessionLoader)
+// - Notifies parent when UI settings change via onUISettingsChange
+// - Disables all editing interactions when isLocked is true
 
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import * as d3 from 'd3';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
@@ -26,18 +28,20 @@ import Badge from '@mui/material/Badge';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
-import CameraAlt from '@mui/icons-material/CameraAlt'; // Icon for Photo Mode
+import CameraAlt from '@mui/icons-material/CameraAlt';
+import Alert from '@mui/material/Alert';
+import Lock from '@mui/icons-material/Lock';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
 
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
-import { useColorScheme } from '@/store/colorModeStore';
+import { useColorScheme, useColorModeStore } from '@/store/colorModeStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
-import { EventType } from '@/types/Event';
+import { EventType, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
 
 // Import SVG helper functions
 import {
@@ -51,31 +55,45 @@ import {
 
 interface PlaygroundCanvasProps {
   sessionType?: EventType | null;
+  /** When true, all editing is disabled (view-only mode) */
+  isLocked?: boolean;
+  /** UI settings from useSessionLoader - changes when session changes */
+  initialUISettings?: SessionUISettings | null;
+  /** Callback when user changes settings */
+  onUISettingsChange?: (settings: SessionUISettings) => void;
 }
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
-export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanvasProps) {
+export default function PlaygroundCanvas({ 
+  sessionType = null,
+  isLocked = false,
+  initialUISettings,
+  onUISettingsChange,
+}: PlaygroundCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomBehavior = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const gLayerRef = useRef<SVGGElement | null>(null);
+  
+  // UI State - local state that renders the UI
   const [zoomLevel, setZoomLevel] = useState(1);
   const [connectorGap, setConnectorGap] = useState<number>(8);
-
-  // Table visibility toggle (default: true = show tables)
-  const [showTableBodies, setShowTableBodies] = useState<boolean>(true);
-
-  // NEW: Photography Mode State
+  const [hideTableBodies, setHideTableBodies] = useState<boolean>(false);
   const [isPhotoMode, setIsPhotoMode] = useState<boolean>(false);
+
+  // Flag to prevent notifying parent while we're syncing from parent's props
+  const isSyncingFromParent = useRef(false);
+
+  // Get color scheme from store
+  const colorModeStore = useColorModeStore();
+  const colorScheme = useColorScheme();
+  const isColorblindMode = colorModeStore.colorMode === 'colorblind';
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
   const mealPlanPopoverOpen = Boolean(mealPlanAnchorEl);
-
-  // Get color scheme from store
-  const colorScheme = useColorScheme();
 
   // Store hooks
   const {
@@ -111,7 +129,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     return m;
   }, [guests]);
 
-  // Calculate max meal plans across all guests
   const maxMealPlanCount = useMemo(() => {
     let max = 0;
     guests.forEach((g) => {
@@ -122,7 +139,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     return max;
   }, [guests]);
 
-  // Generate meal plan options
   const mealPlanOptions = useMemo(() => {
     const options: { value: number | null; label: string }[] = [
       { value: null, label: 'None' }
@@ -134,11 +150,91 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   }, [maxMealPlanCount]);
 
   // ============================================================================
+  // SYNC UI SETTINGS FROM PARENT (when session changes)
+  // ============================================================================
+
+  useEffect(() => {
+    // When initialUISettings changes (new session loaded), sync to local state
+    if (initialUISettings) {
+      console.log('[PlaygroundCanvas] Syncing settings from parent:', initialUISettings);
+      isSyncingFromParent.current = true;
+      
+      setConnectorGap(initialUISettings.connectorGap ?? 8);
+      setHideTableBodies(initialUISettings.hideTableBodies ?? false);
+      setIsPhotoMode(initialUISettings.isPhotoMode ?? false);
+      
+      // Colorblind mode is already applied by useSessionLoader
+      
+      // Reset flag after state updates are processed
+      requestAnimationFrame(() => {
+        isSyncingFromParent.current = false;
+      });
+    }
+  }, [initialUISettings]);
+
+  // ============================================================================
+  // NOTIFY PARENT OF SETTINGS CHANGES (when user interacts)
+  // ============================================================================
+
+  const notifyTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Don't notify if we're syncing from parent (would cause loop)
+    if (isSyncingFromParent.current || !onUISettingsChange) return;
+    
+    // Clear pending notification
+    if (notifyTimeout.current) {
+      clearTimeout(notifyTimeout.current);
+    }
+    
+    // Debounce notification
+    notifyTimeout.current = setTimeout(() => {
+      const settings: SessionUISettings = {
+        connectorGap,
+        hideTableBodies,
+        isPhotoMode,
+        isColorblindMode,
+        zoomLevel,
+      };
+      console.log('[PlaygroundCanvas] Notifying parent of user changes:', settings);
+      onUISettingsChange(settings);
+    }, 200);
+    
+    return () => {
+      if (notifyTimeout.current) clearTimeout(notifyTimeout.current);
+    };
+  }, [connectorGap, hideTableBodies, isPhotoMode, isColorblindMode, zoomLevel, onUISettingsChange]);
+
+  // ============================================================================
+  // LOCKED MODE HANDLERS - wrap store functions to check lock state
+  // ============================================================================
+
+  const handleSelectSeat = useCallback((tableId: string, seatId: string) => {
+    if (isLocked) return;
+    selectSeat(tableId, seatId);
+  }, [isLocked, selectSeat]);
+
+  const handleLockSeat = useCallback((tableId: string, seatId: string, locked: boolean) => {
+    if (isLocked) return;
+    lockSeat(tableId, seatId, locked);
+  }, [isLocked, lockSeat]);
+
+  const handleClearSeat = useCallback((tableId: string, seatId: string) => {
+    if (isLocked) return;
+    clearSeat(tableId, seatId);
+  }, [isLocked, clearSeat]);
+
+  // ============================================================================
   // MODAL & POPOVER HANDLERS
   // ============================================================================
 
   const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
-  const handleAddTableClick = () => setIsAddTableModalOpen(true);
+  
+  const handleAddTableClick = () => {
+    if (isLocked) return;
+    setIsAddTableModalOpen(true);
+  };
+  
   const handleCloseAddModal = () => setIsAddTableModalOpen(false);
 
   const handleMealPlanClick = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -159,7 +255,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
 
-    // Create background pattern
     const defs = svg.append('defs');
     const pattern = defs
       .append('pattern')
@@ -186,7 +281,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 4]) // Allow slightly more zoom out for large photo layouts
+      .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
         if (gLayerRef.current)
           gLayerRef.current.setAttribute('transform', event.transform.toString());
@@ -260,9 +355,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       .append('g')
       .attr('class', 'table-group')
       .attr('transform', (d) => `translate(${d.x},${d.y})`)
-      .style('cursor', 'grab');
+      .style('cursor', isLocked ? 'default' : 'grab');
 
-    // Create table shapes on enter - using colorScheme
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
       const isSelected = d.id === selectedTableId;
@@ -270,14 +364,16 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       
       const bodyGroup = grp.append('g').attr('class', 'table-body');
       
-      // Initial creation - dimensions will be updated in merge
       if (d.shape === 'round') {
         bodyGroup.append('circle')
           .attr('class', 'table-shape')
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke)
           .attr('stroke-width', 2)
-          .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
+          .on('click', function (event) { 
+            event.stopPropagation(); 
+            setSelectedTable(d.id); 
+          });
       } else {
         bodyGroup.append('rect')
           .attr('class', 'table-shape')
@@ -286,7 +382,10 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           .attr('stroke-width', 2)
           .attr('rx', 4)
           .attr('ry', 4)
-          .on('click', function (event) { event.stopPropagation(); setSelectedTable(d.id); });
+          .on('click', function (event) { 
+            event.stopPropagation(); 
+            setSelectedTable(d.id); 
+          });
       }
       
       bodyGroup.append('text')
@@ -301,22 +400,20 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Update table colors and SIZES when mode/selection changes
+    // Update cursor based on lock state
+    merged.style('cursor', isLocked ? 'default' : 'grab');
+
     merged.each(function (d) {
       const grp = d3.select(this);
       const isSelected = d.id === selectedTableId;
       const fillColor = isSelected ? colorScheme.table.tableSelectedFill : colorScheme.table.tableFill;
       
       const bodyGroup = grp.select('.table-body');
-      
-      // Determine Dimensions based on Photo Mode
-      // In Photo Mode, we enlarge the table slightly to anchor the larger seat boxes
-      // or keep it proportionate.
       const photoScale = isPhotoMode ? 1.4 : 1; 
 
       if (d.shape === 'round') {
         bodyGroup.select('circle.table-shape')
-          .attr('r', d.radius * photoScale) // Scale up radius in photo mode
+          .attr('r', d.radius * photoScale)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       } else {
@@ -334,27 +431,26 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
       bodyGroup.select('text.table-label')
         .attr('fill', colorScheme.table.tableText);
       
-      bodyGroup.style('display', showTableBodies ? 'block' : 'none');
+      bodyGroup.style('display', hideTableBodies ? 'none' : 'block');
     });
 
-    // Render table contents using helper functions
+    // Render table contents
     merged.each(function (tableDatum) {
       const group = d3.select(this);
 
-      // Render seats (Handles both Standard Circles and Photo Mode Squares)
+      // Use wrapped handlers that respect lock state
       renderSeats(
         group as any,
         tableDatum,
         colorScheme,
-        guestLookup, // NEW: Needed for Photo Mode content inside seat
-        selectedMealPlanIndex, // NEW: Needed for Photo Mode
-        isPhotoMode, // NEW: Toggle mode
-        selectSeat,
-        lockSeat,
-        clearSeat
+        guestLookup,
+        selectedMealPlanIndex,
+        isPhotoMode,
+        handleSelectSeat,
+        handleLockSeat,
+        handleClearSeat
       );
 
-      // Render guest display (Only for Standard Mode)
       renderTableGuestDisplay(
         group as any,
         tableDatum,
@@ -362,46 +458,50 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         connectorGap,
         selectedMealPlanIndex,
         colorScheme,
-        isPhotoMode // NEW: If true, this effectively clears the display
+        isPhotoMode
       );
     });
 
-    // ================================================================
-    // DRAG BEHAVIOR
-    // ================================================================
+    // Drag behavior - only enable when not locked
     const svgSelection = d3.select(svgEl);
-    const drag = d3.drag<SVGGElement, Table>()
-      .on('start', function () {
-        svgSelection.on('.zoom', null);
-        d3.select(this).style('cursor', 'grabbing');
-      })
-      .on('drag', function (event, d) {
-        const [px, py] = d3.pointer(event, svgEl);
-        const t = d3.zoomTransform(svgEl);
-        const worldX = Math.max(0, (px - t.x) / t.k);
-        const worldY = Math.max(0, (py - t.y) / t.k);
-        d3.select(this).attr('transform', `translate(${worldX},${worldY})`);
-        moveTable(d.id, worldX, worldY);
-        const row = Math.floor(worldY / CHUNK_HEIGHT);
-        const col = Math.floor(worldX / CHUNK_WIDTH);
-        ensureChunkExists(row, col);
-        assignTableToChunk(d.id, row, col);
-        expandWorldIfNeeded();
-      })
-      .on('end', function () {
-        cleanupEmptyChunks();
-        if (zoomBehavior.current) svgSelection.call(zoomBehavior.current as any);
-        d3.select(this).style('cursor', 'grab');
-      });
+    
+    if (!isLocked) {
+      const drag = d3.drag<SVGGElement, Table>()
+        .on('start', function () {
+          svgSelection.on('.zoom', null);
+          d3.select(this).style('cursor', 'grabbing');
+        })
+        .on('drag', function (event, d) {
+          const [px, py] = d3.pointer(event, svgEl);
+          const t = d3.zoomTransform(svgEl);
+          const worldX = Math.max(0, (px - t.x) / t.k);
+          const worldY = Math.max(0, (py - t.y) / t.k);
+          d3.select(this).attr('transform', `translate(${worldX},${worldY})`);
+          moveTable(d.id, worldX, worldY);
+          const row = Math.floor(worldY / CHUNK_HEIGHT);
+          const col = Math.floor(worldX / CHUNK_WIDTH);
+          ensureChunkExists(row, col);
+          assignTableToChunk(d.id, row, col);
+          expandWorldIfNeeded();
+        })
+        .on('end', function () {
+          cleanupEmptyChunks();
+          if (zoomBehavior.current) svgSelection.call(zoomBehavior.current as any);
+          d3.select(this).style('cursor', 'grab');
+        });
 
-    merged.call(drag as any);
+      merged.call(drag as any);
+    } else {
+      // Remove drag behavior when locked
+      merged.on('.drag', null);
+    }
 
   }, [
-    tables, moveTable, selectSeat, lockSeat, clearSeat,
+    tables, moveTable, handleSelectSeat, handleLockSeat, handleClearSeat,
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    showTableBodies, isPhotoMode // NEW: Re-render on mode change
+    hideTableBodies, isPhotoMode, isLocked 
   ]);
 
   // ============================================================================
@@ -409,6 +509,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
   // ============================================================================
 
   const handleAddTable = (config: TableConfig) => {
+    if (isLocked) return;
+    
     const svgEl = svgRef.current;
     if (!svgEl) return;
 
@@ -466,6 +568,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
 
   return (
     <div id="playground-canvas" style={{ position: 'relative', width: '100%', height: '100%' }}>
+
       <Paper elevation={0} sx={{ position: 'absolute', inset: 0, bgcolor: '#fafafa' }}>
         <Box
           component="svg"
@@ -487,9 +590,7 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
           gap: 2,
         }}
       >
-        {/* FAB Buttons - VERTICAL Stack */}
         <Stack direction="column" spacing={1} alignItems="center">
-          {/* Meal Plan FAB */}
           {maxMealPlanCount > 0 && (
             <Tooltip title="Select Meal Plan to Display" placement="left">
               <Badge
@@ -508,11 +609,19 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
             </Tooltip>
           )}
 
-          {/* Add Table FAB */}
-          <Tooltip title="Add Table" placement="left">
-            <Fab color="primary" size="medium" onClick={handleAddTableClick}>
-              <AddIcon />
-            </Fab>
+          {/* Add Table FAB - disabled when locked */}
+          <Tooltip title={isLocked ? 'Session is locked' : 'Add Table'} placement="left">
+            <span>
+              <Fab 
+                color="primary" 
+                size="medium" 
+                onClick={handleAddTableClick}
+                disabled={isLocked}
+                sx={{ opacity: isLocked ? 0.5 : 1 }}
+              >
+                <AddIcon />
+              </Fab>
+            </span>
           </Tooltip>
         </Stack>
 
@@ -527,34 +636,32 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
               size="small"
               value={connectorGap}
               onChange={(_, v) => setConnectorGap(v as number)}
-              min={2}
-              max={30}
+              min={-20}
+              max={200}
               sx={{ width: 80 }}
             />
           </Stack>
           
-          {/* Colorblind Toggle */}
           <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
             <ColorModeToggle size="small" showLabel />
           </Box>
           
-          {/* Table Visibility Toggle */}
           <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
             <Tooltip title="Toggle visibility of table shapes" placement="left">
               <FormControlLabel
                 control={
                   <Switch
-                    checked={showTableBodies}
-                    onChange={(e) => setShowTableBodies(e.target.checked)}
+                    checked={hideTableBodies}
+                    onChange={(e) => setHideTableBodies(e.target.checked)}
                     size="small"
                     color="primary"
                   />
                 }
                 label={
                   <Stack direction="row" spacing={0.5} alignItems="center">
-                    <TableRestaurant fontSize="small" sx={{ color: showTableBodies ? 'primary.main' : 'text.disabled' }} />
-                    <Typography variant="caption" color={showTableBodies ? 'text.primary' : 'text.disabled'}>
-                      Tables
+                    <TableRestaurant fontSize="small" sx={{ color: hideTableBodies ? 'primary.main' : 'text.disabled' }} />
+                    <Typography variant="caption" color={hideTableBodies ? 'text.primary' : 'text.disabled'}>
+                      Hide Tables
                     </Typography>
                   </Stack>
                 }
@@ -563,16 +670,15 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
             </Tooltip>
           </Box>
 
-          {/* NEW: Photography Mode Toggle */}
           <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Toggle Photography Mode (Unified Square Boxes)" placement="left">
+            <Tooltip title="Toggle Photography Mode" placement="left">
               <FormControlLabel
                 control={
                   <Switch
                     checked={isPhotoMode}
                     onChange={(e) => setIsPhotoMode(e.target.checked)}
                     size="small"
-                    color="secondary" // Distinct color
+                    color="secondary"
                   />
                 }
                 label={
@@ -590,7 +696,6 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         </Paper>
       </Box>
 
-      {/* Meal Plan Popover */}
       <Popover
         open={mealPlanPopoverOpen}
         anchorEl={mealPlanAnchorEl}
@@ -627,9 +732,8 @@ export default function PlaygroundCanvas({ sessionType = null }: PlaygroundCanva
         </Paper>
       </Popover>
 
-      {/* Add Table Modal */}
       <AddTableModal
-        open={isAddTableModalOpen}
+        open={isAddTableModalOpen && !isLocked}
         onClose={handleCloseAddModal}
         onConfirm={(config) => {
           handleAddTable(config);

@@ -29,6 +29,18 @@ import {
 export const PHOTO_BOX_SIZE = 90; // Fixed size for Photo Mode squares
 export const PHOTO_BOX_GAP = 8;   // Gap between boxes in Photo Mode
 
+/**
+ * Visual multiplier for seat circle rendering.
+ * This makes seat circles appear larger without changing the underlying data model.
+ * The base seat radius in generateTable.ts is 12px, so a multiplier of 1.5 makes them 18px.
+ */
+export const SEAT_VISUAL_MULTIPLIER = 1.5;
+
+/**
+ * Font size multiplier for seat numbers (scales with seat size)
+ */
+export const SEAT_FONT_MULTIPLIER = 1.3;
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -1034,7 +1046,7 @@ function renderPhotoSeats(
       grp.select('text.photo-meal')
         .attr('x', cx).attr('y', PHOTO_BOX_SIZE - 8)
         .attr('fill', colorScheme.ui.mealPlanText)
-        .text(mealPlan ? `🍽 ${mealPlan}` : '');
+        .text(mealPlan ? `${mealPlan}` : '');
 
     } else {
       // Empty Seat State
@@ -1113,12 +1125,12 @@ export function renderSeats(
     seatsEnter.merge(seatsSel as any)
       .attr('cx', (s) => s.x - tableDatum.x)
       .attr('cy', (s) => s.y - tableDatum.y)
-      .attr('r', (s) => s.radius)
+      .attr('r', (s) => s.radius * SEAT_VISUAL_MULTIPLIER)
       .attr('fill', (s) => getSeatFillColor(s, colorScheme))
       .attr('stroke', (s) => getSeatStrokeColor(s, colorScheme))
       .attr('stroke-width', (s) => {
         const mode = (s.mode || 'default') as 'default' | 'host-only' | 'external-only';
-        return getSeatStrokeWidth(mode, colorScheme.mode);
+        return getSeatStrokeWidth(mode, colorScheme.mode) * SEAT_VISUAL_MULTIPLIER;
       })
       .attr('stroke-dasharray', (s) => getSeatStrokeDashArray(s, colorScheme))
       .style('cursor', 'pointer')
@@ -1145,10 +1157,10 @@ export function renderSeats(
 
     seatLabelsEnter.merge(seatLabels as any)
       .attr('x', (s) => s.x - tableDatum.x)
-      .attr('y', (s) => s.y - tableDatum.y + 3)
+      .attr('y', (s) => s.y - tableDatum.y + 4)
       .attr('text-anchor', 'middle')
       .attr('fill', colorScheme.table.tableStroke)
-      .attr('font-size', '10px')
+      .attr('font-size', `${Math.round(10 * SEAT_FONT_MULTIPLIER)}px`)
       .attr('font-weight', 'bold')
       .text((s) => s.seatNumber);
   }

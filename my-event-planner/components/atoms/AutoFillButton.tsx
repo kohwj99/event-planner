@@ -7,7 +7,11 @@ import AutoFillModal from '@/components/molecules/AutoFillModal';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { useEventStore } from '@/store/eventStore';
 
-export default function AutoFillButton() {
+interface AutoFillButtonProps {
+  disabled?: boolean; // 🆕
+}
+
+export default function AutoFillButton({ disabled = false }: AutoFillButtonProps) {
   const [open, setOpen] = useState(false);
   const activeEventId = useEventStore((s) => s.activeEventId);
   const activeSessionId = useEventStore((s) => s.activeSessionId);
@@ -19,12 +23,14 @@ export default function AutoFillButton() {
         color="primary"
         onClick={() => setOpen(true)}
         startIcon={<AutoAwesomeIcon />}
+        disabled={disabled} // 🆕
       >
         AutoFill
       </Button>
 
+      {/* 🆕 Only open modal if not disabled */}
       <AutoFillModal 
-        open={open} 
+        open={open && !disabled} 
         onClose={() => setOpen(false)} 
         eventId={activeEventId}
         sessionId={activeSessionId}

@@ -10,6 +10,7 @@ import {
   Chip,
   Alert,
   Divider,
+  Tooltip,
 } from '@mui/material';
 import {
   ArrowBack,
@@ -18,6 +19,9 @@ import {
   Warning,
   FileDownload,
   RestartAlt,
+  Lock,
+  LockOpen,
+  Info,
 } from '@mui/icons-material';
 import AutoFillButton from '@/components/atoms/AutoFillButton';
 
@@ -26,11 +30,13 @@ interface PlaygroundTopControlPanelProps {
   sessionType: string;
   formattedDate: string;
   hasNoGuests: boolean;
+  isLocked?: boolean; // 🆕
   onBack: () => void;
   onSave: () => void;
   onReset: () => void;
   onManageGuests: () => void;
   onExport: () => void;
+  onToggleLock?: () => void; // 🆕
 }
 
 export default function PlaygroundTopControlPanel({
@@ -38,11 +44,13 @@ export default function PlaygroundTopControlPanel({
   sessionType,
   formattedDate,
   hasNoGuests,
+  isLocked = false,
   onBack,
   onSave,
   onReset,
   onManageGuests,
   onExport,
+  onToggleLock,
 }: PlaygroundTopControlPanelProps) {
   return (
     <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
@@ -54,9 +62,21 @@ export default function PlaygroundTopControlPanel({
           </IconButton>
 
           <Box>
-            <Typography variant="h5" fontWeight="bold">
-              {sessionName}
-            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="h5" fontWeight="bold">
+                {sessionName}
+              </Typography>
+              {/* 🆕 Lock indicator chip */}
+              {isLocked && (
+                <Chip
+                  icon={<Lock sx={{ fontSize: 16 }} />}
+                  label="Locked"
+                  size="small"
+                  color="warning"
+                  variant="filled"
+                />
+              )}
+            </Stack>
             <Stack direction="row" spacing={1} alignItems="center" mt={0.5}>
               <Chip
                 label={sessionType}
@@ -75,15 +95,40 @@ export default function PlaygroundTopControlPanel({
         <Stack direction="row" spacing={2} alignItems="center">
           <Divider orientation="vertical" flexItem />
 
-          <Button
-            variant="contained"
-            startIcon={<Groups />}
-            onClick={onManageGuests}
-          >
-            Manage Guests
-          </Button>
+          {/* 🆕 Lock/Unlock Button */}
+          {onToggleLock && (
+            <Tooltip 
+              title={isLocked ? 'Unlock session to enable editing' : 'Lock session to prevent changes'}
+            >
+              <Button
+                variant={isLocked ? 'contained' : 'outlined'}
+                color={isLocked ? 'warning' : 'inherit'}
+                startIcon={isLocked ? <LockOpen /> : <Lock />}
+                onClick={onToggleLock}
+              >
+                {isLocked ? 'Unlock' : 'Lock'}
+              </Button>
+            </Tooltip>
+          )}
 
-          <AutoFillButton />
+          <Divider orientation="vertical" flexItem />
+
+          {/* 🆕 Disabled when locked */}
+          <Tooltip title={isLocked ? 'Session is locked' : ''}>
+            <span>
+              <Button
+                variant="contained"
+                startIcon={<Groups />}
+                onClick={onManageGuests}
+                disabled={isLocked}
+              >
+                Manage Guests
+              </Button>
+            </span>
+          </Tooltip>
+
+          {/* 🆕 Pass disabled prop */}
+          <AutoFillButton disabled={isLocked} />
 
           <Button
             variant="contained"
@@ -94,14 +139,20 @@ export default function PlaygroundTopControlPanel({
             Export
           </Button>
 
-          <Button
-            variant="contained"
-            color="error"
-            startIcon={<RestartAlt />}
-            onClick={onReset}
-          >
-            Reset
-          </Button>
+          {/* 🆕 Disabled when locked */}
+          <Tooltip title={isLocked ? 'Session is locked' : ''}>
+            <span>
+              <Button
+                variant="contained"
+                color="error"
+                startIcon={<RestartAlt />}
+                onClick={onReset}
+                disabled={isLocked}
+              >
+                Reset
+              </Button>
+            </span>
+          </Tooltip>
 
           <Divider orientation="vertical" flexItem />
 
@@ -117,12 +168,21 @@ export default function PlaygroundTopControlPanel({
         </Stack>
       </Stack>
 
-      {hasNoGuests && (
-        <Alert severity="warning" sx={{ mt: 2 }} icon={<Warning />}>
-          No attendees assigned to this session. Click "Manage Guests" →
-          "Manage Attendees" tab to select guests from the master list.
-        </Alert>
-      )}
+      {/* Alerts */}
+      <Stack spacing={1} sx={{ mt: hasNoGuests || isLocked ? 2 : 0 }}>
+        {/* 🆕 Lock info alert */}
+        {isLocked && (
+          <Alert severity="info" icon={<Info />}>
+            This session is locked. Click "Unlock" to enable editing.
+          </Alert>
+        )}
+        
+        {hasNoGuests && !isLocked && (
+          <Alert severity="warning" icon={<Warning />}>
+            No attendees assigned. Click "Manage Guests" → "Manage Attendees" to select guests.
+          </Alert>
+        )}
+      </Stack>
     </Paper>
   );
 }

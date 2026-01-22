@@ -20,6 +20,9 @@ import {
   SortRule,
   TableRules,
   GuestListSelection,
+  // 🆕 Import UI settings types
+  SessionUISettings,
+  DEFAULT_SESSION_UI_SETTINGS,
 } from "@/types/Event";
 import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
@@ -107,9 +110,11 @@ interface EventStoreState {
     chunks: Record<string, Chunk>;
     activeGuestIds: string[];
     selectedMealPlanIndex?: number | null;
+    uiSettings?: SessionUISettings;
+    isLocked?: boolean;
   } | null;
 
-  /* -------------------- 🆕 SESSION RULES MANAGEMENT -------------------- */
+  /* -------------------- ðŸ†• SESSION RULES MANAGEMENT -------------------- */
   
   /**
    * Save session rules configuration (sort order, proximity rules, table rules, guest selection)
@@ -162,6 +167,41 @@ interface EventStoreState {
     violations: StoredProximityViolation[];
   };
 
+  /* -------------------- 🔒 SESSION LOCK MANAGEMENT -------------------- */
+  
+  /**
+   * Toggle session lock state
+   * When locked, the session becomes view-only
+   */
+  toggleSessionLock: (eventId: string, dayId: string, sessionId: string) => void;
+  
+  /**
+   * Set session lock state explicitly
+   */
+  setSessionLock: (eventId: string, dayId: string, sessionId: string, isLocked: boolean) => void;
+  
+  /**
+   * Check if a session is locked
+   */
+  isSessionLocked: (sessionId: string) => boolean;
+
+  /* -------------------- 🖼️ SESSION UI SETTINGS MANAGEMENT -------------------- */
+  
+  /**
+   * Save session UI settings (zoom, connector gap, display modes, etc.)
+   */
+  saveSessionUISettings: (
+    eventId: string,
+    dayId: string,
+    sessionId: string,
+    uiSettings: SessionUISettings
+  ) => void;
+  
+  /**
+   * Load session UI settings
+   */
+  loadSessionUISettings: (sessionId: string) => SessionUISettings | null;
+
   /* -------------------- Statistics & Audit -------------------- */
   getPriorStats: (eventId: string, currentSessionId: string) => AdjacencyMap;
   checkSessionAuditStatus: (eventId: string, sessionId: string) => "clean" | "review_required";
@@ -193,7 +233,7 @@ interface EventStoreState {
   /** Computes full datetime (ISO string) from day date + session start time for chronological ordering */
   getSessionDateTime: (sessionId: string) => string | null;
 
-  /* -------------------- 📊 Adjacency Recording -------------------- */
+  /* -------------------- ðŸ“Š Adjacency Recording -------------------- */
   recordSessionAdjacency: (
     eventId: string,
     sessionId: string,
@@ -388,7 +428,7 @@ export const useEventStore = create<EventStoreState>()(
                             chunks: {},
                             activeGuestIds: [],
                           },
-                          // 🆕 Initialize with default rules
+                          // ðŸ†• Initialize with default rules
                           rulesConfig: { ...DEFAULT_SESSION_RULES },
                           storedViolations: [],
                         },
@@ -606,6 +646,8 @@ export const useEventStore = create<EventStoreState>()(
                   chunks: session.seatPlan.chunks || {},
                   activeGuestIds: session.seatPlan.activeGuestIds || [],
                   selectedMealPlanIndex: session.seatPlan.selectedMealPlanIndex ?? null,
+                  uiSettings: session.seatPlan.uiSettings ?? { ...DEFAULT_SESSION_UI_SETTINGS },
+                  isLocked: session.isLocked ?? false,
                 };
               }
             }
@@ -614,7 +656,7 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ==================== 🆕 SESSION RULES MANAGEMENT ==================== */
+        /* ==================== ðŸ†• SESSION RULES MANAGEMENT ==================== */
         
         saveSessionRules: (eventId, dayId, sessionId, rulesConfig) =>
           set((state) => {
@@ -762,6 +804,117 @@ export const useEventStore = create<EventStoreState>()(
             rulesConfig: { ...DEFAULT_SESSION_RULES },
             violations: [],
           };
+        },
+
+        /* ==================== 🔒 SESSION LOCK MANAGEMENT ==================== */
+        
+        toggleSessionLock: (eventId, dayId, sessionId) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => {
+                  if (d.id !== dayId) return d;
+                  return {
+                    ...d,
+                    sessions: d.sessions.map((s) =>
+                      s.id !== sessionId
+                        ? s
+                        : {
+                          ...s,
+                          isLocked: !s.isLocked,
+                          lockedAt: !s.isLocked ? new Date().toISOString() : undefined,
+                        }
+                    ),
+                  };
+                }),
+              };
+            }),
+          })),
+
+        setSessionLock: (eventId, dayId, sessionId, isLocked) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => {
+                  if (d.id !== dayId) return d;
+                  return {
+                    ...d,
+                    sessions: d.sessions.map((s) =>
+                      s.id !== sessionId
+                        ? s
+                        : {
+                          ...s,
+                          isLocked,
+                          lockedAt: isLocked ? new Date().toISOString() : undefined,
+                        }
+                    ),
+                  };
+                }),
+              };
+            }),
+          })),
+
+        isSessionLocked: (sessionId) => {
+          const state = get();
+          
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                return session.isLocked ?? false;
+              }
+            }
+          }
+          
+          return false;
+        },
+
+        /* ==================== 🖼️ SESSION UI SETTINGS MANAGEMENT ==================== */
+        
+        saveSessionUISettings: (eventId, dayId, sessionId, uiSettings) =>
+          set((state) => ({
+            events: state.events.map((e) => {
+              if (e.id !== eventId) return e;
+              return {
+                ...e,
+                days: e.days.map((d) => {
+                  if (d.id !== dayId) return d;
+                  return {
+                    ...d,
+                    sessions: d.sessions.map((s) =>
+                      s.id !== sessionId
+                        ? s
+                        : {
+                          ...s,
+                          seatPlan: {
+                            ...s.seatPlan,
+                            uiSettings,
+                          },
+                        }
+                    ),
+                  };
+                }),
+              };
+            }),
+          })),
+
+        loadSessionUISettings: (sessionId) => {
+          const state = get();
+          
+          for (const event of state.events) {
+            for (const day of event.days) {
+              const session = day.sessions.find(s => s.id === sessionId);
+              if (session) {
+                return session.seatPlan?.uiSettings ?? { ...DEFAULT_SESSION_UI_SETTINGS };
+              }
+            }
+          }
+          
+          return null;
         },
 
         /* ==================== STATISTICS & AUDIT ==================== */

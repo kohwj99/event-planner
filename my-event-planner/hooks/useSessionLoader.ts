@@ -2,8 +2,9 @@ import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { useColorModeStore } from '@/store/colorModeStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
-import { StoredProximityViolation } from '@/types/Event';
+import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
 
 /**
  * Hook for loading and saving session data
@@ -15,6 +16,8 @@ import { StoredProximityViolation } from '@/types/Event';
  * 4. Loading and saving session rules (proximity rules, sort order, table rules)
  * 5. Loading and saving violations
  * 6. CRITICAL: Syncing guestStore with eventStore session guests
+ * 7. 🆕 Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
+ * 8. 🆕 Session lock state management
  * 
  * NOTE: All tracking functionality is now in eventStore.
  * No separate trackingStore import is needed.
@@ -26,12 +29,18 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Track if component has mounted to prevent SSR issues
   const [isMounted, setIsMounted] = useState(false);
   
+  // 🆕 UI Settings state - will be passed to PlaygroundCanvas
+  const [uiSettings, setUISettings] = useState<SessionUISettings>(DEFAULT_SESSION_UI_SETTINGS);
+  const [isLocked, setIsLocked] = useState(false);
+  
+  // 🆕 Track session context for saving UI settings
+  const sessionContextRef = useRef<{ eventId: string; dayId: string } | null>(null);
+  
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
   // Hydration check - CRITICAL for preventing data loss on refresh
-  // Now using eventStore's hydration state directly
   const hasHydrated = useEventStore((state) => state._hasHydrated);
   
   // Combined check: mounted AND hydrated
@@ -46,9 +55,16 @@ export const useSessionLoader = (sessionId: string | null) => {
   
   // Session rules methods
   const loadSessionRules = useEventStore((state) => state.loadSessionRules);
-  const saveSessionRules = useEventStore((state) => state.saveSessionRules);
-  const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
   const saveSessionViolations = useEventStore((state) => state.saveSessionViolations);
+  const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
+  
+  // 🆕 UI Settings methods
+  const saveSessionUISettings = useEventStore((state) => state.saveSessionUISettings);
+  const loadSessionUISettings = useEventStore((state) => state.loadSessionUISettings);
+  
+  // 🆕 Lock methods
+  const toggleSessionLockStore = useEventStore((state) => state.toggleSessionLock);
+  const isSessionLockedStore = useEventStore((state) => state.isSessionLocked);
   
   // Tracking functions - now from eventStore
   const isSessionTracked = useEventStore((state) => state.isSessionTracked);
@@ -61,6 +77,9 @@ export const useSessionLoader = (sessionId: string | null) => {
 
   // Guest Store - now using setGuests for bulk sync
   const setGuests = useGuestStore((state) => state.setGuests);
+  
+  // 🆕 Color Mode Store - for colorblind mode sync
+  const setColorMode = useColorModeStore((state) => state.setColorMode);
 
   // Save current session before switching
   const saveCurrentSession = useCallback(() => {
@@ -70,7 +89,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const sessionData = getSessionById(currentSessionId);
     if (!sessionData) return;
 
-    const { tables, chunks, selectedMealPlanIndex, violations, proximityRules } = useSeatStore.getState();
+    const { tables, chunks, selectedMealPlanIndex, violations } = useSeatStore.getState();
 
     // Collect all assigned guest IDs from seats
     const activeGuestIds = new Set<string>();
@@ -82,14 +101,16 @@ export const useSessionLoader = (sessionId: string | null) => {
       });
     });
 
-    console.log(`Saving session: ${sessionData.session.name}`);
+    console.log(`[useSessionLoader] Saving session: ${sessionData.session.name}`);
+    console.log(`[useSessionLoader] Saving UI settings:`, uiSettings);
     
-    // Save seat plan to event store (including selectedMealPlanIndex)
+    // 🆕 Save seat plan to event store (including uiSettings)
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
+      uiSettings, // 🆕 Include UI settings in seat plan
     });
 
     // Save violations to session
@@ -107,20 +128,17 @@ export const useSessionLoader = (sessionId: string | null) => {
         reason: v.reason,
       }));
       saveSessionViolations(sessionData.eventId, sessionData.dayId, currentSessionId, storedViolations);
-      console.log(`Saved ${storedViolations.length} violations to session`);
+      console.log(`[useSessionLoader] Saved ${storedViolations.length} violations to session`);
     } else {
       // Clear violations if none exist
       saveSessionViolations(sessionData.eventId, sessionData.dayId, currentSessionId, []);
     }
 
-    // Note: Rules are saved in AutoFillModal when user confirms autofill
-    // We don't overwrite rules here to preserve intentionally configured rules
-
     // Check if this session is tracked (using eventStore as source of truth)
     const tracked = isSessionTracked(sessionData.eventId, currentSessionId);
     
     if (tracked) {
-      console.log(`Recording adjacency data for tracked session`);
+      console.log(`[useSessionLoader] Recording adjacency data for tracked session`);
       
       // Record adjacency data (this also updates planning order)
       recordSessionAdjacency(
@@ -132,7 +150,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       
       // Log the planning order for debugging
       const planningOrder = getSessionPlanningOrder(sessionData.eventId, currentSessionId);
-      console.log(`Session planning order: ${planningOrder}`);
+      console.log(`[useSessionLoader] Session planning order: ${planningOrder}`);
     }
   }, [
     getSessionById, 
@@ -141,23 +159,30 @@ export const useSessionLoader = (sessionId: string | null) => {
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
+    uiSettings, // 🆕 Include uiSettings in dependencies
   ]);
 
   // Load session data
   const loadSession = useCallback((newSessionId: string) => {
-    console.log(`Loading session: ${newSessionId}`);
+    console.log(`[useSessionLoader] Loading session: ${newSessionId}`);
 
     const sessionData = getSessionById(newSessionId);
     if (!sessionData) {
-      console.error('Session not found');
+      console.error('[useSessionLoader] Session not found');
       return;
     }
+
+    // 🆕 Store context for saving UI settings
+    sessionContextRef.current = {
+      eventId: sessionData.eventId,
+      dayId: sessionData.dayId,
+    };
 
     // Load seat plan
     const seatPlan = loadSessionSeatPlan(newSessionId);
     if (seatPlan && seatPlan.tables.length > 0) {
       // Existing session with data
-      console.log('Loading existing seat plan with', seatPlan.tables.length, 'tables');
+      console.log('[useSessionLoader] Loading existing seat plan with', seatPlan.tables.length, 'tables');
       setSeatStoreState({
         tables: seatPlan.tables,
         chunks: seatPlan.chunks,
@@ -165,15 +190,32 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedSeatId: null,
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
       });
+      
+      // 🆕 Load UI settings
+      const loadedUISettings = seatPlan.uiSettings ?? DEFAULT_SESSION_UI_SETTINGS;
+      console.log('[useSessionLoader] Loading UI settings:', loadedUISettings);
+      setUISettings(loadedUISettings);
+      
+      // 🆕 Apply colorblind mode to global store
+      setColorMode(loadedUISettings.isColorblindMode ? 'colorblind' : 'standard');
+      
+      // 🆕 Load lock state
+      const locked = seatPlan.isLocked ?? false;
+      setIsLocked(locked);
+      console.log('[useSessionLoader] Session lock state:', locked);
+      
     } else {
       // New session - initialize with proper chunk structure
-      console.log('Initializing new session with default chunk');
+      console.log('[useSessionLoader] Initializing new session with default chunk');
       resetTables();
+      
+      // 🆕 Reset UI settings to defaults for new session
+      setUISettings(DEFAULT_SESSION_UI_SETTINGS);
+      setIsLocked(false);
+      setColorMode('standard');
     }
 
     // CRITICAL FIX: Use the new setGuests function for bulk sync
-    // This ensures all guests from the session are properly synced to guestStore
-    // and preserves the deleted status for existing guests
     const sessionGuests = getSessionGuests(newSessionId);
     let allLoadedGuests: any[] = [];
     
@@ -181,7 +223,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       const { hostGuests, externalGuests } = sessionGuests;
       allLoadedGuests = [...hostGuests, ...externalGuests];
       
-      console.log('Syncing session guests to guestStore:', {
+      console.log('[useSessionLoader] Syncing session guests to guestStore:', {
         hostCount: hostGuests.length,
         externalCount: externalGuests.length,
       });
@@ -189,7 +231,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       // Use setGuests for atomic bulk sync (preserves deleted status)
       setGuests(hostGuests, externalGuests);
     } else {
-      console.log('No session guests found, clearing guestStore');
+      console.log('[useSessionLoader] No session guests found, clearing guestStore');
       setGuests([], []);
     }
 
@@ -202,7 +244,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     // Load session rules if they exist
     const savedRules = loadSessionRules(newSessionId);
     if (savedRules) {
-      console.log('Loading saved session rules');
+      console.log('[useSessionLoader] Loading saved session rules');
       
       // Set proximity rules in seatStore for violation detection
       if (savedRules.proximityRules) {
@@ -219,25 +261,22 @@ export const useSessionLoader = (sessionId: string | null) => {
     const storedViolations = loadSessionViolations(newSessionId);
     
     if (storedViolations && storedViolations.length > 0) {
-      // Use stored violations - this shows violations that existed when user left
-      console.log(`Loading ${storedViolations.length} stored violations`);
+      console.log(`[useSessionLoader] Loading ${storedViolations.length} stored violations`);
       useSeatStore.setState({ violations: storedViolations });
     } else if (savedRules?.proximityRules && seatPlan && seatPlan.tables.length > 0) {
-      // No stored violations but we have rules - detect violations
-      console.log('Detecting violations based on saved rules');
+      console.log('[useSessionLoader] Detecting violations based on saved rules');
       const detectedViolations = detectProximityViolations(
         seatPlan.tables,
         savedRules.proximityRules,
         guestLookup
       );
       useSeatStore.setState({ violations: detectedViolations });
-      console.log(`Detected ${detectedViolations.length} violations`);
+      console.log(`[useSessionLoader] Detected ${detectedViolations.length} violations`);
     } else {
-      // No rules or no tables - clear violations
       useSeatStore.setState({ violations: [] });
     }
     
-    console.log('Session loaded with rules and violations');
+    console.log('[useSessionLoader] Session loaded with rules and violations');
 
     setActiveSession(newSessionId);
     lastSessionIdRef.current = newSessionId;
@@ -251,13 +290,51 @@ export const useSessionLoader = (sessionId: string | null) => {
     setSeatStoreState, 
     setGuests, 
     setActiveSession, 
-    resetTables
+    resetTables,
+    setColorMode, // 🆕
   ]);
 
   /**
+   * 🆕 Handle UI settings changes from PlaygroundCanvas
+   * This is called when user changes connector gap, photo mode, etc.
+   */
+  const handleUISettingsChange = useCallback((newSettings: SessionUISettings) => {
+    console.log('[useSessionLoader] UI settings changed:', newSettings);
+    setUISettings(newSettings);
+    
+    // Apply colorblind mode immediately
+    setColorMode(newSettings.isColorblindMode ? 'colorblind' : 'standard');
+    
+    // Save immediately if we have session context
+    if (sessionId && sessionContextRef.current) {
+      saveSessionUISettings(
+        sessionContextRef.current.eventId,
+        sessionContextRef.current.dayId,
+        sessionId,
+        newSettings
+      );
+      console.log('[useSessionLoader] Saved UI settings to store');
+    }
+  }, [sessionId, saveSessionUISettings, setColorMode]);
+  
+  /**
+   * 🆕 Toggle session lock state
+   */
+  const handleToggleLock = useCallback(() => {
+    if (!sessionId || !sessionContextRef.current) return;
+    
+    toggleSessionLockStore(
+      sessionContextRef.current.eventId, 
+      sessionContextRef.current.dayId, 
+      sessionId
+    );
+    
+    setIsLocked(prev => !prev);
+    console.log('[useSessionLoader] Toggled lock state');
+  }, [sessionId, toggleSessionLockStore]);
+
+  /**
    * Force re-sync guests from eventStore to guestStore.
-   * This is useful when guests are added/modified in the master list
-   * and need to be reflected in the current session without full reload.
    */
   const resyncGuests = useCallback(() => {
     if (!sessionId) return false;
@@ -267,7 +344,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     
     const { hostGuests, externalGuests } = sessionGuests;
     
-    console.log('useSessionLoader.resyncGuests: Force syncing guests', {
+    console.log('[useSessionLoader] Force syncing guests', {
       hostCount: hostGuests.length,
       externalCount: externalGuests.length,
     });
@@ -288,7 +365,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   useEffect(() => {
     // CRITICAL: Don't do anything until mounted and stores are hydrated
     if (!isReady) {
-      console.log('Waiting for store hydration before loading session...');
+      console.log('[useSessionLoader] Waiting for store hydration before loading session...');
       return;
     }
 
@@ -327,5 +404,10 @@ export const useSessionLoader = (sessionId: string | null) => {
     saveCurrentSession,
     resyncGuests,
     isHydrated: isReady,
+    // 🆕 UI Settings and Lock
+    uiSettings,
+    isLocked,
+    handleUISettingsChange,
+    handleToggleLock,
   };
 };
