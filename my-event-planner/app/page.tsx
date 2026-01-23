@@ -1,196 +1,297 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useEventStore } from "@/store/eventStore";
-import {
-  Container, Typography, Button, Card, CardContent, CardActionArea,
-  CardActions, TextField, Dialog, DialogTitle, DialogContent, DialogActions,
-  CircularProgress, Box, Divider
-} from "@mui/material";
-
-import Grid from "@mui/material/Grid";
+import { useEffect, useState, useRef, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Container,
+  Typography,
+  Button,
+  CircularProgress,
+  Box,
+  Snackbar,
+  Alert
+} from "@mui/material";
+import Grid from "@mui/material/Grid";
 import AddIcon from "@mui/icons-material/Add";
-import DeleteIcon from "@mui/icons-material/Delete";
-import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import FileUploadIcon from "@mui/icons-material/FileUpload";
+
+import { useEventStore } from "@/store/eventStore";
+import { Event } from "@/types/Event";
+import { useSnackbar } from "@/hooks/useSnackbar";
+import {
+  parseEventJSON,
+  createRemappedEvent,
+  downloadEventAsJSON
+} from "@/utils/eventImportUtils";
+import { CreateEventDialog, CreateEventFormData } from "@/components/molecules/CreateEventDialog";
+import { EmptyEventsState } from "@/components/molecules/EmptyEventState";
+import { EventCard } from "@/components/organisms/EventCard";
+import { ImportEventDialog } from "@/components/molecules/ImportEventDialog";
+import { ExportEventDialog } from "@/components/molecules/ExportEventDialog";
+
 
 export default function HomePage() {
   const router = useRouter();
-  const { events, createEvent, deleteEvent, setActiveEvent, _hasHydrated } = useEventStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Store
+  const { 
+    events, 
+    createEvent, 
+    deleteEvent, 
+    setActiveEvent, 
+    _hasHydrated, 
+    exportEventJSON, 
+    importEventJSON 
+  } = useEventStore();
 
+  // Component state
   const [isMounted, setIsMounted] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    date: new Date().toISOString().split('T')[0]
-  });
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  
+  // Import state
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importedEventData, setImportedEventData] = useState<Event | null>(null);
+  const [importEventName, setImportEventName] = useState("");
+  const [importError, setImportError] = useState<string | null>(null);
+  
+  // Export state
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [eventToExport, setEventToExport] = useState<Event | null>(null);
+  
+  // Snackbar
+  const { snackbar, showSuccess, showError, closeSnackbar } = useSnackbar();
 
+  // Hydration
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
   const isReady = isMounted && _hasHydrated;
 
-  const handleCreate = () => {
+  // ==================== NAVIGATION ====================
+  const handleNavigate = (id: string) => {
+    setActiveEvent(id);
+    router.push(`/events/${id}`);
+  };
+
+  // ==================== CREATE EVENT ====================
+  const handleCreate = (formData: CreateEventFormData) => {
     createEvent(
       formData.name,
       formData.description,
       "Executive meeting",
       formData.date
     );
-    setOpen(false);
-    setFormData({
-      name: "",
-      description: "",
-      date: new Date().toISOString().split('T')[0]
-    });
+    setCreateDialogOpen(false);
+    showSuccess("Event created successfully!");
   };
 
-  const handleNavigate = (id: string) => {
-    setActiveEvent(id);
-    router.push(`/events/${id}`);
+  // ==================== IMPORT EVENT ====================
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
   };
 
-  return (
-    // Set background to a very light grey/white for the whole page
-    <Box sx={{ bgcolor: "#f8f9fa", minHeight: "100vh", py: 6 }}>
-      <Container maxWidth="lg">
-        {!isReady ? (
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.json')) {
+      setImportError("Please select a JSON file.");
+      setImportDialogOpen(true);
+      resetFileInput();
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      const result = parseEventJSON(content);
+
+      if (result.success && result.event) {
+        setImportedEventData(result.event);
+        setImportEventName(result.event.name + " (Imported)");
+        setImportError(null);
+      } else {
+        setImportError(result.error || "Unknown error occurred.");
+      }
+      setImportDialogOpen(true);
+    };
+
+    reader.onerror = () => {
+      setImportError("Failed to read file.");
+      setImportDialogOpen(true);
+    };
+
+    reader.readAsText(file);
+    resetFileInput();
+  };
+
+  const resetFileInput = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleImportConfirm = () => {
+    if (!importedEventData || !importEventName.trim()) return;
+
+    const remappedEvent = createRemappedEvent(importedEventData, importEventName);
+    const success = importEventJSON(JSON.stringify(remappedEvent));
+
+    if (success) {
+      showSuccess(`Event "${importEventName}" imported successfully!`);
+      handleImportCancel();
+    } else {
+      setImportError("Failed to import event. Please try again.");
+    }
+  };
+
+  const handleImportCancel = () => {
+    setImportDialogOpen(false);
+    setImportedEventData(null);
+    setImportEventName("");
+    setImportError(null);
+  };
+
+  // ==================== EXPORT EVENT ====================
+  const handleExportClick = (event: Event) => {
+    setEventToExport(event);
+    setExportDialogOpen(true);
+  };
+
+  const handleExportConfirm = () => {
+    if (!eventToExport) return;
+
+    const jsonData = exportEventJSON(eventToExport.id);
+    if (!jsonData) {
+      showError("Failed to export event.");
+      handleExportCancel();
+      return;
+    }
+
+    downloadEventAsJSON(jsonData, eventToExport.name);
+    showSuccess(`Event "${eventToExport.name}" exported successfully!`);
+    handleExportCancel();
+  };
+
+  const handleExportCancel = () => {
+    setExportDialogOpen(false);
+    setEventToExport(null);
+  };
+
+  // ==================== RENDER ====================
+  if (!isReady) {
+    return (
+      <Box sx={{ bgcolor: "#f8f9fa", minHeight: "100vh", py: 6 }}>
+        <Container maxWidth="lg">
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: 2 }}>
             <CircularProgress size={48} />
             <Typography variant="body1" color="text.secondary">Loading events...</Typography>
           </Box>
+        </Container>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ bgcolor: "#f8f9fa", minHeight: "100vh", py: 6 }}>
+      <Container maxWidth="lg">
+        {/* Header */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5, flexWrap: 'wrap', gap: 2 }}>
+          <Box>
+            <Typography variant="h4" fontWeight="800" color="text.primary" gutterBottom>
+              C-SIT
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Manage and track your upcoming events.
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            <Button
+              variant="outlined"
+              startIcon={<FileUploadIcon />}
+              size="large"
+              onClick={handleImportClick}
+              sx={{ borderRadius: 2, textTransform: 'none', px: 3 }}
+            >
+              Import Event
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              size="large"
+              onClick={() => setCreateDialogOpen(true)}
+              sx={{ borderRadius: 2, textTransform: 'none', px: 4, boxShadow: 2 }}
+            >
+              New Event
+            </Button>
+          </Box>
+        </Box>
+
+        {/* Events Grid */}
+        {events.length > 0 ? (
+          <Grid container spacing={3}>
+            {events.map((event) => (
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={event.id}>
+                <EventCard
+                  event={event}
+                  onNavigate={handleNavigate}
+                  onExport={handleExportClick}
+                  onDelete={deleteEvent}
+                />
+              </Grid>
+            ))}
+          </Grid>
         ) : (
-          <>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 5 }}>
-              <Box>
-                <Typography variant="h4" fontWeight="800" color="text.primary" gutterBottom>
-                  C-SIT
-                </Typography>
-                <Typography variant="body1" color="text.secondary">
-                  Manage and track your upcoming events.
-                </Typography>
-              </Box>
-              <Button
-                variant="contained"
-                startIcon={<AddIcon />}
-                size="large"
-                onClick={() => setOpen(true)}
-                sx={{ borderRadius: 2, textTransform: 'none', px: 4, boxShadow: 2 }}
-              >
-                New Event
-              </Button>
-            </Box>
-
-            <Grid container spacing={3}>
-              {events.map((event) => (
-                <Grid size={{ xs: 12, sm: 6, md: 4 }} key={event.id}>
-                  <Card 
-                    elevation={0} 
-                    sx={{ 
-                      height: "100%", 
-                      display: 'flex', 
-                      flexDirection: 'column',
-                      borderRadius: 3,
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      transition: '0.3s',
-                      '&:hover': { boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }
-                    }}
-                  >
-                    <CardActionArea onClick={() => handleNavigate(event.id)} sx={{ flexGrow: 1, p: 1 }}>
-                      <CardContent>
-                        <Typography variant="h6" fontWeight="bold" color="text.primary" gutterBottom>
-                          {event.name}
-                        </Typography>
-                        
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, color: 'text.secondary' }}>
-                          <CalendarTodayIcon sx={{ fontSize: 16 }} />
-                          <Typography variant="caption" fontWeight="500">
-                            {(event.startDate || event.createdAt).split('T')[0]}
-                          </Typography>
-                        </Box>
-
-                        <Divider sx={{ mb: 2 }} />
-
-                        {/* Neat & Professional Description handling */}
-                        <Typography 
-                          variant="body2" 
-                          color="text.secondary" 
-                          sx={{ 
-                            lineHeight: 1.6,
-                            whiteSpace: 'pre-wrap', // Preserves spacing but wraps naturally
-                            overflowWrap: 'break-word' 
-                          }}
-                        >
-                          {event.description || "No description provided."}
-                        </Typography>
-
-                        {event.trackingEnabled && (
-                          <Box sx={{ mt: 2, p: 1, bgcolor: 'aliceblue', borderRadius: 1 }}>
-                            <Typography variant="caption" color="primary" fontWeight="600">
-                              📊 Tracking {event.trackedGuestIds?.length || 0} guests
-                            </Typography>
-                          </Box>
-                        )}
-                      </CardContent>
-                    </CardActionArea>
-                    <CardActions sx={{ justifyContent: "flex-end", p: 2, pt: 0 }}>
-                      <Button
-                        size="small"
-                        color="error"
-                        startIcon={<DeleteIcon />}
-                        onClick={() => deleteEvent(event.id)}
-                        sx={{ textTransform: 'none' }}
-                      >
-                        Delete
-                      </Button>
-                    </CardActions>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-
-            {events.length === 0 && (
-              <Box sx={{ textAlign: 'center', py: 10, bgcolor: 'white', borderRadius: 4, border: '1px dashed grey' }}>
-                <Typography variant="h5" color="text.secondary" gutterBottom>No events found</Typography>
-                <Button variant="outlined" startIcon={<AddIcon />} sx={{ mt: 2 }} onClick={() => setOpen(true)}>
-                  Create your first event
-                </Button>
-              </Box>
-            )}
-
-            {/* Create Event Dialog */}
-            <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm" PaperProps={{ sx: { borderRadius: 3 } }}>
-              <DialogTitle sx={{ fontWeight: 'bold' }}>Create New Event</DialogTitle>
-              <DialogContent>
-                <TextField
-                  autoFocus margin="dense" label="Event Name" fullWidth variant="outlined"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  sx={{ mt: 1 }}
-                />
-                <TextField
-                  margin="dense" label="Start Date" type="date" fullWidth
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                />
-                <TextField
-                  margin="dense" label="Description" fullWidth multiline rows={4}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Describe your event details..."
-                />
-              </DialogContent>
-              <DialogActions sx={{ p: 3 }}>
-                <Button onClick={() => setOpen(false)} color="inherit">Cancel</Button>
-                <Button onClick={handleCreate} variant="contained" sx={{ px: 4 }}>Create Event</Button>
-              </DialogActions>
-            </Dialog>
-          </>
+          <EmptyEventsState
+            onImport={handleImportClick}
+            onCreate={() => setCreateDialogOpen(true)}
+          />
         )}
+
+        {/* Dialogs */}
+        <CreateEventDialog
+          open={createDialogOpen}
+          onClose={() => setCreateDialogOpen(false)}
+          onCreate={handleCreate}
+        />
+
+        <ImportEventDialog
+          open={importDialogOpen}
+          importedEvent={importedEventData}
+          importName={importEventName}
+          error={importError}
+          onNameChange={setImportEventName}
+          onConfirm={handleImportConfirm}
+          onCancel={handleImportCancel}
+        />
+
+        <ExportEventDialog
+          open={exportDialogOpen}
+          event={eventToExport}
+          onConfirm={handleExportConfirm}
+          onCancel={handleExportCancel}
+        />
+
+        {/* Snackbar */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={closeSnackbar}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert onClose={closeSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Container>
     </Box>
   );
