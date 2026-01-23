@@ -1,6 +1,6 @@
 // components/molecules/AddTableModal.tsx
 // V2 Template System - Opens TemplateCustomizationModal when a template is selected
-// Features: Template selection, custom table creation
+// Features: Template selection, custom table creation, template import/export
 // FIXED: Passes currentOrdering to preserve user's selections across tab switches
 
 'use client';
@@ -29,6 +29,8 @@ import {
   Tooltip,
   ToggleButtonGroup,
   ToggleButton,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import {
   FilterList,
@@ -39,6 +41,9 @@ import {
   Check,
   Circle,
   Rectangle,
+  FileDownload,
+  FileUpload,
+  Download,
 } from '@mui/icons-material';
 
 // V2 Types
@@ -67,6 +72,14 @@ import TablePreview from '../atoms/TablePreview';
 import ScrollablePreviewContainer from '../atoms/ScrollablePreviewContainer';
 import SeatOrderingPanel from './SeatOrderingPanel';
 import SeatModePanel from './SeatModePanel';
+
+// Import/Export helpers
+import {
+  exportSingleTemplate,
+  exportMultipleTemplatesAsZip,
+  importTemplatesFromFiles,
+  triggerFileInput,
+} from '@/utils/templateImportExportHelper';
 
 // ============================================================================
 // TYPES
@@ -108,6 +121,7 @@ interface TemplateCardProps {
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onExport: () => void;
 }
 
 function TemplateCard({
@@ -116,6 +130,7 @@ function TemplateCard({
   onEdit,
   onDuplicate,
   onDelete,
+  onExport,
 }: TemplateCardProps) {
   const seatCount = getTotalSeatCountV2(template.config);
   const isCircle = isCircleConfigV2(template.config);
@@ -361,6 +376,11 @@ function TemplateCard({
               <ContentCopy fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Tooltip title="Export Template">
+            <IconButton size="small" onClick={onExport} color="primary">
+              <FileDownload fontSize="small" />
+            </IconButton>
+          </Tooltip>
           {!template.isBuiltIn && (
             <Tooltip title="Delete Template">
               <IconButton size="small" onClick={onDelete} color="error">
@@ -410,6 +430,28 @@ export default function AddTableModal({
   const [selectedTemplateForCustomization, setSelectedTemplateForCustomization] = useState<TableTemplateV2 | null>(null);
 
   // ============================================================================
+  // SNACKBAR STATE FOR IMPORT/EXPORT FEEDBACK
+  // ============================================================================
+
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'error' | 'info' | 'warning';
+  }>({
+    open: false,
+    message: '',
+    severity: 'info',
+  });
+
+  const showSnackbar = useCallback((message: string, severity: 'success' | 'error' | 'info' | 'warning') => {
+    setSnackbar({ open: true, message, severity });
+  }, []);
+
+  const closeSnackbar = useCallback(() => {
+    setSnackbar((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  // ============================================================================
   // CUSTOM TABLE STATE
   // ============================================================================
 
@@ -448,6 +490,11 @@ export default function AddTableModal({
     [customSeatCount]
   );
 
+  // Get existing template names for import clash resolution
+  const existingTemplateNames = useMemo(() => {
+    return new Set(templates.map((t) => t.name));
+  }, [templates]);
+
   // ============================================================================
   // EFFECTS
   // ============================================================================
@@ -463,10 +510,64 @@ export default function AddTableModal({
   }, [open, sessionType]);
 
   // ============================================================================
-  // HANDLERS
+  // TEMPLATE IMPORT/EXPORT HANDLERS
   // ============================================================================
 
-  // Template handlers
+  const handleExportTemplate = useCallback((template: TableTemplateV2) => {
+    try {
+      exportSingleTemplate(template);
+      showSnackbar(`Exported "${template.name}" successfully`, 'success');
+    } catch (error) {
+      showSnackbar('Failed to export template', 'error');
+    }
+  }, [showSnackbar]);
+
+  const handleExportAllTemplates = useCallback(async () => {
+    try {
+      if (filteredTemplates.length === 0) {
+        showSnackbar('No templates to export', 'warning');
+        return;
+      }
+      const filename = filterSessionType
+        ? `templates-${filterSessionType.toLowerCase().replace(/\s+/g, '-')}`
+        : 'templates-all';
+      await exportMultipleTemplatesAsZip(filteredTemplates, filename);
+      showSnackbar(`Exported ${filteredTemplates.length} template(s) as zip successfully`, 'success');
+    } catch (error) {
+      showSnackbar('Failed to export templates', 'error');
+    }
+  }, [filteredTemplates, filterSessionType, showSnackbar]);
+
+  const handleImportTemplates = useCallback(() => {
+    triggerFileInput(async (files) => {
+      try {
+        const result = await importTemplatesFromFiles(files, existingTemplateNames);
+
+        if (result.success && result.templates.length > 0) {
+          // Create each imported template
+          for (const templateInput of result.templates) {
+            createTemplate(templateInput);
+          }
+          showSnackbar(
+            `Imported ${result.importedCount} template(s) successfully${result.errors.length > 0 ? ` (${result.errors.length} warning(s))` : ''}`,
+            result.errors.length > 0 ? 'warning' : 'success'
+          );
+        } else {
+          showSnackbar(
+            result.errors.length > 0 ? result.errors[0] : 'No valid templates found',
+            'error'
+          );
+        }
+      } catch (error) {
+        showSnackbar('Failed to import templates', 'error');
+      }
+    }, true);
+  }, [existingTemplateNames, createTemplate, showSnackbar]);
+
+  // ============================================================================
+  // TEMPLATE HANDLERS
+  // ============================================================================
+
   const handleTemplateSelect = (template: TableTemplateV2) => {
     setSelectedTemplateForCustomization(template);
     setCustomizationModalOpen(true);
@@ -579,33 +680,61 @@ export default function AddTableModal({
         {/* ================================================================== */}
         {topTab === 'templates' && (
           <DialogContent sx={{ minHeight: 500 }}>
-            {/* Session Type Filter */}
+            {/* Session Type Filter + Import/Export Actions */}
             <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: '#f5f5f5' }}>
-              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-                <FilterList color="action" />
-                <Typography variant="subtitle2">Filter:</Typography>
-                <Stack direction="row" spacing={1} flexWrap="wrap">
-                  <Chip
-                    label="All"
-                    onClick={() => setFilterSessionType(null)}
-                    color={filterSessionType === null ? 'primary' : 'default'}
-                    variant={filterSessionType === null ? 'filled' : 'outlined'}
-                  />
-                  {(['Executive meeting', 'Bilateral Meeting', 'Meal', 'Phototaking'] as EventType[]).map(
-                    (type) => (
-                      <Chip
-                        key={type}
-                        label={type}
-                        onClick={() => setFilterSessionType(type)}
-                        sx={{
-                          bgcolor: filterSessionType === type ? SESSION_TYPE_COLORS_V2[type] : 'transparent',
-                          color: filterSessionType === type ? 'white' : 'text.primary',
-                          borderColor: SESSION_TYPE_COLORS_V2[type],
-                        }}
-                        variant={filterSessionType === type ? 'filled' : 'outlined'}
-                      />
-                    )
-                  )}
+              <Stack spacing={2}>
+                {/* Filter Row */}
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                  <FilterList color="action" />
+                  <Typography variant="subtitle2">Filter:</Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap">
+                    <Chip
+                      label="All"
+                      onClick={() => setFilterSessionType(null)}
+                      color={filterSessionType === null ? 'primary' : 'default'}
+                      variant={filterSessionType === null ? 'filled' : 'outlined'}
+                    />
+                    {(['Executive meeting', 'Bilateral Meeting', 'Meal', 'Phototaking'] as EventType[]).map(
+                      (type) => (
+                        <Chip
+                          key={type}
+                          label={type}
+                          onClick={() => setFilterSessionType(type)}
+                          sx={{
+                            bgcolor: filterSessionType === type ? SESSION_TYPE_COLORS_V2[type] : 'transparent',
+                            color: filterSessionType === type ? 'white' : 'text.primary',
+                            borderColor: SESSION_TYPE_COLORS_V2[type],
+                          }}
+                          variant={filterSessionType === type ? 'filled' : 'outlined'}
+                        />
+                      )
+                    )}
+                  </Stack>
+                </Stack>
+
+                {/* Import/Export Actions Row */}
+                <Divider />
+                <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Import/Export:
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<FileUpload />}
+                    onClick={handleImportTemplates}
+                  >
+                    Import Templates
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<Download />}
+                    onClick={handleExportAllTemplates}
+                    disabled={filteredTemplates.length === 0}
+                  >
+                    Export as Zip ({filteredTemplates.length})
+                  </Button>
                 </Stack>
               </Stack>
             </Paper>
@@ -655,13 +784,14 @@ export default function AddTableModal({
                   onEdit={() => handleTemplateEdit(template)}
                   onDuplicate={() => handleTemplateDuplicate(template)}
                   onDelete={() => handleTemplateDelete(template)}
+                  onExport={() => handleExportTemplate(template)}
                 />
               ))}
 
               {filteredTemplates.length === 0 && (
                 <Paper sx={{ p: 3, gridColumn: 'span 2', textAlign: 'center' }}>
                   <Typography color="text.secondary">
-                    No templates found. Create one to get started!
+                    No templates found. Create one or import from JSON/ZIP files!
                   </Typography>
                 </Paper>
               )}
@@ -888,6 +1018,18 @@ export default function AddTableModal({
         onConfirm={handleCustomizationConfirm}
         template={selectedTemplateForCustomization}
       />
+
+      {/* Snackbar for import/export feedback */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={closeSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={closeSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </>
   );
 }
