@@ -1,6 +1,10 @@
+// types/Event.ts
+// Updated with Drawing Layer Support
+
 import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
+import { DrawingLayerState, DEFAULT_DRAWING_LAYER_STATE } from "@/types/DrawingShape";
 
 // Shared list of types
 export type EventType = 
@@ -9,7 +13,7 @@ export type EventType =
   | "Meal" 
   | "Phototaking";
 
-/* -------------------- 🎨 SESSION UI SETTINGS -------------------- */
+/* -------------------- SESSION UI SETTINGS -------------------- */
 
 /**
  * UI Settings that are persisted per session
@@ -45,7 +49,7 @@ export const DEFAULT_SESSION_UI_SETTINGS: SessionUISettings = {
   panY: 0,
 };
 
-/* -------------------- 📝 ADJACENCY TRACKING TYPES -------------------- */
+/* -------------------- ADJACENCY TRACKING TYPES -------------------- */
 
 /**
  * Type of adjacency relationship for Boss Tracking
@@ -98,7 +102,7 @@ export const DEFAULT_EVENT_TRACKING = {
   } as PlanningOrderTracker,
 };
 
-/* -------------------- 🎯 AUTOFILL RULES TYPES -------------------- */
+/* -------------------- AUTOFILL RULES TYPES -------------------- */
 
 /**
  * Sort field options for guest ordering
@@ -179,21 +183,19 @@ export interface GuestListSelection {
   includeExternal: boolean;
 }
 
-/* -------------------- 🎲 RANDOMIZE ORDER TYPES -------------------- */
+/* -------------------- RANDOMIZE ORDER TYPES -------------------- */
 
 /**
  * Randomize partition for shuffling guests within rank ranges
- * Uses formula: minRank <= rank < maxRank
  */
 export interface RandomizePartition {
   id: string;
-  minRank: number;  // Inclusive lower bound (x <= rank)
-  maxRank: number;  // Exclusive upper bound (rank < y)
+  minRank: number;
+  maxRank: number;
 }
 
 /**
  * Randomize order configuration
- * Only applicable when sortRules has exactly 1 rule that is ranking-based
  */
 export interface RandomizeOrderConfig {
   enabled: boolean;
@@ -209,26 +211,14 @@ export const DEFAULT_RANDOMIZE_ORDER: RandomizeOrderConfig = {
 };
 
 /**
- * Complete session rules configuration - stored with each session
- * This allows rules to persist when navigating between sessions
+ * Complete session rules configuration
  */
 export interface SessionRulesConfig {
-  /** Which guest lists to include in autofill */
   guestListSelection: GuestListSelection;
-  
-  /** Sorting rules for guest ordering */
   sortRules: SortRule[];
-  
-  /** Table assignment rules (ratio, spacing) */
   tableRules: TableRules;
-  
-  /** Proximity rules (sit together, sit away) */
   proximityRules: ProximityRules;
-  
-  /** Randomize order configuration for shuffling within rank partitions */
   randomizeOrder?: RandomizeOrderConfig;
-  
-  /** Timestamp when rules were last modified */
   lastModified?: string;
 }
 
@@ -281,79 +271,85 @@ export interface StoredProximityViolation {
   reason?: string;
 }
 
-/* -------------------- 📅 SESSION & DAY TYPES -------------------- */
+/* -------------------- SESSION & DAY TYPES -------------------- */
 
 export interface Session {
   id: string;
   name: string;
   description: string;
-  sessionType: EventType; // Specific type for the session
-  startTime: string;      // ISO string
-  endTime: string;        // ISO string
+  sessionType: EventType;
+  startTime: string;
+  endTime: string;
   
-  // 🎯 Session-level guest inheritance
-  inheritedHostGuestIds: string[];     // IDs from masterHostGuests
-  inheritedExternalGuestIds: string[]; // IDs from masterExternalGuests
+  // Session-level guest inheritance
+  inheritedHostGuestIds: string[];
+  inheritedExternalGuestIds: string[];
   
   // Statistics Tracking
   lastModified?: string;    
   lastStatsCheck?: string;  
 
-  // 🎯 Boss Adjacency Tracking Metadata
-  isTrackedForAdjacency?: boolean;  // Whether this session is tracked
-  planningOrder?: number;            // Order in which this was planned (1, 2, 3...)
-  needsAdjacencyReview?: boolean;   // Flag if upstream session changed
+  // Boss Adjacency Tracking Metadata
+  isTrackedForAdjacency?: boolean;
+  planningOrder?: number;
+  needsAdjacencyReview?: boolean;
 
-  // 🔒 Session Lock State
-  isLocked?: boolean;       // Whether the session is locked for editing
-  lockedAt?: string;        // ISO timestamp when locked
-  lockedBy?: string;        // User who locked (for future multi-user support)
+  // Session Lock State
+  isLocked?: boolean;
+  lockedAt?: string;
+  lockedBy?: string;
 
   seatPlan: {
     tables: Table[];
     chunks: Record<string, Chunk>;
     activeGuestIds: string[];
-    selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
-    uiSettings?: SessionUISettings;        // 🎨 UI display settings
+    selectedMealPlanIndex?: number | null;
+    uiSettings?: SessionUISettings;
+    isLocked?: boolean;
+    /** NEW: Drawing layer data */
+    drawingLayer?: DrawingLayerState;
   };
   
-  // ⚙️ Session Rules Configuration - persists autofill settings
+  // Session Rules Configuration
   rulesConfig?: SessionRulesConfig;
   
-  // ⚙️ Stored violations - persists violations for display on session load
+  // Stored violations
   storedViolations?: StoredProximityViolation[];
+  
+  /** NEW: Separate drawing layer storage for easy access */
+  drawingLayerState?: DrawingLayerState;
 }
 
 export interface EventDay {
   id: string;
-  date: string; // ISO string (The column date)
+  date: string;
   sessions: Session[];
 }
 
-/* -------------------- 🏛️ EVENT TYPE -------------------- */
+/* -------------------- EVENT TYPE -------------------- */
 
 export interface Event {
   id: string;
   name: string;
   description: string;
-  eventType: EventType; // The overall event category
-  startDate: string;    // The starting date of the event
+  eventType: EventType;
+  startDate: string;
   createdAt: string;
   
   masterHostGuests: Guest[];
   masterExternalGuests: Guest[];
   
-  // 🎯 Boss Adjacency Tracking Configuration (CONSOLIDATED)
-  trackedGuestIds?: string[];                    // IDs of guests being tracked
-  trackingEnabled?: boolean;                     // Whether tracking is enabled for this event
-  adjacencyRecords?: SessionAdjacencyRecord[];   // All historical adjacency data
-  planningOrderTracker?: PlanningOrderTracker;   // Session planning order management
+  // Boss Adjacency Tracking Configuration
+  trackedGuestIds?: string[];
+  trackingEnabled?: boolean;
+  adjacencyRecords?: SessionAdjacencyRecord[];
+  planningOrderTracker?: PlanningOrderTracker;
   
   days: EventDay[];
 }
 
 /**
- * Helper to ensure an event has all tracking fields (for migration)
+ * Helper to ensure an event has all tracking fields
  */
 export function ensureTrackingFields(event: Event): Event {
   return {
@@ -366,18 +362,19 @@ export function ensureTrackingFields(event: Event): Event {
 }
 
 /**
- * Helper to ensure a session has rules config (for migration)
+ * Helper to ensure a session has rules config
  */
 export function ensureSessionRulesConfig(session: Session): Session {
   return {
     ...session,
     rulesConfig: session.rulesConfig ?? { ...DEFAULT_SESSION_RULES },
     storedViolations: session.storedViolations ?? [],
+    drawingLayerState: session.drawingLayerState ?? DEFAULT_DRAWING_LAYER_STATE,
   };
 }
 
 /**
- * Helper to migrate all sessions in an event to have rules config
+ * Helper to migrate all sessions in an event
  */
 export function migrateEventSessionRules(event: Event): Event {
   return {
@@ -386,5 +383,19 @@ export function migrateEventSessionRules(event: Event): Event {
       ...day,
       sessions: day.sessions.map(session => ensureSessionRulesConfig(session)),
     })),
+  };
+}
+
+/**
+ * Helper to ensure a session has drawing layer data
+ */
+export function ensureDrawingLayer(session: Session): Session {
+  return {
+    ...session,
+    seatPlan: {
+      ...session.seatPlan,
+      drawingLayer: session.seatPlan.drawingLayer ?? DEFAULT_DRAWING_LAYER_STATE,
+    },
+    drawingLayerState: session.drawingLayerState ?? DEFAULT_DRAWING_LAYER_STATE,
   };
 }

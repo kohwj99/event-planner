@@ -1,3 +1,7 @@
+// components/organisms/PlaygroundTopControlPanel.tsx
+// Top control panel for the playground canvas
+// UPDATED: Added Plan/Draw mode toggle for drawing layer feature
+
 'use client';
 
 import {
@@ -11,6 +15,8 @@ import {
   Alert,
   Divider,
   Tooltip,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import {
   ArrowBack,
@@ -22,22 +28,40 @@ import {
   Lock,
   LockOpen,
   Info,
+  TableChart,
+  Draw,
 } from '@mui/icons-material';
 import AutoFillButton from '@/components/atoms/AutoFillButton';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export type CanvasMode = 'plan' | 'draw';
+
+// ============================================================================
+// COMPONENT PROPS
+// ============================================================================
 
 interface PlaygroundTopControlPanelProps {
   sessionName: string;
   sessionType: string;
   formattedDate: string;
   hasNoGuests: boolean;
-  isLocked?: boolean; // 🆕
+  isLocked?: boolean;
+  canvasMode?: CanvasMode;
   onBack: () => void;
   onSave: () => void;
   onReset: () => void;
   onManageGuests: () => void;
   onExport: () => void;
-  onToggleLock?: () => void; // 🆕
+  onToggleLock?: () => void;
+  onCanvasModeChange?: (mode: CanvasMode) => void;
 }
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 
 export default function PlaygroundTopControlPanel({
   sessionName,
@@ -45,13 +69,25 @@ export default function PlaygroundTopControlPanel({
   formattedDate,
   hasNoGuests,
   isLocked = false,
+  canvasMode = 'plan',
   onBack,
   onSave,
   onReset,
   onManageGuests,
   onExport,
   onToggleLock,
+  onCanvasModeChange,
 }: PlaygroundTopControlPanelProps) {
+  
+  const handleModeChange = (
+    _event: React.MouseEvent<HTMLElement>,
+    newMode: CanvasMode | null
+  ) => {
+    if (newMode && onCanvasModeChange) {
+      onCanvasModeChange(newMode);
+    }
+  };
+  
   return (
     <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -66,13 +102,23 @@ export default function PlaygroundTopControlPanel({
               <Typography variant="h5" fontWeight="bold">
                 {sessionName}
               </Typography>
-              {/* 🆕 Lock indicator chip */}
+              {/* Lock indicator chip */}
               {isLocked && (
                 <Chip
                   icon={<Lock sx={{ fontSize: 16 }} />}
                   label="Locked"
                   size="small"
                   color="warning"
+                  variant="filled"
+                />
+              )}
+              {/* Drawing mode indicator */}
+              {canvasMode === 'draw' && (
+                <Chip
+                  icon={<Draw sx={{ fontSize: 16 }} />}
+                  label="Drawing Mode"
+                  size="small"
+                  color="secondary"
                   variant="filled"
                 />
               )}
@@ -91,11 +137,33 @@ export default function PlaygroundTopControlPanel({
           </Box>
         </Stack>
 
+        {/* CENTER - Mode Toggle */}
+        {onCanvasModeChange && (
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <ToggleButtonGroup
+              value={canvasMode}
+              exclusive
+              onChange={handleModeChange}
+              size="small"
+              color="primary"
+            >
+              <ToggleButton value="plan" sx={{ px: 2 }}>
+                <TableChart sx={{ mr: 1, fontSize: 20 }} />
+                Plan
+              </ToggleButton>
+              <ToggleButton value="draw" sx={{ px: 2 }}>
+                <Draw sx={{ mr: 1, fontSize: 20 }} />
+                Draw
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+        )}
+
         {/* RIGHT */}
         <Stack direction="row" spacing={2} alignItems="center">
           <Divider orientation="vertical" flexItem />
 
-          {/* 🆕 Lock/Unlock Button */}
+          {/* Lock/Unlock Button */}
           {onToggleLock && (
             <Tooltip 
               title={isLocked ? 'Unlock session to enable editing' : 'Lock session to prevent changes'}
@@ -113,23 +181,43 @@ export default function PlaygroundTopControlPanel({
 
           <Divider orientation="vertical" flexItem />
 
-          {/* 🆕 Disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : ''}>
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<Groups />}
-                onClick={onManageGuests}
-                disabled={isLocked}
-              >
-                Manage Guests
-              </Button>
-            </span>
-          </Tooltip>
+          {/* Plan mode controls - hidden in draw mode */}
+          {canvasMode === 'plan' && (
+            <>
+              <Tooltip title={isLocked ? 'Session is locked' : ''}>
+                <span>
+                  <Button
+                    variant="contained"
+                    startIcon={<Groups />}
+                    onClick={onManageGuests}
+                    disabled={isLocked}
+                  >
+                    Manage Guests
+                  </Button>
+                </span>
+              </Tooltip>
 
-          {/* 🆕 Pass disabled prop */}
-          <AutoFillButton disabled={isLocked} />
+              <AutoFillButton disabled={isLocked} />
 
+              <Tooltip title={isLocked ? 'Session is locked' : ''}>
+                <span>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    startIcon={<RestartAlt />}
+                    onClick={onReset}
+                    disabled={isLocked}
+                  >
+                    Reset
+                  </Button>
+                </span>
+              </Tooltip>
+
+              <Divider orientation="vertical" flexItem />
+            </>
+          )}
+
+          {/* Always visible buttons */}
           <Button
             variant="contained"
             color="secondary"
@@ -138,23 +226,6 @@ export default function PlaygroundTopControlPanel({
           >
             Export
           </Button>
-
-          {/* 🆕 Disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : ''}>
-            <span>
-              <Button
-                variant="contained"
-                color="error"
-                startIcon={<RestartAlt />}
-                onClick={onReset}
-                disabled={isLocked}
-              >
-                Reset
-              </Button>
-            </span>
-          </Tooltip>
-
-          <Divider orientation="vertical" flexItem />
 
           <Button
             variant="contained"
@@ -169,17 +240,24 @@ export default function PlaygroundTopControlPanel({
       </Stack>
 
       {/* Alerts */}
-      <Stack spacing={1} sx={{ mt: hasNoGuests || isLocked ? 2 : 0 }}>
-        {/* 🆕 Lock info alert */}
+      <Stack spacing={1} sx={{ mt: (hasNoGuests && canvasMode === 'plan') || isLocked || canvasMode === 'draw' ? 2 : 0 }}>
+        {/* Lock info alert */}
         {isLocked && (
           <Alert severity="info" icon={<Info />}>
             This session is locked. Click "Unlock" to enable editing.
           </Alert>
         )}
         
-        {hasNoGuests && !isLocked && (
+        {/* Draw mode info alert */}
+        {canvasMode === 'draw' && !isLocked && (
+          <Alert severity="info" icon={<Draw />}>
+            Drawing mode is active. Seat planning is disabled. Switch to "Plan" mode to manage seats.
+          </Alert>
+        )}
+        
+        {hasNoGuests && !isLocked && canvasMode === 'plan' && (
           <Alert severity="warning" icon={<Warning />}>
-            No attendees assigned. Click "Manage Guests" → "Manage Attendees" to select guests.
+            No attendees assigned. Click "Manage Guests" then "Manage Attendees" to select guests.
           </Alert>
         )}
       </Stack>

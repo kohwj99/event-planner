@@ -1,7 +1,10 @@
-// src/utils/exportToPDF.ts
+// utils/exportToPDF.ts
+// Updated with Drawing Layer Support
+
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import { useSeatStore } from "@/store/seatStore";
+import { useDrawingStore } from "@/store/drawingStore";
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 
 /**
@@ -9,6 +12,7 @@ import { CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
  * This ensures styles are preserved when the SVG is cloned.
  */
 function inlineComputedStyles(svgElement: SVGSVGElement): void {
+  // Include drawing layer elements in styling
   const elementsToStyle = svgElement.querySelectorAll('circle, rect, ellipse, line, path, text, polygon, polyline');
   
   elementsToStyle.forEach((el) => {
@@ -60,9 +64,120 @@ function inlineComputedStyles(svgElement: SVGSVGElement): void {
 }
 
 /**
+ * Render drawing shapes into an SVG element
+ * This ensures drawings are included in the export
+ */
+function renderDrawingShapesToSVG(svgElement: SVGSVGElement): void {
+  const drawingState = useDrawingStore.getState();
+  const shapes = drawingState.shapes;
+  
+  if (!shapes || shapes.length === 0) return;
+  
+  // Find or create the zoom layer
+  let zoomLayer = svgElement.querySelector('g.zoom-layer');
+  if (!zoomLayer) {
+    zoomLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    zoomLayer.setAttribute('class', 'zoom-layer');
+    svgElement.appendChild(zoomLayer);
+  }
+  
+  // Create drawing layer group
+  const drawingLayer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  drawingLayer.setAttribute('class', 'drawing-layer-export');
+  
+  // Sort shapes by z-index
+  const sortedShapes = [...shapes].sort((a, b) => a.zIndex - b.zIndex);
+  
+  sortedShapes.forEach((shape) => {
+    const shapeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    shapeGroup.setAttribute('transform', `translate(${shape.x}, ${shape.y})`);
+    shapeGroup.setAttribute('opacity', String(shape.opacity));
+    
+    // Create shape path based on type
+    let pathD = '';
+    const { type, width, height } = shape;
+    
+    switch (type) {
+      case 'rectangle':
+        pathD = `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
+        break;
+      case 'ellipse':
+        const rx = width / 2;
+        const ry = height / 2;
+        const kappa = 0.5522847498;
+        const ox = rx * kappa;
+        const oy = ry * kappa;
+        pathD = `
+          M ${rx} 0
+          C ${rx + ox} 0, ${width} ${ry - oy}, ${width} ${ry}
+          C ${width} ${ry + oy}, ${rx + ox} ${height}, ${rx} ${height}
+          C ${rx - ox} ${height}, 0 ${ry + oy}, 0 ${ry}
+          C 0 ${ry - oy}, ${rx - ox} 0, ${rx} 0
+          Z
+        `;
+        break;
+      case 'diamond':
+        pathD = `
+          M ${width / 2} 0
+          L ${width} ${height / 2}
+          L ${width / 2} ${height}
+          L 0 ${height / 2}
+          Z
+        `;
+        break;
+      case 'arrow':
+        const arrowHeadSize = 12;
+        const arrowY = height / 2 || 0;
+        pathD = `
+          M 0 ${arrowY}
+          L ${width - arrowHeadSize} ${arrowY}
+          M ${width - arrowHeadSize} ${arrowY - arrowHeadSize / 2}
+          L ${width} ${arrowY}
+          L ${width - arrowHeadSize} ${arrowY + arrowHeadSize / 2}
+        `;
+        break;
+      case 'line':
+        const lineY = height / 2 || 0;
+        pathD = `M 0 ${lineY} L ${width} ${lineY}`;
+        break;
+      default:
+        pathD = `M 0 0 L ${width} 0 L ${width} ${height} L 0 ${height} Z`;
+    }
+    
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathD);
+    path.setAttribute('fill', type === 'line' || type === 'arrow' ? 'none' : shape.fillColor);
+    path.setAttribute('stroke', shape.strokeColor);
+    path.setAttribute('stroke-width', String(shape.strokeWidth));
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    shapeGroup.appendChild(path);
+    
+    // Add text if present
+    if (shape.text && type !== 'line' && type !== 'arrow') {
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', String(width / 2));
+      text.setAttribute('y', String(height / 2));
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('dominant-baseline', 'middle');
+      text.setAttribute('fill', shape.textColor || '#000');
+      text.setAttribute('font-size', String(shape.fontSize || 14));
+      text.setAttribute('font-weight', shape.fontWeight || 'normal');
+      text.textContent = shape.text;
+      shapeGroup.appendChild(text);
+    }
+    
+    drawingLayer.appendChild(shapeGroup);
+  });
+  
+  zoomLayer.appendChild(drawingLayer);
+}
+
+/**
  * Export each chunk as one PDF page maintaining exact aspect ratio.
  * The chunk aspect ratio (CHUNK_WIDTH:CHUNK_HEIGHT = 2000:1200 = 5:3) is preserved.
  * Uses high resolution rasterization for quality output.
+ * Includes drawing layer shapes in the export.
  */
 export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") {
   const container = document.getElementById(elementId);
@@ -78,43 +193,37 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   }
 
   // Chunk aspect ratio
-  const CHUNK_ASPECT = CHUNK_WIDTH / CHUNK_HEIGHT; // 2000/1200 = 1.6667
+  const CHUNK_ASPECT = CHUNK_WIDTH / CHUNK_HEIGHT;
 
   // Use custom page size that matches chunk aspect ratio
-  // We'll use a page that's 10 inches wide to maintain good resolution
   const PAGE_WIDTH_IN = 10;
-  const PAGE_HEIGHT_IN = PAGE_WIDTH_IN / CHUNK_ASPECT; // ~6 inches
+  const PAGE_HEIGHT_IN = PAGE_WIDTH_IN / CHUNK_ASPECT;
 
   // DPI settings
   const exportDPI = 150;
-  const RASTER_SCALE = 3; // 3x for good quality without being too heavy
+  const RASTER_SCALE = 3;
   
   // Calculate page dimensions in pixels at export DPI
   const pagePxW = Math.round(PAGE_WIDTH_IN * exportDPI);
   const pagePxH = Math.round(PAGE_HEIGHT_IN * exportDPI);
 
-  // Create PDF with custom page size (dimensions in inches converted to points: 1 inch = 72 points)
+  // Create PDF with custom page size
   const pdfW_pt = PAGE_WIDTH_IN * 72;
   const pdfH_pt = PAGE_HEIGHT_IN * 72;
   
-  // const pdf = new jsPDF({ 
-  //   orientation: "landscape", 
-  //   unit: "pt", 
-  //   format: [pdfW_pt, pdfH_pt] // Custom format matching chunk aspect ratio
-  // });
-
   const pdf = new jsPDF({
-  orientation: "landscape",
-  unit: "pt",
-  format: [pdfW_pt, pdfH_pt],
-  compress: true,
-});
-  // px -> points conversion for given DPI
+    orientation: "landscape",
+    unit: "pt",
+    format: [pdfW_pt, pdfH_pt],
+    compress: true,
+  });
+
   const pxToPt = (px: number) => (px * 72) / exportDPI;
 
   const chunks = useSeatStore.getState().getAllChunksSorted();
+  
   if (!chunks || chunks.length === 0) {
-    // fallback: capture whole container
+    // Fallback: capture whole container
     const canvas = await html2canvas(container, { 
       backgroundColor: "#fff", 
       scale: RASTER_SCALE,
@@ -134,6 +243,9 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   // Helper: capture exactly one chunk area into a canvas
   async function captureChunkCanvas(row: number, col: number) {
     const clone = svg!.cloneNode(true) as SVGSVGElement;
+
+    // Render drawing shapes into the clone
+    renderDrawingShapesToSVG(clone);
 
     // Reset transform on zoom-layer to get world coordinates
     const zoomLayer = clone.querySelector("g.zoom-layer") as SVGGElement | null;
@@ -168,7 +280,7 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
     wrapper.appendChild(clone);
     document.body.appendChild(wrapper);
 
-    // IMPORTANT: Inline computed styles AFTER clone is in DOM so getComputedStyle works
+    // Inline computed styles AFTER clone is in DOM
     inlineComputedStyles(clone);
 
     // Rasterize at high scale for quality
@@ -214,22 +326,23 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const worldW = (maxCol - minCol + 1) * CHUNK_WIDTH;
   const worldH = (maxRow - minRow + 1) * CHUNK_HEIGHT;
 
-  // Calculate overview dimensions that fit within page while maintaining aspect ratio
+  // Calculate overview dimensions
   const worldAspect = worldW / worldH;
   let overviewPxW: number;
   let overviewPxH: number;
   
   if (worldAspect > CHUNK_ASPECT) {
-    // World is wider, fit by width
     overviewPxW = pagePxW;
     overviewPxH = Math.round(overviewPxW / worldAspect);
   } else {
-    // World is taller, fit by height
     overviewPxH = pagePxH;
     overviewPxW = Math.round(overviewPxH * worldAspect);
   }
 
   const overviewClone = svg.cloneNode(true) as SVGSVGElement;
+  
+  // Render drawing shapes into overview
+  renderDrawingShapesToSVG(overviewClone);
   
   const zoomLayer2 = overviewClone.querySelector("g.zoom-layer") as SVGGElement | null;
   if (zoomLayer2) zoomLayer2.setAttribute("transform", "");
@@ -253,7 +366,6 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   wrapperOv.appendChild(overviewClone);
   document.body.appendChild(wrapperOv);
 
-  // IMPORTANT: Inline computed styles AFTER clone is in DOM so getComputedStyle works
   inlineComputedStyles(overviewClone);
 
   const overviewCanvas = await html2canvas(wrapperOv, {

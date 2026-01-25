@@ -1,26 +1,30 @@
+// hooks/useSessionLoader.ts
+// Hook for loading and saving session data
+// UPDATED: Added drawing layer support
+//
+// This hook manages:
+// 1. Loading session seat plans when navigating to a session
+// 2. Saving seat plans when navigating away
+// 3. Recording adjacency data for tracked sessions
+// 4. Loading and saving session rules (proximity rules, sort order, table rules)
+// 5. Loading and saving violations
+// 6. CRITICAL: Syncing guestStore with eventStore session guests
+// 7. Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
+// 8. Session lock state management
+// 9. NEW: Drawing layer state management
+
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useColorModeStore } from '@/store/colorModeStore';
+import { useDrawingStore } from '@/store/drawingStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
 import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
+import { DrawingLayerState, DEFAULT_DRAWING_LAYER_STATE } from '@/types/DrawingShape';
 
 /**
  * Hook for loading and saving session data
- * 
- * This hook manages:
- * 1. Loading session seat plans when navigating to a session
- * 2. Saving seat plans when navigating away
- * 3. Recording adjacency data for tracked sessions
- * 4. Loading and saving session rules (proximity rules, sort order, table rules)
- * 5. Loading and saving violations
- * 6. CRITICAL: Syncing guestStore with eventStore session guests
- * 7. 🆕 Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
- * 8. 🆕 Session lock state management
- * 
- * NOTE: All tracking functionality is now in eventStore.
- * No separate trackingStore import is needed.
  */
 export const useSessionLoader = (sessionId: string | null) => {
   const lastSessionIdRef = useRef<string | null>(null);
@@ -29,11 +33,14 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Track if component has mounted to prevent SSR issues
   const [isMounted, setIsMounted] = useState(false);
   
-  // 🆕 UI Settings state - will be passed to PlaygroundCanvas
+  // UI Settings state - will be passed to PlaygroundCanvas
   const [uiSettings, setUISettings] = useState<SessionUISettings>(DEFAULT_SESSION_UI_SETTINGS);
   const [isLocked, setIsLocked] = useState(false);
   
-  // 🆕 Track session context for saving UI settings
+  // Drawing layer state
+  const [drawingLayerState, setDrawingLayerState] = useState<DrawingLayerState>(DEFAULT_DRAWING_LAYER_STATE);
+  
+  // Track session context for saving UI settings
   const sessionContextRef = useRef<{ eventId: string; dayId: string } | null>(null);
   
   useEffect(() => {
@@ -58,13 +65,11 @@ export const useSessionLoader = (sessionId: string | null) => {
   const saveSessionViolations = useEventStore((state) => state.saveSessionViolations);
   const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
   
-  // 🆕 UI Settings methods
+  // UI Settings methods
   const saveSessionUISettings = useEventStore((state) => state.saveSessionUISettings);
-  const loadSessionUISettings = useEventStore((state) => state.loadSessionUISettings);
   
-  // 🆕 Lock methods
+  // Lock methods
   const toggleSessionLockStore = useEventStore((state) => state.toggleSessionLock);
-  const isSessionLockedStore = useEventStore((state) => state.isSessionLocked);
   
   // Tracking functions - now from eventStore
   const isSessionTracked = useEventStore((state) => state.isSessionTracked);
@@ -78,8 +83,13 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Guest Store - now using setGuests for bulk sync
   const setGuests = useGuestStore((state) => state.setGuests);
   
-  // 🆕 Color Mode Store - for colorblind mode sync
+  // Color Mode Store - for colorblind mode sync
   const setColorMode = useColorModeStore((state) => state.setColorMode);
+  
+  // Drawing Store - for drawing layer management
+  const getDrawingLayerState = useDrawingStore((state) => state.getDrawingLayerState);
+  const loadDrawingLayerState = useDrawingStore((state) => state.loadDrawingLayerState);
+  const resetDrawingStore = useDrawingStore((state) => state.resetDrawingStore);
 
   // Save current session before switching
   const saveCurrentSession = useCallback(() => {
@@ -101,17 +111,31 @@ export const useSessionLoader = (sessionId: string | null) => {
       });
     });
 
+    // Get current drawing layer state
+    const currentDrawingState = getDrawingLayerState();
+
     console.log(`[useSessionLoader] Saving session: ${sessionData.session.name}`);
     console.log(`[useSessionLoader] Saving UI settings:`, uiSettings);
+    console.log(`[useSessionLoader] Saving drawing layer with ${currentDrawingState.shapes.length} shapes`);
     
-    // 🆕 Save seat plan to event store (including uiSettings)
+    // Save seat plan to event store (including uiSettings)
+    // Note: Drawing layer is stored separately via custom storage
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
-      uiSettings, // 🆕 Include UI settings in seat plan
+      uiSettings,
     });
+    
+    // Save drawing layer state to localStorage (separate from seat plan)
+    try {
+      const drawingKey = `drawing_layer_${currentSessionId}`;
+      localStorage.setItem(drawingKey, JSON.stringify(currentDrawingState));
+      console.log(`[useSessionLoader] Drawing layer saved to localStorage`);
+    } catch (e) {
+      console.warn('[useSessionLoader] Failed to save drawing layer to localStorage:', e);
+    }
 
     // Save violations to session
     if (violations && violations.length > 0) {
@@ -159,7 +183,8 @@ export const useSessionLoader = (sessionId: string | null) => {
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
-    uiSettings, // 🆕 Include uiSettings in dependencies
+    uiSettings,
+    getDrawingLayerState,
   ]);
 
   // Load session data
@@ -172,7 +197,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       return;
     }
 
-    // 🆕 Store context for saving UI settings
+    // Store context for saving UI settings
     sessionContextRef.current = {
       eventId: sessionData.eventId,
       dayId: sessionData.dayId,
@@ -191,16 +216,16 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
       });
       
-      // 🆕 Load UI settings
+      // Load UI settings
       const loadedUISettings = seatPlan.uiSettings ?? DEFAULT_SESSION_UI_SETTINGS;
       console.log('[useSessionLoader] Loading UI settings:', loadedUISettings);
       setUISettings(loadedUISettings);
       
-      // 🆕 Apply colorblind mode to global store
+      // Apply colorblind mode to global store
       setColorMode(loadedUISettings.isColorblindMode ? 'colorblind' : 'standard');
       
-      // 🆕 Load lock state
-      const locked = seatPlan.isLocked ?? false;
+      // Load lock state
+      const locked = (seatPlan as any).isLocked ?? false;
       setIsLocked(locked);
       console.log('[useSessionLoader] Session lock state:', locked);
       
@@ -209,10 +234,30 @@ export const useSessionLoader = (sessionId: string | null) => {
       console.log('[useSessionLoader] Initializing new session with default chunk');
       resetTables();
       
-      // 🆕 Reset UI settings to defaults for new session
+      // Reset UI settings to defaults for new session
       setUISettings(DEFAULT_SESSION_UI_SETTINGS);
       setIsLocked(false);
       setColorMode('standard');
+    }
+    
+    // Load drawing layer state from localStorage
+    try {
+      const drawingKey = `drawing_layer_${newSessionId}`;
+      const savedDrawing = localStorage.getItem(drawingKey);
+      if (savedDrawing) {
+        const parsedDrawing = JSON.parse(savedDrawing) as DrawingLayerState;
+        loadDrawingLayerState(parsedDrawing);
+        setDrawingLayerState(parsedDrawing);
+        console.log(`[useSessionLoader] Loaded drawing layer with ${parsedDrawing.shapes.length} shapes`);
+      } else {
+        resetDrawingStore();
+        setDrawingLayerState(DEFAULT_DRAWING_LAYER_STATE);
+        console.log('[useSessionLoader] No drawing layer found, using defaults');
+      }
+    } catch (e) {
+      console.warn('[useSessionLoader] Failed to load drawing layer from localStorage:', e);
+      resetDrawingStore();
+      setDrawingLayerState(DEFAULT_DRAWING_LAYER_STATE);
     }
 
     // CRITICAL FIX: Use the new setGuests function for bulk sync
@@ -291,11 +336,13 @@ export const useSessionLoader = (sessionId: string | null) => {
     setGuests, 
     setActiveSession, 
     resetTables,
-    setColorMode, // 🆕
+    setColorMode,
+    loadDrawingLayerState,
+    resetDrawingStore,
   ]);
 
   /**
-   * 🆕 Handle UI settings changes from PlaygroundCanvas
+   * Handle UI settings changes from PlaygroundCanvas
    * This is called when user changes connector gap, photo mode, etc.
    */
   const handleUISettingsChange = useCallback((newSettings: SessionUISettings) => {
@@ -318,7 +365,26 @@ export const useSessionLoader = (sessionId: string | null) => {
   }, [sessionId, saveSessionUISettings, setColorMode]);
   
   /**
-   * 🆕 Toggle session lock state
+   * Handle drawing layer state changes
+   * Call this when switching modes to ensure state is saved
+   */
+  const handleDrawingLayerChange = useCallback((state: DrawingLayerState) => {
+    setDrawingLayerState(state);
+    
+    // Save to localStorage immediately
+    if (sessionId) {
+      try {
+        const drawingKey = `drawing_layer_${sessionId}`;
+        localStorage.setItem(drawingKey, JSON.stringify(state));
+        console.log('[useSessionLoader] Drawing layer saved');
+      } catch (e) {
+        console.warn('[useSessionLoader] Failed to save drawing layer:', e);
+      }
+    }
+  }, [sessionId]);
+  
+  /**
+   * Toggle session lock state
    */
   const handleToggleLock = useCallback(() => {
     if (!sessionId || !sessionContextRef.current) return;
@@ -404,10 +470,13 @@ export const useSessionLoader = (sessionId: string | null) => {
     saveCurrentSession,
     resyncGuests,
     isHydrated: isReady,
-    // 🆕 UI Settings and Lock
+    // UI Settings and Lock
     uiSettings,
     isLocked,
     handleUISettingsChange,
     handleToggleLock,
+    // Drawing layer
+    drawingLayerState,
+    handleDrawingLayerChange,
   };
 };

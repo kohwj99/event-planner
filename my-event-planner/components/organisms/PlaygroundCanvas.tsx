@@ -2,10 +2,11 @@
 // Main canvas for seat planning with D3-based SVG rendering
 // Uses centralized color configuration from colorConfig.ts via colorModeStore
 //
-// UPDATED: UI Settings Persistence & Session Lock Support
-// - Receives initialUISettings from parent (from useSessionLoader)
-// - Notifies parent when UI settings change via onUISettingsChange
-// - Disables all editing interactions when isLocked is true
+// UPDATED: Added Drawing Layer Support
+// - New canvasMode prop to switch between 'plan' and 'draw' modes
+// - Renders drawing shapes BELOW the planning layer (correct z-order)
+// - Disables planning interactions when in draw mode
+// - Drawing layer shapes are draggable and resizable
 
 'use client';
 
@@ -29,14 +30,14 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
 import CameraAlt from '@mui/icons-material/CameraAlt';
-import Alert from '@mui/material/Alert';
-import Lock from '@mui/icons-material/Lock';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
+import DrawingSVGLayer from '@/components/organisms/DrawingSVGLayer';
 
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
+import { useDrawingStore } from '@/store/drawingStore';
 import { useColorScheme, useColorModeStore } from '@/store/colorModeStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
@@ -50,6 +51,12 @@ import {
 } from '@/utils/tableSVGHelper';
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export type CanvasMode = 'plan' | 'draw';
+
+// ============================================================================
 // COMPONENT PROPS
 // ============================================================================
 
@@ -61,6 +68,8 @@ interface PlaygroundCanvasProps {
   initialUISettings?: SessionUISettings | null;
   /** Callback when user changes settings */
   onUISettingsChange?: (settings: SessionUISettings) => void;
+  /** Current canvas mode - 'plan' for seat planning, 'draw' for drawing shapes */
+  canvasMode?: CanvasMode;
 }
 
 // ============================================================================
@@ -72,10 +81,17 @@ export default function PlaygroundCanvas({
   isLocked = false,
   initialUISettings,
   onUISettingsChange,
+  canvasMode = 'plan',
 }: PlaygroundCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const zoomBehavior = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const gLayerRef = useRef<SVGGElement | null>(null);
+  
+  // Ref to the drawing layer group (created by D3, below tables layer)
+  const [drawingLayerRef, setDrawingLayerRef] = useState<SVGGElement | null>(null);
+  
+  // Store current zoom transform for drawing layer coordinate conversion
+  const [currentZoomTransform, setCurrentZoomTransform] = useState<d3.ZoomTransform>(d3.zoomIdentity);
   
   // UI State - local state that renders the UI
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -89,11 +105,13 @@ export default function PlaygroundCanvas({
   // Get color scheme from store
   const colorModeStore = useColorModeStore();
   const colorScheme = useColorScheme();
-  const isColorblindMode = colorModeStore.colorMode === 'colorblind';
 
   // Meal plan popover state
   const [mealPlanAnchorEl, setMealPlanAnchorEl] = useState<HTMLButtonElement | null>(null);
   const mealPlanPopoverOpen = Boolean(mealPlanAnchorEl);
+
+  // Add table modal
+  const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
 
   // Store hooks
   const {
@@ -114,6 +132,9 @@ export default function PlaygroundCanvas({
     expandWorldIfNeeded,
     cleanupEmptyChunks,
   } = useSeatStore();
+
+  // Drawing store - only get the selectShape action
+  const selectShape = useDrawingStore((state) => state.selectShape);
 
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
@@ -150,6 +171,12 @@ export default function PlaygroundCanvas({
   }, [maxMealPlanCount]);
 
   // ============================================================================
+  // DETERMINE IF PLANNING IS DISABLED
+  // Planning is disabled when locked OR in draw mode
+  // ============================================================================
+  const isPlanningDisabled = isLocked || canvasMode === 'draw';
+
+  // ============================================================================
   // SYNC UI SETTINGS FROM PARENT (when session changes)
   // ============================================================================
 
@@ -163,8 +190,6 @@ export default function PlaygroundCanvas({
       setHideTableBodies(initialUISettings.hideTableBodies ?? false);
       setIsPhotoMode(initialUISettings.isPhotoMode ?? false);
       
-      // Colorblind mode is already applied by useSessionLoader
-      
       // Reset flag after state updates are processed
       requestAnimationFrame(() => {
         isSyncingFromParent.current = false;
@@ -176,6 +201,7 @@ export default function PlaygroundCanvas({
   // NOTIFY PARENT OF SETTINGS CHANGES (when user interacts)
   // ============================================================================
 
+  const isColorblindMode = colorModeStore.colorMode === 'colorblind';
   const notifyTimeout = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -206,32 +232,30 @@ export default function PlaygroundCanvas({
   }, [connectorGap, hideTableBodies, isPhotoMode, isColorblindMode, zoomLevel, onUISettingsChange]);
 
   // ============================================================================
-  // LOCKED MODE HANDLERS - wrap store functions to check lock state
+  // LOCKED/DRAW MODE HANDLERS - wrap store functions to check state
   // ============================================================================
 
   const handleSelectSeat = useCallback((tableId: string, seatId: string) => {
-    if (isLocked) return;
+    if (isPlanningDisabled) return;
     selectSeat(tableId, seatId);
-  }, [isLocked, selectSeat]);
+  }, [isPlanningDisabled, selectSeat]);
 
   const handleLockSeat = useCallback((tableId: string, seatId: string, locked: boolean) => {
-    if (isLocked) return;
+    if (isPlanningDisabled) return;
     lockSeat(tableId, seatId, locked);
-  }, [isLocked, lockSeat]);
+  }, [isPlanningDisabled, lockSeat]);
 
   const handleClearSeat = useCallback((tableId: string, seatId: string) => {
-    if (isLocked) return;
+    if (isPlanningDisabled) return;
     clearSeat(tableId, seatId);
-  }, [isLocked, clearSeat]);
+  }, [isPlanningDisabled, clearSeat]);
 
   // ============================================================================
   // MODAL & POPOVER HANDLERS
   // ============================================================================
 
-  const [isAddTableModalOpen, setIsAddTableModalOpen] = useState(false);
-  
   const handleAddTableClick = () => {
-    if (isLocked) return;
+    if (isPlanningDisabled) return;
     setIsAddTableModalOpen(true);
   };
   
@@ -276,27 +300,47 @@ export default function PlaygroundCanvas({
 
     const g = svg.append('g').attr('class', 'zoom-layer');
     gLayerRef.current = g.node();
+    
+    // Create layers in correct z-order:
+    // 1. Chunks (background)
+    // 2. Drawing layer (shapes) - BELOW tables
+    // 3. Tables (on top)
     g.append('g').attr('class', 'chunks-layer');
+    
+    // Create drawing layer and store ref for React portal
+    const drawingLayer = g.append('g').attr('class', 'drawing-layer');
+    setDrawingLayerRef(drawingLayer.node());
+    
     g.append('g').attr('class', 'tables-layer');
 
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
-        if (gLayerRef.current)
+        if (gLayerRef.current) {
           gLayerRef.current.setAttribute('transform', event.transform.toString());
+        }
         setZoomLevel(event.transform.k);
+        setCurrentZoomTransform(event.transform);
       });
 
     zoomBehavior.current = zoom;
-    svg.call(zoom as any);
-    svg.call((zoom as any).transform, d3.zoomIdentity);
+    svg.call(zoom);
+    svg.call(zoom.transform, d3.zoomIdentity);
+    setCurrentZoomTransform(d3.zoomIdentity);
 
     svg.on('click', () => {
       setSelectedTable(null);
       selectSeat('', null);
+      // Deselect drawing shapes too
+      selectShape(null);
     });
-  }, []);
+    
+    // Cleanup
+    return () => {
+      setDrawingLayerRef(null);
+    };
+  }, [setSelectedTable, selectSeat, selectShape]);
 
   // ============================================================================
   // CHUNKS RENDERING
@@ -307,7 +351,7 @@ export default function PlaygroundCanvas({
     if (!gEl) return;
     const chunkLayer = d3.select(gEl).select('.chunks-layer');
     const allChunks = Object.values(chunks).filter((c) => c.row >= 0 && c.col >= 0);
-    const chunkGroups = chunkLayer.selectAll<SVGGElement, any>('g.chunk-group').data(allChunks, (c: any) => c.id);
+    const chunkGroups = chunkLayer.selectAll<SVGGElement, typeof allChunks[number]>('g.chunk-group').data(allChunks, (c) => c.id);
     
     const enter = chunkGroups.enter().append('g').attr('class', 'chunk-group');
     enter.append('rect')
@@ -322,7 +366,7 @@ export default function PlaygroundCanvas({
       .attr('fill', '#616161')
       .attr('font-size', 18);
     
-    const merged = enter.merge(chunkGroups as any);
+    const merged = enter.merge(chunkGroups);
     merged.select('rect.chunk-outline')
       .attr('x', (c) => c.col * CHUNK_WIDTH)
       .attr('y', (c) => c.row * CHUNK_HEIGHT)
@@ -355,7 +399,8 @@ export default function PlaygroundCanvas({
       .append('g')
       .attr('class', 'table-group')
       .attr('transform', (d) => `translate(${d.x},${d.y})`)
-      .style('cursor', isLocked ? 'default' : 'grab');
+      .style('cursor', isPlanningDisabled ? 'default' : 'grab')
+      .style('pointer-events', canvasMode === 'draw' ? 'none' : 'auto');
 
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
@@ -398,10 +443,12 @@ export default function PlaygroundCanvas({
         .text(d.label);
     });
 
-    const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
+    const merged = enter.merge(tableGroups).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Update cursor based on lock state
-    merged.style('cursor', isLocked ? 'default' : 'grab');
+    // Update cursor and pointer events based on mode
+    merged
+      .style('cursor', isPlanningDisabled ? 'default' : 'grab')
+      .style('pointer-events', canvasMode === 'draw' ? 'none' : 'auto');
 
     merged.each(function (d) {
       const grp = d3.select(this);
@@ -412,13 +459,14 @@ export default function PlaygroundCanvas({
       const photoScale = isPhotoMode ? 1.4 : 1; 
 
       if (d.shape === 'round') {
+        const radius = d.radius ?? 60;
         bodyGroup.select('circle.table-shape')
-          .attr('r', d.radius * photoScale)
+          .attr('r', radius * photoScale)
           .attr('fill', fillColor)
           .attr('stroke', colorScheme.table.tableStroke);
       } else {
-        const width = (d.width || 160) * photoScale;
-        const height = (d.height || 100) * photoScale;
+        const width = (d.width ?? 160) * photoScale;
+        const height = (d.height ?? 100) * photoScale;
         bodyGroup.select('rect.table-shape')
           .attr('x', -width / 2)
           .attr('y', -height / 2)
@@ -436,11 +484,11 @@ export default function PlaygroundCanvas({
 
     // Render table contents
     merged.each(function (tableDatum) {
-      const group = d3.select(this);
+      const group = d3.select(this) as d3.Selection<SVGGElement, Table, null, undefined>;
 
       // Use wrapped handlers that respect lock state
       renderSeats(
-        group as any,
+        group as d3.Selection<SVGGElement, any, any, any>,
         tableDatum,
         colorScheme,
         guestLookup,
@@ -452,7 +500,7 @@ export default function PlaygroundCanvas({
       );
 
       renderTableGuestDisplay(
-        group as any,
+        group as d3.Selection<SVGGElement, any, any, any>,
         tableDatum,
         guestLookup,
         connectorGap,
@@ -462,10 +510,10 @@ export default function PlaygroundCanvas({
       );
     });
 
-    // Drag behavior - only enable when not locked
+    // Drag behavior - only enable when not in planning disabled mode
     const svgSelection = d3.select(svgEl);
     
-    if (!isLocked) {
+    if (!isPlanningDisabled) {
       const drag = d3.drag<SVGGElement, Table>()
         .on('start', function () {
           svgSelection.on('.zoom', null);
@@ -486,13 +534,15 @@ export default function PlaygroundCanvas({
         })
         .on('end', function () {
           cleanupEmptyChunks();
-          if (zoomBehavior.current) svgSelection.call(zoomBehavior.current as any);
+          if (zoomBehavior.current && svgRef.current) {
+            d3.select(svgRef.current).call(zoomBehavior.current);
+          }
           d3.select(this).style('cursor', 'grab');
         });
 
-      merged.call(drag as any);
+      merged.call(drag);
     } else {
-      // Remove drag behavior when locked
+      // Remove drag behavior when locked or in draw mode
       merged.on('.drag', null);
     }
 
@@ -501,7 +551,8 @@ export default function PlaygroundCanvas({
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    hideTableBodies, isPhotoMode, isLocked 
+    hideTableBodies, isPhotoMode, isPlanningDisabled, canvasMode,
+    setSelectedTable
   ]);
 
   // ============================================================================
@@ -509,7 +560,7 @@ export default function PlaygroundCanvas({
   // ============================================================================
 
   const handleAddTable = (config: TableConfig) => {
-    if (isLocked) return;
+    if (isPlanningDisabled) return;
     
     const svgEl = svgRef.current;
     if (!svgEl) return;
@@ -521,7 +572,9 @@ export default function PlaygroundCanvas({
     const worldX = Math.max(0, (centerX - t.x) / t.k);
     const worldY = Math.max(0, (centerY - t.y) / t.k);
 
-    for (let i = 0; i < config.quantity; i++) {
+    const numTables = config.quantity || 1;
+    
+    for (let i = 0; i < numTables; i++) {
       const id = `t${Date.now()}-${i}`;
       const label = config.label
         ? `${config.label} ${tables.length + i + 1}`
@@ -577,124 +630,173 @@ export default function PlaygroundCanvas({
           preserveAspectRatio="xMidYMid meet"
         />
       </Paper>
+      
+      {/* Drawing layer - renders via portal into the D3-managed SVG group */}
+      <DrawingSVGLayer
+        containerRef={drawingLayerRef}
+        zoomTransform={currentZoomTransform}
+        isActive={canvasMode === 'draw' && !isLocked}
+      />
 
-      {/* Bottom Right Controls */}
-      <Box
-        sx={{
-          position: 'absolute',
-          bottom: 24,
-          right: 24,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 2,
-        }}
-      >
-        <Stack direction="column" spacing={1} alignItems="center">
-          {maxMealPlanCount > 0 && (
-            <Tooltip title="Select Meal Plan to Display" placement="left">
-              <Badge
-                badgeContent={selectedMealPlanIndex !== null ? selectedMealPlanIndex + 1 : 0}
-                color="success"
-                invisible={selectedMealPlanIndex === null}
-              >
-                <Fab
-                  color={selectedMealPlanIndex !== null ? 'success' : 'default'}
-                  size="medium"
-                  onClick={handleMealPlanClick}
+      {/* Draw mode overlay indicator */}
+      {canvasMode === 'draw' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 16,
+            left: 16,
+            bgcolor: 'secondary.main',
+            color: 'white',
+            px: 2,
+            py: 0.5,
+            borderRadius: 2,
+            fontSize: '0.875rem',
+            fontWeight: 'bold',
+            boxShadow: 2,
+          }}
+        >
+          Drawing Mode
+        </Box>
+      )}
+
+      {/* Bottom Right Controls - only show in plan mode */}
+      {canvasMode === 'plan' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 24,
+            right: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-end',
+            gap: 2,
+          }}
+        >
+          <Stack direction="column" spacing={1} alignItems="center">
+            {maxMealPlanCount > 0 && (
+              <Tooltip title="Select Meal Plan to Display" placement="left">
+                <Badge
+                  badgeContent={selectedMealPlanIndex !== null ? selectedMealPlanIndex + 1 : 0}
+                  color="success"
+                  invisible={selectedMealPlanIndex === null}
                 >
-                  <Restaurant />
+                  <Fab
+                    color={selectedMealPlanIndex !== null ? 'success' : 'default'}
+                    size="medium"
+                    onClick={handleMealPlanClick}
+                  >
+                    <Restaurant />
+                  </Fab>
+                </Badge>
+              </Tooltip>
+            )}
+
+            {/* Add Table FAB - disabled when locked or in draw mode */}
+            <Tooltip title={isPlanningDisabled ? (isLocked ? 'Session is locked' : 'Switch to Plan mode') : 'Add Table'} placement="left">
+              <span>
+                <Fab 
+                  color="primary" 
+                  size="medium" 
+                  onClick={handleAddTableClick}
+                  disabled={isPlanningDisabled}
+                  sx={{ opacity: isPlanningDisabled ? 0.5 : 1 }}
+                >
+                  <AddIcon />
                 </Fab>
-              </Badge>
+              </span>
             </Tooltip>
-          )}
+          </Stack>
 
-          {/* Add Table FAB - disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : 'Add Table'} placement="left">
-            <span>
-              <Fab 
-                color="primary" 
-                size="medium" 
-                onClick={handleAddTableClick}
-                disabled={isLocked}
-                sx={{ opacity: isLocked ? 0.5 : 1 }}
-              >
-                <AddIcon />
-              </Fab>
-            </span>
-          </Tooltip>
-        </Stack>
+          {/* Controls Card */}
+          <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 160, borderRadius: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              Zoom: {Math.round(zoomLevel * 100)}%
+            </Typography>
+            <Stack direction="row" spacing={2} alignItems="center" mt={1}>
+              <Typography variant="caption">Gap:</Typography>
+              <Slider
+                size="small"
+                value={connectorGap}
+                onChange={(_, v) => setConnectorGap(v as number)}
+                min={-20}
+                max={200}
+                sx={{ width: 80 }}
+              />
+            </Stack>
+            
+            <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+              <ColorModeToggle size="small" showLabel />
+            </Box>
+            
+            <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Tooltip title="Toggle visibility of table shapes" placement="left">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={hideTableBodies}
+                      onChange={(e) => setHideTableBodies(e.target.checked)}
+                      size="small"
+                      color="primary"
+                    />
+                  }
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <TableRestaurant fontSize="small" sx={{ color: hideTableBodies ? 'primary.main' : 'text.disabled' }} />
+                      <Typography variant="caption" color={hideTableBodies ? 'text.primary' : 'text.disabled'}>
+                        Hide Tables
+                      </Typography>
+                    </Stack>
+                  }
+                  sx={{ m: 0 }}
+                />
+              </Tooltip>
+            </Box>
 
-        {/* Controls Card */}
-        <Paper elevation={2} sx={{ px: 2, py: 1.5, minWidth: 160, borderRadius: 2 }}>
+            <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+              <Tooltip title="Toggle Photography Mode" placement="left">
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={isPhotoMode}
+                      onChange={(e) => setIsPhotoMode(e.target.checked)}
+                      size="small"
+                      color="secondary"
+                    />
+                  }
+                  label={
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <CameraAlt fontSize="small" sx={{ color: isPhotoMode ? 'secondary.main' : 'text.disabled' }} />
+                      <Typography variant="caption" color={isPhotoMode ? 'text.primary' : 'text.disabled'}>
+                        Photo Mode
+                      </Typography>
+                    </Stack>
+                  }
+                  sx={{ m: 0 }}
+                />
+              </Tooltip>
+            </Box>
+          </Paper>
+        </Box>
+      )}
+
+      {/* Drawing mode zoom indicator */}
+      {canvasMode === 'draw' && (
+        <Paper
+          elevation={2}
+          sx={{
+            position: 'absolute',
+            bottom: 24,
+            right: 24,
+            px: 2,
+            py: 1,
+            borderRadius: 2,
+          }}
+        >
           <Typography variant="caption" color="text.secondary">
             Zoom: {Math.round(zoomLevel * 100)}%
           </Typography>
-          <Stack direction="row" spacing={2} alignItems="center" mt={1}>
-            <Typography variant="caption">Gap:</Typography>
-            <Slider
-              size="small"
-              value={connectorGap}
-              onChange={(_, v) => setConnectorGap(v as number)}
-              min={-20}
-              max={200}
-              sx={{ width: 80 }}
-            />
-          </Stack>
-          
-          <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
-            <ColorModeToggle size="small" showLabel />
-          </Box>
-          
-          <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Toggle visibility of table shapes" placement="left">
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={hideTableBodies}
-                    onChange={(e) => setHideTableBodies(e.target.checked)}
-                    size="small"
-                    color="primary"
-                  />
-                }
-                label={
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <TableRestaurant fontSize="small" sx={{ color: hideTableBodies ? 'primary.main' : 'text.disabled' }} />
-                    <Typography variant="caption" color={hideTableBodies ? 'text.primary' : 'text.disabled'}>
-                      Hide Tables
-                    </Typography>
-                  </Stack>
-                }
-                sx={{ m: 0 }}
-              />
-            </Tooltip>
-          </Box>
-
-          <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-            <Tooltip title="Toggle Photography Mode" placement="left">
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={isPhotoMode}
-                    onChange={(e) => setIsPhotoMode(e.target.checked)}
-                    size="small"
-                    color="secondary"
-                  />
-                }
-                label={
-                  <Stack direction="row" spacing={0.5} alignItems="center">
-                    <CameraAlt fontSize="small" sx={{ color: isPhotoMode ? 'secondary.main' : 'text.disabled' }} />
-                    <Typography variant="caption" color={isPhotoMode ? 'text.primary' : 'text.disabled'}>
-                      Photo Mode
-                    </Typography>
-                  </Stack>
-                }
-                sx={{ m: 0 }}
-              />
-            </Tooltip>
-          </Box>
         </Paper>
-      </Box>
+      )}
 
       <Popover
         open={mealPlanPopoverOpen}
@@ -733,7 +835,7 @@ export default function PlaygroundCanvas({
       </Popover>
 
       <AddTableModal
-        open={isAddTableModalOpen && !isLocked}
+        open={isAddTableModalOpen && !isPlanningDisabled}
         onClose={handleCloseAddModal}
         onConfirm={(config) => {
           handleAddTable(config);

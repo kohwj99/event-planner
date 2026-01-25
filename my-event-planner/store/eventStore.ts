@@ -29,6 +29,7 @@ import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
 import { getEnhancedAdjacentSeats, EnhancedAdjacency } from "@/utils/adjacencyHelper";
+import { DrawingLayerState } from "@/types/DrawingShape";
 
 interface EventStoreState {
   /* -------------------- State -------------------- */
@@ -114,8 +115,8 @@ interface EventStoreState {
     isLocked?: boolean;
   } | null;
 
-  /* -------------------- ðŸ†• SESSION RULES MANAGEMENT -------------------- */
-  
+  /* --------------------  SESSION RULES MANAGEMENT -------------------- */
+
   /**
    * Save session rules configuration (sort order, proximity rules, table rules, guest selection)
    */
@@ -167,26 +168,26 @@ interface EventStoreState {
     violations: StoredProximityViolation[];
   };
 
-  /* -------------------- 🔒 SESSION LOCK MANAGEMENT -------------------- */
-  
+  /* -------------------- SESSION LOCK MANAGEMENT -------------------- */
+
   /**
    * Toggle session lock state
    * When locked, the session becomes view-only
    */
   toggleSessionLock: (eventId: string, dayId: string, sessionId: string) => void;
-  
+
   /**
    * Set session lock state explicitly
    */
   setSessionLock: (eventId: string, dayId: string, sessionId: string, isLocked: boolean) => void;
-  
+
   /**
    * Check if a session is locked
    */
   isSessionLocked: (sessionId: string) => boolean;
 
-  /* -------------------- 🖼️ SESSION UI SETTINGS MANAGEMENT -------------------- */
-  
+  /* -------------------- SESSION UI SETTINGS MANAGEMENT -------------------- */
+
   /**
    * Save session UI settings (zoom, connector gap, display modes, etc.)
    */
@@ -196,7 +197,7 @@ interface EventStoreState {
     sessionId: string,
     uiSettings: SessionUISettings
   ) => void;
-  
+
   /**
    * Load session UI settings
    */
@@ -233,7 +234,7 @@ interface EventStoreState {
   /** Computes full datetime (ISO string) from day date + session start time for chronological ordering */
   getSessionDateTime: (sessionId: string) => string | null;
 
-  /* -------------------- ðŸ“Š Adjacency Recording -------------------- */
+  /* -------------------- Adjacency Recording -------------------- */
   recordSessionAdjacency: (
     eventId: string,
     sessionId: string,
@@ -281,6 +282,16 @@ interface EventStoreState {
 
   getSessionsNeedingReview: (eventId: string) => string[];
   acknowledgeSessionReview: (eventId: string, sessionId: string) => void;
+
+  // In your eventStore actions
+  saveSessionDrawingLayer: (
+    eventId: string,
+    dayId: string,
+    sessionId: string,
+    drawingState: DrawingLayerState
+  ) => void;
+
+  loadSessionDrawingLayer: (sessionId: string) => DrawingLayerState | null;
 
   /* -------------------- Cleanup -------------------- */
   clearEventTracking: (eventId: string) => void;
@@ -428,7 +439,7 @@ export const useEventStore = create<EventStoreState>()(
                             chunks: {},
                             activeGuestIds: [],
                           },
-                          // ðŸ†• Initialize with default rules
+                          // Initialize with default rules
                           rulesConfig: { ...DEFAULT_SESSION_RULES },
                           storedViolations: [],
                         },
@@ -656,8 +667,8 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ==================== ðŸ†• SESSION RULES MANAGEMENT ==================== */
-        
+        /* ==================== SESSION RULES MANAGEMENT ==================== */
+
         saveSessionRules: (eventId, dayId, sessionId, rulesConfig) =>
           set((state) => {
             const now = new Date().toISOString();
@@ -806,8 +817,8 @@ export const useEventStore = create<EventStoreState>()(
           };
         },
 
-        /* ==================== 🔒 SESSION LOCK MANAGEMENT ==================== */
-        
+        /* ==================== SESSION LOCK MANAGEMENT ==================== */
+
         toggleSessionLock: (eventId, dayId, sessionId) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -860,7 +871,7 @@ export const useEventStore = create<EventStoreState>()(
 
         isSessionLocked: (sessionId) => {
           const state = get();
-          
+
           for (const event of state.events) {
             for (const day of event.days) {
               const session = day.sessions.find(s => s.id === sessionId);
@@ -869,12 +880,12 @@ export const useEventStore = create<EventStoreState>()(
               }
             }
           }
-          
+
           return false;
         },
 
         /* ==================== 🖼️ SESSION UI SETTINGS MANAGEMENT ==================== */
-        
+
         saveSessionUISettings: (eventId, dayId, sessionId, uiSettings) =>
           set((state) => ({
             events: state.events.map((e) => {
@@ -904,7 +915,7 @@ export const useEventStore = create<EventStoreState>()(
 
         loadSessionUISettings: (sessionId) => {
           const state = get();
-          
+
           for (const event of state.events) {
             for (const day of event.days) {
               const session = day.sessions.find(s => s.id === sessionId);
@@ -913,7 +924,7 @@ export const useEventStore = create<EventStoreState>()(
               }
             }
           }
-          
+
           return null;
         },
 
@@ -940,8 +951,8 @@ export const useEventStore = create<EventStoreState>()(
 
           // Filter sessions that are chronologically before the current session
           const previousSessions = sessionsWithDateTime
-            .filter(({ session, dateTime }) => 
-              session.id !== currentSessionId && 
+            .filter(({ session, dateTime }) =>
+              session.id !== currentSessionId &&
               new Date(dateTime).getTime() < new Date(currentSessionDateTime).getTime()
             )
             .map(({ session }) => session);
@@ -980,8 +991,8 @@ export const useEventStore = create<EventStoreState>()(
 
           // Filter sessions chronologically before the current session
           const previousSessions = sessionsWithDateTime
-            .filter(({ session, dateTime }) => 
-              session.id !== sessionId && 
+            .filter(({ session, dateTime }) =>
+              session.id !== sessionId &&
               new Date(dateTime).getTime() < new Date(currentSessionDateTime).getTime()
             )
             .map(({ session }) => session);
@@ -1384,12 +1395,12 @@ export const useEventStore = create<EventStoreState>()(
           if (!currentSessionDateTime) return {};
 
           const allRecords = event.adjacencyRecords || [];
-          
+
           // Filter records to only include those chronologically before current session
           const relevantRecords = allRecords.filter(record => {
             if (record.trackedGuestId !== trackedGuestId) return false;
             if (record.sessionId === currentSessionId) return false;
-            
+
             const recordDateTime = record.sessionDateTime || record.sessionStartTime;
             return new Date(recordDateTime).getTime() < new Date(currentSessionDateTime).getTime();
           });
@@ -1417,10 +1428,10 @@ export const useEventStore = create<EventStoreState>()(
 
           // Build set of opposite-type guest IDs
           const oppositeGuestIds = new Set<string>();
-          const guestList = trackedGuestFromHost 
-            ? event.masterExternalGuests 
+          const guestList = trackedGuestFromHost
+            ? event.masterExternalGuests
             : event.masterHostGuests;
-          
+
           guestList.forEach(g => {
             if (!g.deleted) {
               oppositeGuestIds.add(g.id);
@@ -1428,12 +1439,12 @@ export const useEventStore = create<EventStoreState>()(
           });
 
           const allRecords = event.adjacencyRecords || [];
-          
+
           // Filter records chronologically and by tracked guest
           const relevantRecords = allRecords.filter(record => {
             if (record.trackedGuestId !== trackedGuestId) return false;
             if (record.sessionId === currentSessionId) return false;
-            
+
             const recordDateTime = record.sessionDateTime || record.sessionStartTime;
             return new Date(recordDateTime).getTime() < new Date(currentSessionDateTime).getTime();
           });
@@ -1446,14 +1457,14 @@ export const useEventStore = create<EventStoreState>()(
               record.adjacentGuestDetails.forEach(detail => {
                 // Filter to only opposite type guests
                 if (!oppositeGuestIds.has(detail.guestId)) return;
-                
+
                 if (!adjacencyCount[detail.guestId]) {
                   adjacencyCount[detail.guestId] = { count: 0, byType: {} };
                 }
                 adjacencyCount[detail.guestId].count += 1;
-                
+
                 const adjType = detail.adjacencyType || 'side';
-                adjacencyCount[detail.guestId].byType[adjType] = 
+                adjacencyCount[detail.guestId].byType[adjType] =
                   (adjacencyCount[detail.guestId].byType[adjType] || 0) + 1;
               });
             } else {
@@ -1461,12 +1472,12 @@ export const useEventStore = create<EventStoreState>()(
               record.adjacentGuestIds.forEach(guestId => {
                 // Filter to only opposite type guests
                 if (!oppositeGuestIds.has(guestId)) return;
-                
+
                 if (!adjacencyCount[guestId]) {
                   adjacencyCount[guestId] = { count: 0, byType: {} };
                 }
                 adjacencyCount[guestId].count += 1;
-                adjacencyCount[guestId].byType['side'] = 
+                adjacencyCount[guestId].byType['side'] =
                   (adjacencyCount[guestId].byType['side'] || 0) + 1;
               });
             }
@@ -1499,10 +1510,10 @@ export const useEventStore = create<EventStoreState>()(
           );
 
           return Object.entries(adjacencyCount)
-            .map(([guestId, data]) => ({ 
-              guestId, 
-              count: data.count, 
-              byType: data.byType 
+            .map(([guestId, data]) => ({
+              guestId,
+              count: data.count,
+              byType: data.byType
             }))
             .sort((a, b) => b.count - a.count);
         },
@@ -1636,6 +1647,50 @@ export const useEventStore = create<EventStoreState>()(
               };
             }),
           })),
+
+        saveSessionDrawingLayer: (eventId, dayId, sessionId, drawingState) =>
+          set((state) => ({
+            events: state.events.map((event) =>
+              event.id !== eventId
+                ? event
+                : {
+                  ...event,
+                  days: event.days.map((day) =>
+                    day.id !== dayId
+                      ? day
+                      : {
+                        ...day,
+                        sessions: day.sessions.map((session) =>
+                          session.id !== sessionId
+                            ? session
+                            : {
+                              ...session,
+                              seatPlan: {
+                                ...session.seatPlan,
+                                drawingLayer: drawingState,
+                              },
+                              drawingLayerState: drawingState,
+                            }
+                        ),
+                      }
+                  ),
+                }
+            ),
+          })),
+
+        loadSessionDrawingLayer: (sessionId) => {
+          const state = get();
+          for (const event of state.events) {
+            for (const day of event.days) {
+              for (const session of day.sessions) {
+                if (session.id === sessionId) {
+                  return session.seatPlan?.drawingLayer || session.drawingLayerState || null;
+                }
+              }
+            }
+          }
+          return null;
+        },
       }),
 
       {

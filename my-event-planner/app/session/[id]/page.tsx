@@ -1,10 +1,14 @@
+// app/events/[eventId]/sessions/[id]/page.tsx
+// Session detail page with Plan/Draw mode support
+
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useEventStore } from '@/store/eventStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useSeatStore } from '@/store/seatStore';
+import { useDrawingStore } from '@/store/drawingStore';
 import { useSessionLoader } from '@/hooks/useSessionLoader';
 import {
   Box,
@@ -19,19 +23,23 @@ import {
 } from '@mui/icons-material';
 import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
 import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
+import DrawingConfigPanel from '@/components/organisms/DrawingConfigPanel';
 import ExportModal from '@/components/molecules/ExportModal';
 import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
-import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
+import PlaygroundTopControlPanel, { CanvasMode } from '@/components/organisms/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
 import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
+import { DrawingColorOption, getDefaultDrawingColor } from '@/utils/drawingColorConfig';
+import { DrawingShapeType } from '@/types/DrawingShape';
+import { useColorModeStore } from '@/store/colorModeStore';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
   const router = useRouter();
 
-  // 🆕 Use session loader hook - now returns UI settings and lock state
+  // Use session loader hook
   const { 
     saveCurrentSession,
     isHydrated,
@@ -39,6 +47,8 @@ export default function SessionDetailPage() {
     isLocked, 
     handleUISettingsChange, 
     handleToggleLock,
+    drawingLayerState,
+    handleDrawingLayerChange,
   } = useSessionLoader(sessionId);
 
   // Event Store
@@ -52,6 +62,11 @@ export default function SessionDetailPage() {
   // Seat Store - for reset
   const resetTables = useSeatStore((s) => s.resetTables);
 
+  // Drawing Store
+  const { addShape, getDrawingLayerState } = useDrawingStore();
+  const colorMode = useColorModeStore((s) => s.colorMode);
+
+  // Local state
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [sessionData, setSessionData] = useState<{
@@ -61,6 +76,9 @@ export default function SessionDetailPage() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMounted, setIsMounted] = useState(false);
+  
+  // Canvas mode: 'plan' or 'draw'
+  const [canvasMode, setCanvasMode] = useState<CanvasMode>('plan');
 
   // Fix hydration by only rendering after mount
   useEffect(() => {
@@ -81,13 +99,22 @@ export default function SessionDetailPage() {
     }
   }, [sessionId, events, getSessionById]);
 
-  const handleSave = () => {
+  // Handle save - includes drawing layer
+  const handleSave = useCallback(() => {
+    // Save drawing layer state
+    const currentDrawingState = getDrawingLayerState();
+    handleDrawingLayerChange(currentDrawingState);
+    
     saveCurrentSession();
-    alert('Seating plan saved successfully!');
-  };
+    alert('Session saved successfully!');
+  }, [saveCurrentSession, getDrawingLayerState, handleDrawingLayerChange]);
 
   const handleBack = () => {
+    // Save before navigating away
+    const currentDrawingState = getDrawingLayerState();
+    handleDrawingLayerChange(currentDrawingState);
     saveCurrentSession();
+    
     if (sessionData) {
       router.push(`/events/${sessionData.eventId}`);
     } else {
@@ -95,7 +122,7 @@ export default function SessionDetailPage() {
     }
   };
 
-  // 🆕 Check lock state before reset
+  // Check lock state before reset
   const handleReset = () => {
     if (isLocked) {
       alert('Cannot reset - session is locked. Unlock first to make changes.');
@@ -114,6 +141,25 @@ export default function SessionDetailPage() {
   const handleExportPPTX = () => {
     exportToPPTX();
   };
+
+  // Handle canvas mode change
+  const handleCanvasModeChange = useCallback((mode: CanvasMode) => {
+    // Save drawing state when switching away from draw mode
+    if (canvasMode === 'draw' && mode === 'plan') {
+      const currentDrawingState = getDrawingLayerState();
+      handleDrawingLayerChange(currentDrawingState);
+    }
+    setCanvasMode(mode);
+  }, [canvasMode, getDrawingLayerState, handleDrawingLayerChange]);
+
+  // Handle adding a new shape from the drawing panel
+  const handleAddShape = useCallback((type: DrawingShapeType, color: DrawingColorOption) => {
+    // Add shape at center of visible canvas area
+    // In a real implementation, you'd calculate this based on current viewport
+    const centerX = 400;
+    const centerY = 300;
+    addShape(type, centerX, centerY, color.fill, color.stroke);
+  }, [addShape]);
 
   // Show loading spinner during initial load
   if (!isMounted || isLoading || !isHydrated) {
@@ -169,18 +215,20 @@ export default function SessionDetailPage() {
           formattedDate={formattedDate}
           hasNoGuests={hasNoGuests}
           isLocked={isLocked}
+          canvasMode={canvasMode}
           onBack={handleBack}
           onSave={handleSave}
           onReset={handleReset}
           onManageGuests={() => setGuestModalOpen(true)}
           onExport={() => setExportModalOpen(true)}
           onToggleLock={handleToggleLock}
+          onCanvasModeChange={handleCanvasModeChange}
         />
       }
     >
 
       {/* Main Content - Seat Planner */}
-      {hasNoGuests ? (
+      {hasNoGuests && canvasMode === 'plan' ? (
         <Box
           sx={{
             flexGrow: 1,
@@ -210,29 +258,36 @@ export default function SessionDetailPage() {
         <div className="flex flex-1 overflow-hidden">
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden" id="playground-canvas">
-            {/* 🆕 Pass UI settings and lock state to canvas */}
+            {/* Pass canvas mode and lock state to canvas */}
             <PlayGroundCanvas 
               sessionType={session.sessionType}
               isLocked={isLocked}
               initialUISettings={uiSettings}
               onUISettingsChange={handleUISettingsChange}
+              canvasMode={canvasMode}
             />
 
-            {/* Seating Stats Panel with Boss Adjacency */}
-            <SeatingStatsPanel
-              eventId={eventId}
-              sessionId={sessionId}
-            />
+            {/* Seating Stats Panel - only show in plan mode */}
+            {canvasMode === 'plan' && (
+              <SeatingStatsPanel
+                eventId={eventId}
+                sessionId={sessionId}
+              />
+            )}
           </div>
 
-          {/* Right Panel - 🆕 Pass lock state */}
+          {/* Right Panel - switches based on mode */}
           <div className="w-80 bg-gray-100 border-l border-gray-300 overflow-y-auto">
-            <PlaygroundRightConfigPanel isLocked={isLocked} />
+            {canvasMode === 'plan' ? (
+              <PlaygroundRightConfigPanel isLocked={isLocked} />
+            ) : (
+              <DrawingConfigPanel onAddShape={handleAddShape} />
+            )}
           </div>
         </div>
       )}
 
-      {/* Unified Guest Management Modal */}
+      {/* Unified Guest Management Modal - only functional in plan mode */}
       <SessionGuestListModal
         open={guestModalOpen}
         onClose={() => setGuestModalOpen(false)}
