@@ -4,8 +4,6 @@ import { devtools, persist } from "zustand/middleware";
 export interface Guest {
   id: string;
   name: string;
-  gender: "Male" | "Female" | "Other";
-  salutation: string;
   country: string;
   company: string;
   title: string;

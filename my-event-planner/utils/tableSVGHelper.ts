@@ -339,7 +339,7 @@ export function generateGuestBoxData(
     const guest = s.assignedGuestId ? guestLookup[s.assignedGuestId] : null;
     if (!guest) return;
 
-    const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+    const name = guest.name || '';
     const stars = getRankStars(guest.ranking);
     const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
 
@@ -383,7 +383,7 @@ export function generateGuestBoxData(
     const relY = s.y - tableDatum.y;
     const { nx, ny, angle } = calculateRadialNormal(relX, relY);
 
-    const name = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+    const name = guest.name || '';
     const stars = getRankStars(guest.ranking);
     const line2 = `${guest.country || ''} | ${guest.company || ''}`.trim();
 
@@ -992,7 +992,7 @@ function renderPhotoSeats(
         .text(stars);
 
       // Name (Multi-line with NO ellipsis - full name displayed)
-      const fullName = `${guest.salutation || ''} ${guest.name || ''}`.trim();
+      const fullName = guest.name || '';
       const nameLines = wrapTextToLines(fullName, 14);
       
       // Calculate font size based on number of lines (smaller for more lines)

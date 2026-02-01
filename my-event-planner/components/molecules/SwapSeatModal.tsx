@@ -287,7 +287,7 @@ export default function SwapSeatModal({
 
           <Stack direction="row" alignItems="center" justifyContent="space-between">
             <Typography variant="subtitle1" fontWeight="bold">
-              {guest.salutation} {guest.name}
+              {guest.name}
             </Typography>
             {isVIP && (
               <Chip
@@ -398,7 +398,7 @@ export default function SwapSeatModal({
                   color="text.secondary"
                   component="span"
                 >
-                  {candidate.guest?.title || ''} • {candidate.guest?.company || ''} • {candidate.guest?.country || ''}
+                  {candidate.guest?.title || ''} â€¢ {candidate.guest?.company || ''} â€¢ {candidate.guest?.country || ''}
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip
@@ -605,7 +605,7 @@ export default function SwapSeatModal({
                       fontWeight="bold"
                       sx={{ mb: 1, px: 1 }}
                     >
-                      ✓ Perfect Swaps (No Violations)
+                      âœ“ Perfect Swaps (No Violations)
                     </Typography>
                     {perfectSwaps.map(renderCandidateItem)}
                   </>
@@ -619,7 +619,7 @@ export default function SwapSeatModal({
                       fontWeight="bold"
                       sx={{ mt: perfectSwaps.length > 0 ? 2 : 0, mb: 1, px: 1 }}
                     >
-                      ⚠ Swaps with Violations
+                      âš  Swaps with Violations
                     </Typography>
                     {imperfectSwaps.map(renderCandidateItem)}
                   </>
@@ -671,7 +671,7 @@ export default function SwapSeatModal({
                       <Stack spacing={0.5} sx={{ mt: 1 }}>
                         {selectedCandidate.violationsAfterSwap.slice(0, 5).map((v, idx) => (
                           <Typography key={idx} variant="caption" display="block">
-                            • {v.type === 'sit-together' ? '🤝' : '🚫'} {v.guest1Name} & {v.guest2Name}
+                            â€¢ {v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«'} {v.guest1Name} & {v.guest2Name}
                           </Typography>
                         ))}
                         {selectedCandidate.violationsAfterSwap.length > 5 && (

@@ -43,12 +43,7 @@ import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import MealPlanModal from './MealPlanModal';
 
-const salutations = ['Mr.', 'Ms.', 'Mrs.', 'Dr.', 'Prof.'];
-const genders = ['Male', 'Female', 'Other'];
-const countries = ['Singapore', 'USA', 'UK', 'China', 'India', 'Japan', 'Australia'];
-
-// Define the known/required columns
-const KNOWN_COLUMNS = ['name', 'salutation', 'gender', 'country', 'company', 'title', 'ranking'];
+const KNOWN_COLUMNS = ['name', 'country', 'company', 'title', 'ranking'];
 
 interface MasterGuestListModalProps {
   open: boolean;
@@ -84,9 +79,7 @@ export default function MasterGuestListModal({
   
   const [addForm, setAddForm] = useState<Omit<Guest, 'id' | 'fromHost'>>({
     name: '',
-    gender: 'Male',
-    salutation: 'Mr.',
-    country: 'Singapore',
+    country: '',
     company: '',
     title: '',
     ranking: 10,
@@ -241,9 +234,7 @@ export default function MasterGuestListModal({
 
       return {
         name: row.Name || row.name || '',
-        salutation: row.Salutation || row.salutation || 'Mr.',
-        gender: (row.Gender || row.gender || 'Male') as Guest['gender'],
-        country: row.Country || row.country || 'Singapore',
+        country: row.Country || row.country || '',
         company: row.Company || row.company || '',
         title: row.Title || row.title || '',
         ranking,
@@ -268,8 +259,6 @@ export default function MasterGuestListModal({
     const template = [
       {
         Name: 'John Doe',
-        Salutation: 'Mr.',
-        Gender: 'Male',
         Country: 'Singapore',
         Company: 'Example Corp',
         Title: 'CEO',
@@ -300,8 +289,6 @@ export default function MasterGuestListModal({
     const exportData = guests.map(g => {
       const base: any = {
         Name: g.name,
-        Salutation: g.salutation,
-        Gender: g.gender,
         Country: g.country,
         Company: g.company,
         Title: g.title,
@@ -349,7 +336,7 @@ export default function MasterGuestListModal({
     setEditForm({});
   };
 
-  /* -------------------- âž• ADD GUEST -------------------- */
+  /* -------------------- ADD GUEST -------------------- */
   const handleAddGuest = () => {
     if (!addForm.name.trim()) return;
     
@@ -363,9 +350,7 @@ export default function MasterGuestListModal({
     
     setAddForm({
       name: '',
-      gender: 'Male',
-      salutation: 'Mr.',
-      country: 'Singapore',
+      country: '',
       company: '',
       title: '',
       ranking: 10,
@@ -478,7 +463,7 @@ export default function MasterGuestListModal({
               </Alert>
             )}
             <Typography variant="caption" display="block" sx={{ mt: 1 }} color="text.secondary">
-              Required columns: Name, Salutation, Gender, Country, Company, Title, Ranking
+              Required columns: Name, Country, Company, Title, Ranking
             </Typography>
             <Typography variant="caption" display="block" color="text.secondary">
               Ranking supports decimals (e.g., 1.5, 2.3) for finer priority control
@@ -498,19 +483,6 @@ export default function MasterGuestListModal({
             <Stack direction="row" flexWrap="wrap" spacing={1.5}>
               <TextField
                 size="small"
-                label="Salutation"
-                select
-                value={addForm.salutation}
-                onChange={(e) => setAddForm({ ...addForm, salutation: e.target.value })}
-                sx={{ minWidth: 100 }}
-              >
-                {salutations.map((s) => (
-                  <MenuItem key={s} value={s}>{s}</MenuItem>
-                ))}
-              </TextField>
-
-              <TextField
-                size="small"
                 label="Name"
                 value={addForm.name}
                 onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
@@ -519,29 +491,11 @@ export default function MasterGuestListModal({
 
               <TextField
                 size="small"
-                label="Gender"
-                select
-                value={addForm.gender}
-                onChange={(e) => setAddForm({ ...addForm, gender: e.target.value as Guest['gender'] })}
-                sx={{ minWidth: 100 }}
-              >
-                {genders.map((g) => (
-                  <MenuItem key={g} value={g}>{g}</MenuItem>
-                ))}
-              </TextField>
-
-              <TextField
-                size="small"
                 label="Country"
-                select
                 value={addForm.country}
                 onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
                 sx={{ minWidth: 140 }}
-              >
-                {countries.map((c) => (
-                  <MenuItem key={c} value={c}>{c}</MenuItem>
-                ))}
-              </TextField>
+              />
 
               <TextField
                 size="small"
@@ -609,7 +563,7 @@ export default function MasterGuestListModal({
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: '80px 160px 80px 100px 140px 140px 80px 100px 80px auto',
+              gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px auto',
               gap: 1,
               px: 1.5,
               py: 1,
@@ -619,9 +573,7 @@ export default function MasterGuestListModal({
               fontSize: '0.75rem',
             }}
           >
-            <Typography variant="caption" fontWeight="bold">Salutation</Typography>
             <Typography variant="caption" fontWeight="bold">Name</Typography>
-            <Typography variant="caption" fontWeight="bold">Gender</Typography>
             <Typography variant="caption" fontWeight="bold">Country</Typography>
             <Typography variant="caption" fontWeight="bold">Company</Typography>
             <Typography variant="caption" fontWeight="bold">Title</Typography>
@@ -660,7 +612,7 @@ export default function MasterGuestListModal({
                     key={guest.id}
                     sx={{
                       display: 'grid',
-                      gridTemplateColumns: '80px 160px 80px 100px 140px 140px 80px 100px 80px auto',
+                      gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px auto',
                       gap: 1,
                       alignItems: 'center',
                       p: 1.5,
@@ -673,37 +625,15 @@ export default function MasterGuestListModal({
                       <>
                         <TextField
                           size="small"
-                          select
-                          value={editForm.salutation || guest.salutation}
-                          onChange={(e) => setEditForm({ ...editForm, salutation: e.target.value })}
-                          sx={{ minWidth: 70 }}
-                        >
-                          {salutations.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                        </TextField>
-
-                        <TextField
-                          size="small"
                           value={editForm.name ?? guest.name}
                           onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
                         />
 
                         <TextField
                           size="small"
-                          select
-                          value={editForm.gender || guest.gender}
-                          onChange={(e) => setEditForm({ ...editForm, gender: e.target.value as Guest['gender'] })}
-                        >
-                          {genders.map(g => <MenuItem key={g} value={g}>{g}</MenuItem>)}
-                        </TextField>
-
-                        <TextField
-                          size="small"
-                          select
-                          value={editForm.country || guest.country}
+                          value={editForm.country ?? guest.country}
                           onChange={(e) => setEditForm({ ...editForm, country: e.target.value })}
-                        >
-                          {countries.map(c => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                        </TextField>
+                        />
 
                         <TextField
                           size="small"
@@ -747,9 +677,7 @@ export default function MasterGuestListModal({
                       </>
                     ) : (
                       <>
-                        <Typography variant="body2">{guest.salutation}</Typography>
                         <Typography variant="body2" fontWeight={500}>{guest.name}</Typography>
-                        <Typography variant="body2" color="text.secondary">{guest.gender}</Typography>
                         <Typography variant="body2" color="text.secondary">{guest.country}</Typography>
                         <Typography variant="body2" color="text.secondary" noWrap>{guest.company}</Typography>
                         <Typography variant="body2" color="text.secondary" noWrap>{guest.title}</Typography>

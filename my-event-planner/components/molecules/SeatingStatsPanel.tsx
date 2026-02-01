@@ -684,7 +684,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                         sx={{ fontWeight: 'bold' }}
                                       />
                                       <Typography variant="body2" fontWeight="bold">
-                                        {guest.salutation} {guest.name}
+                                        {guest.name}
                                       </Typography>
                                     </Stack>
                                   }
@@ -726,7 +726,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                         sx={{ fontWeight: 'bold' }}
                                       />
                                       <Typography variant="body2" fontWeight="bold">
-                                        {guest.salutation} {guest.name}
+                                        {guest.name}
                                       </Typography>
                                     </Stack>
                                   }
@@ -823,7 +823,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                           <Stack direction="row" spacing={1} alignItems="center" mb={0.5}>
                             <Visibility color="primary" fontSize="small" />
                             <Typography variant="subtitle2" fontWeight={600}>
-                              {current.trackedGuest.salutation} {current.trackedGuest.name}
+                              {current.trackedGuest.name}
                             </Typography>
                             {!current.isSeated ? (
                               <Chip
@@ -864,7 +864,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                   }}
                                 >
                                   <Typography variant="body2" sx={{ flexGrow: 1 }}>
-                                    {adj.guest.salutation} {adj.guest.name}
+                                    {adj.guest.name}
                                     <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                                       {adj.guest.company}
                                     </Typography>
@@ -904,10 +904,10 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                               <Visibility color="primary" fontSize="small" />
                               <Box flexGrow={1}>
                                 <Typography variant="subtitle2" fontWeight={600}>
-                                  {history.trackedGuest.salutation} {history.trackedGuest.name}
+                                  {history.trackedGuest.name}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  {history.trackedGuest.company} • {history.trackedGuest.fromHost ? 'Host' : 'External'}
+                                  {history.trackedGuest.company} â€¢ {history.trackedGuest.fromHost ? 'Host' : 'External'}
                                 </Typography>
                               </Box>
                               <Stack direction="row" spacing={1}>
@@ -951,7 +951,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                     >
                                       <TableCell>
                                         <Typography variant="body2" fontWeight={500}>
-                                          {adj.guest.salutation} {adj.guest.name}
+                                          {adj.guest.name}
                                         </Typography>
                                         <Typography variant="caption" color="text.secondary">
                                           {adj.guest.title}

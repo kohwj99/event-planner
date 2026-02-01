@@ -824,7 +824,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                       Define rank partitions to randomize. Guests within each partition will be shuffled randomly
                       while maintaining their group position relative to other ranks.
                       <br />
-                      <strong>Formula:</strong> minRank ≤ rank &lt; maxRank
+                      <strong>Formula:</strong> minRank â‰¤ rank &lt; maxRank
                     </Typography>
 
                     <Stack spacing={1.5}>
@@ -847,7 +847,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                           <TextField
                             size="small"
                             type="number"
-                            label="Min Rank (≥)"
+                            label="Min Rank (â‰¥)"
                             value={partition.minRank}
                             onChange={(e) => updateRandomizePartition(partition.id, 'minRank', Math.round(parseFloat(e.target.value) * 10) / 10  || 1)}
                             inputProps={{ min: 0, max: 9 }}
@@ -974,7 +974,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                             />
                             <Box>
                               <Typography variant="body2" fontWeight={600}>
-                                {rec.vipGuest.salutation} {rec.vipGuest.name}
+                                {rec.vipGuest.name}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {rec.vipGuest.company} - {rec.vipGuest.fromHost ? 'Host' : 'External'}
@@ -992,7 +992,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                             <VisibilityIcon fontSize="small" color="primary" />
                             <Box>
                               <Typography variant="body2" fontWeight={500}>
-                                {rec.trackedGuest.salutation} {rec.trackedGuest.name}
+                                {rec.trackedGuest.name}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {rec.trackedGuest.company} - Tracked
@@ -1312,7 +1312,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
           onClick={handleConfirm}
           disabled={isProcessing || (!includeHost && !includeExternal) || validationErrors.length > 0}
         >
-          {isProcessing ? 'Fillingâ€¦' : 'Confirm Auto-Fill'}
+          {isProcessing ? 'FillingÃ¢â‚¬Â¦' : 'Confirm Auto-Fill'}
         </Button>
       </DialogActions>
     </Dialog>

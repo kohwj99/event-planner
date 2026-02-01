@@ -58,7 +58,7 @@ interface SessionGuestListModalProps {
 
 type MainTabValue = 'attendees' | 'seating';
 type GuestTypeTab = 'host' | 'external';
-type SortField = 'name' | 'gender' | 'company' | 'country' | 'title' | 'ranking';
+type SortField = 'name' | 'company' | 'country' | 'title' | 'ranking';
 type SortDirection = 'asc' | 'desc';
 
 interface SortConfig {
@@ -75,7 +75,6 @@ interface RankRangeFilter {
 // Column configuration for consistent ordering
 const COLUMNS: { field: SortField; label: string; width: number }[] = [
   { field: 'name', label: 'Name', width: 180 },
-  { field: 'gender', label: 'Gender', width: 80 },
   { field: 'company', label: 'Company', width: 150 },
   { field: 'country', label: 'Country', width: 100 },
   { field: 'title', label: 'Title', width: 150 },
@@ -291,7 +290,6 @@ export default function SessionGuestListModal({
   const getGuestValue = (guest: Guest, field: SortField): string | number => {
     switch (field) {
       case 'name': return guest.name ?? '';
-      case 'gender': return guest.gender ?? '';
       case 'company': return guest.company ?? '';
       case 'country': return guest.country ?? '';
       case 'title': return guest.title ?? '';
@@ -334,7 +332,6 @@ export default function SessionGuestListModal({
       const q = searchFilter.toLowerCase();
       result = result.filter(g => 
         (g.name ?? '').toLowerCase().includes(q) ||
-        (g.gender ?? '').toLowerCase().includes(q) ||
         (g.company ?? '').toLowerCase().includes(q) ||
         (g.country ?? '').toLowerCase().includes(q) ||
         (g.title ?? '').toLowerCase().includes(q) ||
@@ -830,7 +827,7 @@ export default function SessionGuestListModal({
             <TextField
               size="small"
               fullWidth
-              placeholder="Search by name, gender, company, country, title, or rank..."
+              placeholder="Search by name, company, country, title, or rank..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               sx={{ mb: 2 }}
@@ -991,7 +988,6 @@ export default function SessionGuestListModal({
                 ) : (
                   filteredSortedMasterGuests.map((guest) => {
                     const isSelected = attendeesSelectedIds.has(guest.id);
-                    const fullName = `${guest.salutation} ${guest.name}`.trim();
 
                     return (
                       <Stack
@@ -1022,15 +1018,10 @@ export default function SessionGuestListModal({
                         </Box>
 
                         <TruncatedCell 
-                          text={fullName} 
+                          text={guest.name} 
                           width={180} 
                           fontWeight={500} 
                           color="text.primary" 
-                        />
-
-                        <TruncatedCell 
-                          text={guest.gender || ''} 
-                          width={80} 
                         />
 
                         <TruncatedCell 
@@ -1133,7 +1124,7 @@ export default function SessionGuestListModal({
               <TextField
                 size="small"
                 fullWidth
-                placeholder="Search by name, gender, company, country, title, or rank..."
+                placeholder="Search by name, company, country, title, or rank..."
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 sx={{ mb: 2 }}
@@ -1277,7 +1268,6 @@ export default function SessionGuestListModal({
                     filteredSortedActiveGuests.map((guest) => {
                       const seatInfo = getGuestSeatInfo(guest.id);
                       const isHidden = guest.deleted;
-                      const fullName = `${guest.salutation} ${guest.name}`.trim();
                       const seatLabel = seatInfo ? `${seatInfo.tableName} - Seat ${seatInfo.seatNumber}` : '';
 
                       return (
@@ -1295,16 +1285,11 @@ export default function SessionGuestListModal({
                           }}
                         >
                           <TruncatedCell 
-                            text={fullName} 
+                            text={guest.name} 
                             width={180} 
                             fontWeight={500} 
                             color="text.primary"
                             textDecoration={isHidden ? 'line-through' : undefined}
-                          />
-
-                          <TruncatedCell 
-                            text={guest.gender || ''} 
-                            width={80} 
                           />
 
                           <TruncatedCell 
