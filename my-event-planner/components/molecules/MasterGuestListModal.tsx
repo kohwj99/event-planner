@@ -23,7 +23,7 @@ import {
   Switch,
   Tooltip,
 } from '@mui/material';
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
 import { 
@@ -59,12 +59,10 @@ export default function MasterGuestListModal({
   const event = useEventStore((s) => s.events.find(e => e.id === eventId));
   const addMasterGuest = useEventStore((s) => s.addMasterGuest);
   const updateEventDetails = useEventStore((s) => s.updateEventDetails);
-  const updateEventTrackedGuests = useEventStore((s) => s.updateEventTrackedGuests);
 
   // Tracking Store
   const toggleGuestTracking = useEventStore((s) => s.toggleGuestTracking);
   const isGuestTracked = useEventStore((s) => s.isGuestTracked);
-  const getTrackedGuests = useEventStore((s) => s.getTrackedGuests);
 
   const [tab, setTab] = useState<'host' | 'external'>('host');
   const [filter, setFilter] = useState('');

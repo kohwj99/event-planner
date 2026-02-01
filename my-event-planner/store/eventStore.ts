@@ -12,7 +12,7 @@ import {
   PlanningOrderTracker,
   DEFAULT_EVENT_TRACKING,
   ensureTrackingFields,
-  // 🆕 Import new types for session rules
+  // ðŸ†• Import new types for session rules
   SessionRulesConfig,
   DEFAULT_SESSION_RULES,
   StoredProximityViolation,
@@ -20,7 +20,7 @@ import {
   SortRule,
   TableRules,
   GuestListSelection,
-  // 🆕 Import UI settings types
+  // ðŸ†• Import UI settings types
   SessionUISettings,
   DEFAULT_SESSION_UI_SETTINGS,
 } from "@/types/Event";
@@ -28,7 +28,7 @@ import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
 import { calculateVIPExposure, AdjacencyMap } from "@/utils/eventStatisticHelper";
-import { getEnhancedAdjacentSeats, EnhancedAdjacency } from "@/utils/adjacencyHelper";
+import { getEnhancedAdjacentSeats } from "@/utils/adjacencyHelper";
 
 interface EventStoreState {
   /* -------------------- State -------------------- */
@@ -114,7 +114,7 @@ interface EventStoreState {
     isLocked?: boolean;
   } | null;
 
-  /* -------------------- ðŸ†• SESSION RULES MANAGEMENT -------------------- */
+  /* -------------------- Ã°Å¸â€ â€¢ SESSION RULES MANAGEMENT -------------------- */
   
   /**
    * Save session rules configuration (sort order, proximity rules, table rules, guest selection)
@@ -167,7 +167,7 @@ interface EventStoreState {
     violations: StoredProximityViolation[];
   };
 
-  /* -------------------- 🔒 SESSION LOCK MANAGEMENT -------------------- */
+  /* -------------------- ðŸ”’ SESSION LOCK MANAGEMENT -------------------- */
   
   /**
    * Toggle session lock state
@@ -185,7 +185,7 @@ interface EventStoreState {
    */
   isSessionLocked: (sessionId: string) => boolean;
 
-  /* -------------------- 🖼️ SESSION UI SETTINGS MANAGEMENT -------------------- */
+  /* -------------------- ðŸ–¼ï¸ SESSION UI SETTINGS MANAGEMENT -------------------- */
   
   /**
    * Save session UI settings (zoom, connector gap, display modes, etc.)
@@ -233,7 +233,7 @@ interface EventStoreState {
   /** Computes full datetime (ISO string) from day date + session start time for chronological ordering */
   getSessionDateTime: (sessionId: string) => string | null;
 
-  /* -------------------- ðŸ“Š Adjacency Recording -------------------- */
+  /* -------------------- Ã°Å¸â€œÅ  Adjacency Recording -------------------- */
   recordSessionAdjacency: (
     eventId: string,
     sessionId: string,
@@ -428,7 +428,7 @@ export const useEventStore = create<EventStoreState>()(
                             chunks: {},
                             activeGuestIds: [],
                           },
-                          // ðŸ†• Initialize with default rules
+                          // Ã°Å¸â€ â€¢ Initialize with default rules
                           rulesConfig: { ...DEFAULT_SESSION_RULES },
                           storedViolations: [],
                         },
@@ -656,7 +656,7 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ==================== ðŸ†• SESSION RULES MANAGEMENT ==================== */
+        /* ==================== Ã°Å¸â€ â€¢ SESSION RULES MANAGEMENT ==================== */
         
         saveSessionRules: (eventId, dayId, sessionId, rulesConfig) =>
           set((state) => {
@@ -806,7 +806,7 @@ export const useEventStore = create<EventStoreState>()(
           };
         },
 
-        /* ==================== 🔒 SESSION LOCK MANAGEMENT ==================== */
+        /* ==================== ðŸ”’ SESSION LOCK MANAGEMENT ==================== */
         
         toggleSessionLock: (eventId, dayId, sessionId) =>
           set((state) => ({
@@ -873,7 +873,7 @@ export const useEventStore = create<EventStoreState>()(
           return false;
         },
 
-        /* ==================== 🖼️ SESSION UI SETTINGS MANAGEMENT ==================== */
+        /* ==================== ðŸ–¼ï¸ SESSION UI SETTINGS MANAGEMENT ==================== */
         
         saveSessionUISettings: (eventId, dayId, sessionId, uiSettings) =>
           set((state) => ({

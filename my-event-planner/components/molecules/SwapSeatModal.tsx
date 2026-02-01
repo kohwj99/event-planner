@@ -43,7 +43,6 @@ import {
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
 import { getSwapCandidates, getIncompatibleSwapCandidates } from '@/utils/swapHelper';
-import { countViolations } from '@/utils/violationDetector';
 import type { ProximityViolation } from '@/utils/violationDetector';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 

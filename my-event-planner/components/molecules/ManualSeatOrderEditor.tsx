@@ -157,7 +157,6 @@ export default function ManualSeatOrderEditor({
   currentOrdering,
   seatModes = [],
   onOrderingChange,
-  onComplete,
   size = 'medium',
   showLabels = true,
   colorScheme: propColorScheme,
@@ -207,7 +206,7 @@ export default function ManualSeatOrderEditor({
   // Initialize from current ordering when it changes externally
   useEffect(() => {
     if (currentOrdering.length === effectiveTotalSeats) {
-      // Build map from position → seat number
+      // Build map from position â†’ seat number
       const newMap = new Map<number, number>();
       currentOrdering.forEach((seatNum, posIndex) => {
         newMap.set(posIndex, seatNum);
@@ -278,12 +277,6 @@ export default function ManualSeatOrderEditor({
     setNextSeatNumber(1);
     onOrderingChange(new Array(effectiveTotalSeats).fill(0));
   }, [effectiveTotalSeats, onOrderingChange]);
-
-  const handleComplete = useCallback(() => {
-    if (isComplete && onComplete) {
-      onComplete();
-    }
-  }, [isComplete, onComplete]);
 
   // Get mode colors
   const getModeColors = (mode: SeatMode) => {
@@ -506,7 +499,7 @@ export default function ManualSeatOrderEditor({
             <strong>Current Sequence:</strong>{' '}
             {getCurrentOrdering()
               .map((num, idx) => (num > 0 ? num : '?'))
-              .join(' → ')}
+              .join(' â†’ ')}
           </Typography>
         </Paper>
       )}

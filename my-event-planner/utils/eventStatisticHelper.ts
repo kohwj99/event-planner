@@ -1,6 +1,5 @@
 import { Session } from "@/types/Event";
 import { Guest } from "@/store/guestStore";
-import { Table } from "@/types/Table";
 
 // Interface for the result
 export interface AdjacencyMap {

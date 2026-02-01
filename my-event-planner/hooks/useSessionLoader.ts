@@ -16,8 +16,8 @@ import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTING
  * 4. Loading and saving session rules (proximity rules, sort order, table rules)
  * 5. Loading and saving violations
  * 6. CRITICAL: Syncing guestStore with eventStore session guests
- * 7. 🆕 Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
- * 8. 🆕 Session lock state management
+ * 7. ðŸ†• Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
+ * 8. ðŸ†• Session lock state management
  * 
  * NOTE: All tracking functionality is now in eventStore.
  * No separate trackingStore import is needed.
@@ -29,11 +29,11 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Track if component has mounted to prevent SSR issues
   const [isMounted, setIsMounted] = useState(false);
   
-  // 🆕 UI Settings state - will be passed to PlaygroundCanvas
+  // ðŸ†• UI Settings state - will be passed to PlaygroundCanvas
   const [uiSettings, setUISettings] = useState<SessionUISettings>(DEFAULT_SESSION_UI_SETTINGS);
   const [isLocked, setIsLocked] = useState(false);
   
-  // 🆕 Track session context for saving UI settings
+  // ðŸ†• Track session context for saving UI settings
   const sessionContextRef = useRef<{ eventId: string; dayId: string } | null>(null);
   
   useEffect(() => {
@@ -58,13 +58,11 @@ export const useSessionLoader = (sessionId: string | null) => {
   const saveSessionViolations = useEventStore((state) => state.saveSessionViolations);
   const loadSessionViolations = useEventStore((state) => state.loadSessionViolations);
   
-  // 🆕 UI Settings methods
+  // UI Settings methods
   const saveSessionUISettings = useEventStore((state) => state.saveSessionUISettings);
-  const loadSessionUISettings = useEventStore((state) => state.loadSessionUISettings);
   
-  // 🆕 Lock methods
+  // Lock methods
   const toggleSessionLockStore = useEventStore((state) => state.toggleSessionLock);
-  const isSessionLockedStore = useEventStore((state) => state.isSessionLocked);
   
   // Tracking functions - now from eventStore
   const isSessionTracked = useEventStore((state) => state.isSessionTracked);
@@ -78,7 +76,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Guest Store - now using setGuests for bulk sync
   const setGuests = useGuestStore((state) => state.setGuests);
   
-  // 🆕 Color Mode Store - for colorblind mode sync
+  // ðŸ†• Color Mode Store - for colorblind mode sync
   const setColorMode = useColorModeStore((state) => state.setColorMode);
 
   // Save current session before switching
@@ -104,13 +102,13 @@ export const useSessionLoader = (sessionId: string | null) => {
     console.log(`[useSessionLoader] Saving session: ${sessionData.session.name}`);
     console.log(`[useSessionLoader] Saving UI settings:`, uiSettings);
     
-    // 🆕 Save seat plan to event store (including uiSettings)
+    // ðŸ†• Save seat plan to event store (including uiSettings)
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
-      uiSettings, // 🆕 Include UI settings in seat plan
+      uiSettings, // ðŸ†• Include UI settings in seat plan
     });
 
     // Save violations to session
@@ -159,7 +157,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
-    uiSettings, // 🆕 Include uiSettings in dependencies
+    uiSettings, // ðŸ†• Include uiSettings in dependencies
   ]);
 
   // Load session data
@@ -172,7 +170,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       return;
     }
 
-    // 🆕 Store context for saving UI settings
+    // ðŸ†• Store context for saving UI settings
     sessionContextRef.current = {
       eventId: sessionData.eventId,
       dayId: sessionData.dayId,
@@ -191,15 +189,15 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
       });
       
-      // 🆕 Load UI settings
+      // ðŸ†• Load UI settings
       const loadedUISettings = seatPlan.uiSettings ?? DEFAULT_SESSION_UI_SETTINGS;
       console.log('[useSessionLoader] Loading UI settings:', loadedUISettings);
       setUISettings(loadedUISettings);
       
-      // 🆕 Apply colorblind mode to global store
+      // ðŸ†• Apply colorblind mode to global store
       setColorMode(loadedUISettings.isColorblindMode ? 'colorblind' : 'standard');
       
-      // 🆕 Load lock state
+      // ðŸ†• Load lock state
       const locked = seatPlan.isLocked ?? false;
       setIsLocked(locked);
       console.log('[useSessionLoader] Session lock state:', locked);
@@ -209,7 +207,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       console.log('[useSessionLoader] Initializing new session with default chunk');
       resetTables();
       
-      // 🆕 Reset UI settings to defaults for new session
+      // ðŸ†• Reset UI settings to defaults for new session
       setUISettings(DEFAULT_SESSION_UI_SETTINGS);
       setIsLocked(false);
       setColorMode('standard');
@@ -291,11 +289,11 @@ export const useSessionLoader = (sessionId: string | null) => {
     setGuests, 
     setActiveSession, 
     resetTables,
-    setColorMode, // 🆕
+    setColorMode, // ðŸ†•
   ]);
 
   /**
-   * 🆕 Handle UI settings changes from PlaygroundCanvas
+   * ðŸ†• Handle UI settings changes from PlaygroundCanvas
    * This is called when user changes connector gap, photo mode, etc.
    */
   const handleUISettingsChange = useCallback((newSettings: SessionUISettings) => {
@@ -318,7 +316,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   }, [sessionId, saveSessionUISettings, setColorMode]);
   
   /**
-   * 🆕 Toggle session lock state
+   * ðŸ†• Toggle session lock state
    */
   const handleToggleLock = useCallback(() => {
     if (!sessionId || !sessionContextRef.current) return;
@@ -404,7 +402,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     saveCurrentSession,
     resyncGuests,
     isHydrated: isReady,
-    // 🆕 UI Settings and Lock
+    // ðŸ†• UI Settings and Lock
     uiSettings,
     isLocked,
     handleUISettingsChange,

@@ -1,6 +1,5 @@
 import { Chunk, CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 import { Table } from "@/types/Table";
-import { SeatMode } from "@/types/Seat";
 import { moveTableGeometry } from "@/utils/tableGeometryHelper";
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
@@ -19,13 +18,13 @@ import {
   GuestInfo,
 } from "@/utils/seatValidation";
 
-/* -------------------- 🧩 Types for Proximity Rules -------------------- */
+/* -------------------- ðŸ§© Types for Proximity Rules -------------------- */
 export interface ProximityRules {
   sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>;
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
 }
 
-/* -------------------- 🧠 Store Interface -------------------- */
+/* -------------------- ðŸ§  Store Interface -------------------- */
 interface SeatStoreState {
   tables: Table[];
   chunks: Record<string, Chunk>;
@@ -63,7 +62,7 @@ interface SeatStoreState {
   setGuestLookup: (lookup: Record<string, any>) => void;
   detectViolations: () => void;
 
-  // 🔵 Table-level operations
+  // ðŸ”µ Table-level operations
   lockAllSeatsInTable: (tableId: string) => void;
   unlockAllSeatsInTable: (tableId: string) => void;
   deleteTable: (tableId: string) => void;
@@ -85,7 +84,7 @@ interface SeatStoreState {
   } | null;
 }
 
-/* -------------------- 🧩 Helper: Extract table number from label -------------------- */
+/* -------------------- ðŸ§© Helper: Extract table number from label -------------------- */
 function extractTableNumber(label: string): number | null {
   const match = label.match(/(\d+)\s*$/);
   return match ? parseInt(match[1], 10) : null;
@@ -95,7 +94,7 @@ function updateTableLabel(label: string, newNumber: number): string {
   return label.replace(/(\d+)\s*$/, `${newNumber}`);
 }
 
-/* -------------------- 🧩 Zustand Store -------------------- */
+/* -------------------- ðŸ§© Zustand Store -------------------- */
 export const useSeatStore = create<SeatStoreState>()(
   devtools(
     persist(
@@ -168,7 +167,7 @@ export const useSeatStore = create<SeatStoreState>()(
             })),
           })),
 
-        /* ---------- 🧑 Guest Seat Assignment with Validation ---------- */
+        /* ---------- ðŸ§‘ Guest Seat Assignment with Validation ---------- */
         /**
          * Assign a guest to a seat with seat mode validation
          * Uses centralized validateGuestSeatAssignment function
@@ -265,7 +264,7 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Assignment failed:', assignResult.error);
           }
 
-          // ✅ TRIGGER VIOLATION DETECTION after assignment
+          // âœ… TRIGGER VIOLATION DETECTION after assignment
           if (assignResult.success) {
             get().detectViolations();
           }
@@ -307,7 +306,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // ✅ TRIGGER VIOLATION DETECTION after clearing seat
+          // âœ… TRIGGER VIOLATION DETECTION after clearing seat
           get().detectViolations();
         },
 
@@ -357,7 +356,7 @@ export const useSeatStore = create<SeatStoreState>()(
 
         setSelectedMealPlanIndex: (index) => set({ selectedMealPlanIndex: index }),
 
-        /* ---------- 🔄 Swap Seats with Validation ---------- */
+        /* ---------- ðŸ”„ Swap Seats with Validation ---------- */
         /**
          * Swap two guests between seats with seat mode validation
          * Uses centralized validateSeatSwap function
@@ -487,7 +486,7 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Swap failed:', swapResult.error);
           }
 
-          // ✅ TRIGGER VIOLATION DETECTION after swap
+          // âœ… TRIGGER VIOLATION DETECTION after swap
           if (swapResult.success) {
             get().detectViolations();
           }
@@ -495,7 +494,7 @@ export const useSeatStore = create<SeatStoreState>()(
           return swapResult.success;
         },
 
-        /* ---------- 🔍 VIOLATION DETECTION ---------- */
+        /* ---------- ðŸ” VIOLATION DETECTION ---------- */
         setProximityRules: (rules) => set({ proximityRules: rules }),
 
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
@@ -511,18 +510,18 @@ export const useSeatStore = create<SeatStoreState>()(
             return;
           }
 
-          console.log('🔍 Running violation detection...');
+          console.log('ðŸ” Running violation detection...');
           const violations = detectProximityViolations(
             state.tables,
             state.proximityRules,
             state.guestLookup
           );
 
-          console.log(`🔍 Detected ${violations.length} violations`);
+          console.log(`ðŸ” Detected ${violations.length} violations`);
           set({ violations });
         },
 
-        /* ---------- 🔵 TABLE-LEVEL OPERATIONS ---------- */
+        /* ---------- ðŸ”µ TABLE-LEVEL OPERATIONS ---------- */
 
         lockAllSeatsInTable: (tableId) =>
           set((state) => ({
@@ -568,7 +567,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // ✅ TRIGGER VIOLATION DETECTION after clearing all seats
+          // âœ… TRIGGER VIOLATION DETECTION after clearing all seats
           get().detectViolations();
         },
 
@@ -608,7 +607,7 @@ export const useSeatStore = create<SeatStoreState>()(
             };
           });
 
-          // ✅ TRIGGER VIOLATION DETECTION after deleting table
+          // âœ… TRIGGER VIOLATION DETECTION after deleting table
           get().detectViolations();
         },
 
@@ -619,7 +618,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // ✅ TRIGGER VIOLATION DETECTION after replacing table (seats may have changed)
+          // âœ… TRIGGER VIOLATION DETECTION after replacing table (seats may have changed)
           get().detectViolations();
         },
 

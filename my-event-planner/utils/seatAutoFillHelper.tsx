@@ -13,7 +13,7 @@
 
 import { useSeatStore } from "@/store/seatStore";
 import { useGuestStore } from "@/store/guestStore";
-import { detectProximityViolations, ProximityViolation } from './violationDetector';
+import { ProximityViolation } from './violationDetector';
 import { SeatMode, canGuestSitInSeat } from '@/types/Seat';
 
 export type SortField = "name" | "country" | "organization" | "ranking";

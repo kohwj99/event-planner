@@ -2,18 +2,15 @@
 
 import React, { useEffect, useState, createContext, useContext, ReactNode } from 'react';
 import { useEventStore } from '@/store/eventStore';
-// import { useTrackingStore } from '@/store/trackingStore';
 
 interface HydrationContextValue {
   isHydrated: boolean;
   eventStoreReady: boolean;
-  // trackingStoreReady: boolean;
 }
 
 const HydrationContext = createContext<HydrationContextValue>({
   isHydrated: false,
   eventStoreReady: false,
-  // trackingStoreReady: false,
 });
 
 export const useHydrationContext = () => useContext(HydrationContext);
@@ -36,18 +33,17 @@ export function StoreHydrationProvider({ children }: StoreHydrationProviderProps
     setIsMounted(true);
   }, []);
 
-  // Subscribe to hydration state from both stores
+  // Subscribe to hydration state from store
   // Only access store state after mounting to avoid SSR mismatch
   const eventStoreHydrated = useEventStore((state) => state._hasHydrated);
-  // const trackingStoreHydrated = useTrackingStore((state) => state._hasHydrated);
 
   useEffect(() => {
     // Only check hydration after component has mounted on client
     if (!isMounted) return;
     
-    // Check if both stores have hydrated
+    // Check if store has hydrated
     if (eventStoreHydrated) {
-      console.log('✅ All stores hydrated successfully');
+      console.log('All stores hydrated successfully');
       setIsHydrated(true);
     }
   }, [isMounted, eventStoreHydrated]);
@@ -57,42 +53,32 @@ export function StoreHydrationProvider({ children }: StoreHydrationProviderProps
     if (!isMounted) return;
     
     const unsubscribeEvent = useEventStore.persist.onFinishHydration(() => {
-      console.log('📦 EventStore: onFinishHydration triggered');
+      console.log('EventStore: onFinishHydration triggered');
     });
-
-    // const unsubscribeTracking = useTrackingStore.persist.onFinishHydration(() => {
-    //   console.log('📦 TrackingStore: onFinishHydration triggered');
-    // });
 
     // Check if already hydrated (for hot reloads)
     const eventReady = useEventStore.persist.hasHydrated();
-    // const trackingReady = useTrackingStore.persist.hasHydrated();
     
     if (eventReady) {
-      console.log('✅ Stores already hydrated (hot reload or fast load)');
+      console.log('Stores already hydrated (hot reload or fast load)');
       
       // Manually trigger our hydration flag if the persist API says we're ready
       // but our state flag hasn't been set yet
       if (!useEventStore.getState()._hasHydrated) {
         useEventStore.getState().setHasHydrated(true);
       }
-      // if (!useTrackingStore.getState()._hasHydrated) {
-      //   useTrackingStore.getState().setHasHydrated(true);
-      // }
       
       setIsHydrated(true);
     }
 
     return () => {
       unsubscribeEvent();
-      // unsubscribeTracking();
     };
   }, [isMounted]);
 
   const contextValue: HydrationContextValue = {
     isHydrated,
     eventStoreReady: isMounted && eventStoreHydrated,
-    // trackingStoreReady: isMounted && trackingStoreHydrated,
   };
 
   return (

@@ -28,7 +28,7 @@ import {
   Tab,
   Alert,
 } from '@mui/material';
-import { Refresh, Warning } from '@mui/icons-material';
+import { Warning } from '@mui/icons-material';
 import { Table } from '@/types/Table';
 import { SeatMode } from '@/types/Seat';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';

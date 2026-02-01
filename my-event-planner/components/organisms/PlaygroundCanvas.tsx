@@ -29,8 +29,6 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
 import CameraAlt from '@mui/icons-material/CameraAlt';
-import Alert from '@mui/material/Alert';
-import Lock from '@mui/icons-material/Lock';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
@@ -41,7 +39,7 @@ import { useColorScheme, useColorModeStore } from '@/store/colorModeStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
-import { EventType, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
+import { EventType, SessionUISettings } from '@/types/Event';
 
 // Import SVG helper functions
 import {
