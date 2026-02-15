@@ -56,6 +56,7 @@ import {
   DEFAULT_RANDOMIZE_ORDER,
   StoredProximityViolation,
 } from '@/types/Event';
+import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 
 interface AutoFillModalProps {
   open: boolean;
@@ -89,6 +90,7 @@ interface VIPRecommendation {
 }
 
 export default function AutoFillModal({ open, onClose, eventId, sessionId }: AutoFillModalProps) {
+  const captureSnapshot = useCaptureSnapshot();
   const { hostGuests, externalGuests, setGuests } = useGuestStore();
   const allGuests = [...hostGuests, ...externalGuests].filter((g) => !g.deleted);
 
@@ -609,6 +611,9 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
 
     setIsProcessing(true);
     try {
+      // Capture snapshot before autofill (includes rulesConfig for full undo)
+      captureSnapshot("AutoFill", true);
+
       // CRITICAL FIX: Sync guests from eventStore to guestStore before autofill
       // This ensures any newly added guests to the master list that were inherited
       // by this session are reflected in the guestStore that autoFillSeats reads from

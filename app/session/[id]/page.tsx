@@ -26,6 +26,8 @@ import { exportToPPTX } from '@/utils/exportToPPTX';
 import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
 import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
+import { useUndoRedo } from '@/hooks/useUndoRedo';
+import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
@@ -40,6 +42,12 @@ export default function SessionDetailPage() {
     handleUISettingsChange, 
     handleToggleLock,
   } = useSessionLoader(sessionId);
+
+  // Undo/Redo
+  const { captureSnapshot } = useUndoRedo({
+    sessionId,
+    isLocked,
+  });
 
   // Event Store
   const getSessionById = useEventStore((s) => s.getSessionById);
@@ -103,6 +111,7 @@ export default function SessionDetailPage() {
     }
     
     if (confirm('Are you sure you want to reset all tables? This will clear all seating arrangements.')) {
+      captureSnapshot("Reset Tables");
       resetTables();
     }
   };
@@ -161,6 +170,7 @@ export default function SessionDetailPage() {
   });
 
   return (
+    <UndoRedoProvider captureSnapshot={captureSnapshot}>
     <SessionDetailLayout
       header={
         <PlaygroundTopControlPanel
@@ -251,5 +261,6 @@ export default function SessionDetailPage() {
         onExportPPTX={handleExportPPTX}
       />
     </SessionDetailLayout>
+    </UndoRedoProvider>
   );
 }

@@ -32,6 +32,7 @@ import CameraAlt from '@mui/icons-material/CameraAlt';
 
 import AddTableModal, { TableConfig } from '@/components/molecules/AddTableModal';
 import ColorModeToggle from '@/components/atoms/ColorModeToggle';
+import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
@@ -112,6 +113,8 @@ export default function PlaygroundCanvas({
     expandWorldIfNeeded,
     cleanupEmptyChunks,
   } = useSeatStore();
+
+  const captureSnapshot = useCaptureSnapshot();
 
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
@@ -214,13 +217,15 @@ export default function PlaygroundCanvas({
 
   const handleLockSeat = useCallback((tableId: string, seatId: string, locked: boolean) => {
     if (isLocked) return;
+    captureSnapshot(locked ? "Lock Seat" : "Unlock Seat");
     lockSeat(tableId, seatId, locked);
-  }, [isLocked, lockSeat]);
+  }, [isLocked, lockSeat, captureSnapshot]);
 
   const handleClearSeat = useCallback((tableId: string, seatId: string) => {
     if (isLocked) return;
+    captureSnapshot("Clear Seat");
     clearSeat(tableId, seatId);
-  }, [isLocked, clearSeat]);
+  }, [isLocked, clearSeat, captureSnapshot]);
 
   // ============================================================================
   // MODAL & POPOVER HANDLERS
@@ -468,6 +473,7 @@ export default function PlaygroundCanvas({
         .on('start', function () {
           svgSelection.on('.zoom', null);
           d3.select(this).style('cursor', 'grabbing');
+          captureSnapshot("Move Table");
         })
         .on('drag', function (event, d) {
           const [px, py] = d3.pointer(event, svgEl);
@@ -499,7 +505,7 @@ export default function PlaygroundCanvas({
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    hideTableBodies, isPhotoMode, isLocked 
+    hideTableBodies, isPhotoMode, isLocked, captureSnapshot
   ]);
 
   // ============================================================================
@@ -508,7 +514,8 @@ export default function PlaygroundCanvas({
 
   const handleAddTable = (config: TableConfig) => {
     if (isLocked) return;
-    
+    captureSnapshot("Add Table");
+
     const svgEl = svgRef.current;
     if (!svgEl) return;
 
