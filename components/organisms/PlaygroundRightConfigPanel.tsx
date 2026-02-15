@@ -27,6 +27,7 @@ import {
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 import AssignGuestModal from '@/components/molecules/AssignGuestModal';
 import SwapSeatModal from '@/components/molecules/SwapSeatModal';
 import GuestReassignConfirmModal from '@/components/molecules/GuestReassignConfirmModal';
@@ -54,6 +55,8 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
     replaceTable,
     clearAllSeatsInTable,
   } = useSeatStore();
+
+  const captureSnapshot = useCaptureSnapshot();
 
   const { hostGuests, externalGuests } = useGuestStore();
   const guestLookup = [...hostGuests, ...externalGuests].reduce(
@@ -107,6 +110,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
     if (!selectedTableId || !selectedSeatId || isLocked) return;
 
     if (guestId === null) {
+      captureSnapshot("Clear Seat");
       clearSeat(selectedTableId, selectedSeatId);
       return;
     }
@@ -124,6 +128,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
       });
       setOpenReassignConfirm(true);
     } else {
+      captureSnapshot("Assign Guest");
       assignGuestToSeat(selectedTableId, selectedSeatId, guestId);
     }
   };
@@ -131,6 +136,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
   const handleConfirmReassign = () => {
     if (!pendingAssignment || !selectedTableId || !selectedSeatId || isLocked) return;
 
+    captureSnapshot("Assign Guest");
     clearSeat(pendingAssignment.currentTableId, pendingAssignment.currentSeatId);
     assignGuestToSeat(selectedTableId, selectedSeatId, pendingAssignment.guestId);
 
@@ -164,11 +170,13 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
   // Table-level action handlers - 🆕 Check isLocked
   const handleLockTable = () => {
     if (!selectedTableId || isLocked) return;
+    captureSnapshot("Lock All Seats");
     lockAllSeatsInTable(selectedTableId);
   };
 
   const handleUnlockTable = () => {
     if (!selectedTableId || isLocked) return;
+    captureSnapshot("Unlock All Seats");
     unlockAllSeatsInTable(selectedTableId);
   };
 
@@ -179,6 +187,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
 
   const handleConfirmDeleteTable = () => {
     if (!selectedTableId || isLocked) return;
+    captureSnapshot("Delete Table");
     deleteTable(selectedTableId);
     setOpenDeleteModal(false);
   };
@@ -190,6 +199,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
 
   const handleConfirmModifyTable = (newTable: Table) => {
     if (!selectedTableId || isLocked) return;
+    captureSnapshot("Modify Table");
     clearAllSeatsInTable(selectedTableId);
     replaceTable(selectedTableId, newTable);
     setOpenModifyModal(false);
@@ -406,7 +416,10 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
                   variant="outlined"
                   color="error"
                   disabled={!guest || isLocked}
-                  onClick={() => clearSeat(selectedTableId!, selectedSeatId!)}
+                  onClick={() => {
+                    captureSnapshot("Clear Seat");
+                    clearSeat(selectedTableId!, selectedSeatId!);
+                  }}
                   fullWidth
                 >
                   Clear Seat
@@ -418,7 +431,10 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
               <span>
                 <Button
                   variant="outlined"
-                  onClick={() => lockSeat(selectedTableId!, selectedSeatId!, !selectedSeat.locked)}
+                  onClick={() => {
+                    captureSnapshot(selectedSeat.locked ? "Unlock Seat" : "Lock Seat");
+                    lockSeat(selectedTableId!, selectedSeatId!, !selectedSeat.locked);
+                  }}
                   disabled={isLocked}
                   fullWidth
                 >

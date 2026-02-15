@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore } from '@/store/guestStore';
+import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 import { getSwapCandidates, getIncompatibleSwapCandidates } from '@/utils/swapHelper';
 import type { ProximityViolation } from '@/utils/violationDetector';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
@@ -120,6 +121,8 @@ export default function SwapSeatModal({
   const [filter, setFilter] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState<SwapCandidate | null>(null);
   const [showIncompatible, setShowIncompatible] = useState(false);
+
+  const captureSnapshot = useCaptureSnapshot();
 
   const tables = useSeatStore((s) => s.tables);
   const swapSeats = useSeatStore((s) => s.swapSeats);
@@ -220,6 +223,8 @@ export default function SwapSeatModal({
 
   const handleSwap = () => {
     if (!selectedCandidate) return;
+
+    captureSnapshot("Swap Seats");
 
     console.log('Initiating swap:', {
       source: { tableId: sourceTableId, seatId: sourceSeatId, guest: sourceGuest?.name },
