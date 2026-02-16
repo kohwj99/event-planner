@@ -16,8 +16,8 @@ import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTING
  * 4. Loading and saving session rules (proximity rules, sort order, table rules)
  * 5. Loading and saving violations
  * 6. CRITICAL: Syncing guestStore with eventStore session guests
- * 7. ðŸ†• Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
- * 8. ðŸ†• Session lock state management
+ * 7. Loading and saving UI settings (zoom, connector gap, photo mode, etc.)
+ * 8. Session lock state management
  * 
  * NOTE: All tracking functionality is now in eventStore.
  * No separate trackingStore import is needed.
@@ -29,11 +29,11 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Track if component has mounted to prevent SSR issues
   const [isMounted, setIsMounted] = useState(false);
   
-  // ðŸ†• UI Settings state - will be passed to PlaygroundCanvas
+  // UI Settings state - will be passed to PlaygroundCanvas
   const [uiSettings, setUISettings] = useState<SessionUISettings>(DEFAULT_SESSION_UI_SETTINGS);
   const [isLocked, setIsLocked] = useState(false);
   
-  // ðŸ†• Track session context for saving UI settings
+  // Track session context for saving UI settings
   const sessionContextRef = useRef<{ eventId: string; dayId: string } | null>(null);
   
   useEffect(() => {
@@ -76,7 +76,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   // Guest Store - now using setGuests for bulk sync
   const setGuests = useGuestStore((state) => state.setGuests);
   
-  // ðŸ†• Color Mode Store - for colorblind mode sync
+  // Color Mode Store - for colorblind mode sync
   const setColorMode = useColorModeStore((state) => state.setColorMode);
 
   // Save current session before switching
@@ -102,13 +102,13 @@ export const useSessionLoader = (sessionId: string | null) => {
     console.log(`[useSessionLoader] Saving session: ${sessionData.session.name}`);
     console.log(`[useSessionLoader] Saving UI settings:`, uiSettings);
     
-    // ðŸ†• Save seat plan to event store (including uiSettings)
+    // Save seat plan to event store (including uiSettings)
     saveSessionSeatPlan(sessionData.eventId, sessionData.dayId, currentSessionId, {
       tables,
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
-      uiSettings, // ðŸ†• Include UI settings in seat plan
+      uiSettings, // Include UI settings in seat plan
     });
 
     // Save violations to session
@@ -157,7 +157,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     isSessionTracked, 
     recordSessionAdjacency,
     getSessionPlanningOrder,
-    uiSettings, // ðŸ†• Include uiSettings in dependencies
+    uiSettings, // Include uiSettings in dependencies
   ]);
 
   // Load session data
@@ -170,7 +170,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       return;
     }
 
-    // ðŸ†• Store context for saving UI settings
+    // Store context for saving UI settings
     sessionContextRef.current = {
       eventId: sessionData.eventId,
       dayId: sessionData.dayId,
@@ -189,15 +189,15 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
       });
       
-      // ðŸ†• Load UI settings
+      // Load UI settings
       const loadedUISettings = seatPlan.uiSettings ?? DEFAULT_SESSION_UI_SETTINGS;
       console.log('[useSessionLoader] Loading UI settings:', loadedUISettings);
       setUISettings(loadedUISettings);
       
-      // ðŸ†• Apply colorblind mode to global store
+      // Apply colorblind mode to global store
       setColorMode(loadedUISettings.isColorblindMode ? 'colorblind' : 'standard');
       
-      // ðŸ†• Load lock state
+      // Load lock state
       const locked = seatPlan.isLocked ?? false;
       setIsLocked(locked);
       console.log('[useSessionLoader] Session lock state:', locked);
@@ -207,7 +207,7 @@ export const useSessionLoader = (sessionId: string | null) => {
       console.log('[useSessionLoader] Initializing new session with default chunk');
       resetTables();
       
-      // ðŸ†• Reset UI settings to defaults for new session
+      // Reset UI settings to defaults for new session
       setUISettings(DEFAULT_SESSION_UI_SETTINGS);
       setIsLocked(false);
       setColorMode('standard');
@@ -289,11 +289,11 @@ export const useSessionLoader = (sessionId: string | null) => {
     setGuests, 
     setActiveSession, 
     resetTables,
-    setColorMode, // ðŸ†•
+    setColorMode,
   ]);
 
   /**
-   * ðŸ†• Handle UI settings changes from PlaygroundCanvas
+   * Handle UI settings changes from PlaygroundCanvas
    * This is called when user changes connector gap, photo mode, etc.
    */
   const handleUISettingsChange = useCallback((newSettings: SessionUISettings) => {
@@ -316,7 +316,7 @@ export const useSessionLoader = (sessionId: string | null) => {
   }, [sessionId, saveSessionUISettings, setColorMode]);
   
   /**
-   * ðŸ†• Toggle session lock state
+   * Toggle session lock state
    */
   const handleToggleLock = useCallback(() => {
     if (!sessionId || !sessionContextRef.current) return;
@@ -402,7 +402,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     saveCurrentSession,
     resyncGuests,
     isHydrated: isReady,
-    // ðŸ†• UI Settings and Lock
+    // UI Settings and Lock
     uiSettings,
     isLocked,
     handleUISettingsChange,
