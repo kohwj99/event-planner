@@ -18,13 +18,13 @@ import {
   GuestInfo,
 } from "@/utils/seatValidation";
 
-/* -------------------- ðŸ§© Types for Proximity Rules -------------------- */
+/* -------------------- Types for Proximity Rules -------------------- */
 export interface ProximityRules {
   sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>;
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
 }
 
-/* -------------------- ðŸ§  Store Interface -------------------- */
+/* -------------------- Store Interface -------------------- */
 interface SeatStoreState {
   tables: Table[];
   chunks: Record<string, Chunk>;
@@ -62,7 +62,7 @@ interface SeatStoreState {
   setGuestLookup: (lookup: Record<string, any>) => void;
   detectViolations: () => void;
 
-  // ðŸ”µ Table-level operations
+  // Table-level operations
   lockAllSeatsInTable: (tableId: string) => void;
   unlockAllSeatsInTable: (tableId: string) => void;
   deleteTable: (tableId: string) => void;
@@ -84,7 +84,7 @@ interface SeatStoreState {
   } | null;
 }
 
-/* -------------------- ðŸ§© Helper: Extract table number from label -------------------- */
+/* -------------------- Helper: Extract table number from label -------------------- */
 function extractTableNumber(label: string): number | null {
   const match = label.match(/(\d+)\s*$/);
   return match ? parseInt(match[1], 10) : null;
@@ -94,7 +94,7 @@ function updateTableLabel(label: string, newNumber: number): string {
   return label.replace(/(\d+)\s*$/, `${newNumber}`);
 }
 
-/* -------------------- ðŸ§© Zustand Store -------------------- */
+/* -------------------- Zustand Store -------------------- */
 export const useSeatStore = create<SeatStoreState>()(
   devtools(
     persist(
@@ -167,7 +167,7 @@ export const useSeatStore = create<SeatStoreState>()(
             })),
           })),
 
-        /* ---------- ðŸ§‘ Guest Seat Assignment with Validation ---------- */
+        /* ---------- Guest Seat Assignment with Validation ---------- */
         /**
          * Assign a guest to a seat with seat mode validation
          * Uses centralized validateGuestSeatAssignment function
@@ -264,7 +264,7 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Assignment failed:', assignResult.error);
           }
 
-          // âœ… TRIGGER VIOLATION DETECTION after assignment
+          // Trigger violation detection after assignment
           if (assignResult.success) {
             get().detectViolations();
           }
@@ -306,7 +306,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // âœ… TRIGGER VIOLATION DETECTION after clearing seat
+          // Trigger violation detection after clearing seat
           get().detectViolations();
         },
 
@@ -356,7 +356,7 @@ export const useSeatStore = create<SeatStoreState>()(
 
         setSelectedMealPlanIndex: (index) => set({ selectedMealPlanIndex: index }),
 
-        /* ---------- ðŸ”„ Swap Seats with Validation ---------- */
+        /* ---------- Swap Seats with Validation ---------- */
         /**
          * Swap two guests between seats with seat mode validation
          * Uses centralized validateSeatSwap function
@@ -486,7 +486,7 @@ export const useSeatStore = create<SeatStoreState>()(
             console.error('Swap failed:', swapResult.error);
           }
 
-          // âœ… TRIGGER VIOLATION DETECTION after swap
+          // Trigger violation detection after swap
           if (swapResult.success) {
             get().detectViolations();
           }
@@ -494,7 +494,7 @@ export const useSeatStore = create<SeatStoreState>()(
           return swapResult.success;
         },
 
-        /* ---------- ðŸ” VIOLATION DETECTION ---------- */
+        /* ---------- VIOLATION DETECTION ---------- */
         setProximityRules: (rules) => set({ proximityRules: rules }),
 
         setGuestLookup: (lookup) => set({ guestLookup: lookup }),
@@ -510,18 +510,18 @@ export const useSeatStore = create<SeatStoreState>()(
             return;
           }
 
-          console.log('ðŸ” Running violation detection...');
+          console.log('[ViolationDetector] Running violation detection...');
           const violations = detectProximityViolations(
             state.tables,
             state.proximityRules,
             state.guestLookup
           );
 
-          console.log(`ðŸ” Detected ${violations.length} violations`);
+          console.log(`[ViolationDetector] Detected ${violations.length} violations`);
           set({ violations });
         },
 
-        /* ---------- ðŸ”µ TABLE-LEVEL OPERATIONS ---------- */
+        /* ---------- TABLE-LEVEL OPERATIONS ---------- */
 
         lockAllSeatsInTable: (tableId) =>
           set((state) => ({
@@ -567,7 +567,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // âœ… TRIGGER VIOLATION DETECTION after clearing all seats
+          // Trigger violation detection after clearing all seats
           get().detectViolations();
         },
 
@@ -607,7 +607,7 @@ export const useSeatStore = create<SeatStoreState>()(
             };
           });
 
-          // âœ… TRIGGER VIOLATION DETECTION after deleting table
+          // Trigger violation detection after deleting table
           get().detectViolations();
         },
 
@@ -618,7 +618,7 @@ export const useSeatStore = create<SeatStoreState>()(
             ),
           }));
 
-          // âœ… TRIGGER VIOLATION DETECTION after replacing table (seats may have changed)
+          // Trigger violation detection after replacing table (seats may have changed)
           get().detectViolations();
         },
 

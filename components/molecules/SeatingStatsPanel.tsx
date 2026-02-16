@@ -907,7 +907,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                                   {history.trackedGuest.name}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  {history.trackedGuest.company} â€¢ {history.trackedGuest.fromHost ? 'Host' : 'External'}
+                                  {history.trackedGuest.company} | {history.trackedGuest.fromHost ? 'Host' : 'External'}
                                 </Typography>
                               </Box>
                               <Stack direction="row" spacing={1}>

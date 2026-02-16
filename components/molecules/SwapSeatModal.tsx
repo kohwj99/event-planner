@@ -402,7 +402,7 @@ export default function SwapSeatModal({
                   color="text.secondary"
                   component="span"
                 >
-                  {candidate.guest?.title || ''} â€¢ {candidate.guest?.company || ''} â€¢ {candidate.guest?.country || ''}
+                  {candidate.guest?.title || ''} | {candidate.guest?.company || ''} | {candidate.guest?.country || ''}
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip
@@ -675,7 +675,7 @@ export default function SwapSeatModal({
                       <Stack spacing={0.5} sx={{ mt: 1 }}>
                         {selectedCandidate.violationsAfterSwap.slice(0, 5).map((v, idx) => (
                           <Typography key={idx} variant="caption" display="block">
-                            â€¢ {v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«'} {v.guest1Name} & {v.guest2Name}
+                            | {v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«'} {v.guest1Name} & {v.guest2Name}
                           </Typography>
                         ))}
                         {selectedCandidate.violationsAfterSwap.length > 5 && (

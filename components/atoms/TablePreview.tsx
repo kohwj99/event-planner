@@ -255,7 +255,7 @@ export function RoundTablePreview({
                   fontSize={config.font * 0.7}
                   fill="#2e7d32"
                 >
-                  âœ“
+                  v
                 </text>
               )}
               {size === 'small' && mode !== 'default' && !isManualMode && (
@@ -450,16 +450,16 @@ export function RectangleTablePreview({
         {showGrowthIndicators && (
           <>
             {growthSides.top && (
-              <text x={centerX} y={centerY - tableHeight / 2 - config.seatRadius - 20} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}>â†• grows</text>
+              <text x={centerX} y={centerY - tableHeight / 2 - config.seatRadius - 20} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}> grows</text>
             )}
             {growthSides.bottom && (
-              <text x={centerX} y={centerY + tableHeight / 2 + config.seatRadius + 28} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}>â†• grows</text>
+              <text x={centerX} y={centerY + tableHeight / 2 + config.seatRadius + 28} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success}> grows</text>
             )}
             {growthSides.left && (
-              <text x={centerX - tableWidth / 2 - config.seatRadius - 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(-90, ${centerX - tableWidth / 2 - config.seatRadius - 20}, ${centerY})`}>â†• grows</text>
+              <text x={centerX - tableWidth / 2 - config.seatRadius - 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(-90, ${centerX - tableWidth / 2 - config.seatRadius - 20}, ${centerY})`}> grows</text>
             )}
             {growthSides.right && (
-              <text x={centerX + tableWidth / 2 + config.seatRadius + 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(90, ${centerX + tableWidth / 2 + config.seatRadius + 20}, ${centerY})`}>â†• grows</text>
+              <text x={centerX + tableWidth / 2 + config.seatRadius + 20} y={centerY} textAnchor="middle" fontSize={10} fill={colorScheme.ui.success} transform={`rotate(90, ${centerX + tableWidth / 2 + config.seatRadius + 20}, ${centerY})`}> grows</text>
             )}
           </>
         )}
@@ -502,7 +502,7 @@ export function RectangleTablePreview({
                   {displayText}
                 </text>
               )}
-              {isManualAssigned && <text x={pos.x + config.seatRadius * 0.6} y={pos.y - config.seatRadius * 0.5} fontSize={config.font * 0.7} fill="#2e7d32">âœ“</text>}
+              {isManualAssigned && <text x={pos.x + config.seatRadius * 0.6} y={pos.y - config.seatRadius * 0.5} fontSize={config.font * 0.7} fill="#2e7d32">v</text>}
             </g>
           );
         })}

@@ -12,7 +12,7 @@ import {
   PlanningOrderTracker,
   DEFAULT_EVENT_TRACKING,
   ensureTrackingFields,
-  // ðŸ†• Import new types for session rules
+  // Import new types for session rules
   SessionRulesConfig,
   DEFAULT_SESSION_RULES,
   StoredProximityViolation,
@@ -20,7 +20,7 @@ import {
   SortRule,
   TableRules,
   GuestListSelection,
-  // ðŸ†• Import UI settings types
+  // Import UI settings types
   SessionUISettings,
   DEFAULT_SESSION_UI_SETTINGS,
 } from "@/types/Event";
@@ -114,7 +114,7 @@ interface EventStoreState {
     isLocked?: boolean;
   } | null;
 
-  /* -------------------- Ã°Å¸â€ â€¢ SESSION RULES MANAGEMENT -------------------- */
+  /* -------------------- SESSION RULES MANAGEMENT -------------------- */
   
   /**
    * Save session rules configuration (sort order, proximity rules, table rules, guest selection)
@@ -167,7 +167,7 @@ interface EventStoreState {
     violations: StoredProximityViolation[];
   };
 
-  /* -------------------- ðŸ”’ SESSION LOCK MANAGEMENT -------------------- */
+  /* -------------------- SESSION LOCK MANAGEMENT -------------------- */
   
   /**
    * Toggle session lock state
@@ -185,7 +185,7 @@ interface EventStoreState {
    */
   isSessionLocked: (sessionId: string) => boolean;
 
-  /* -------------------- ðŸ–¼ï¸ SESSION UI SETTINGS MANAGEMENT -------------------- */
+  /* -------------------- SESSION UI SETTINGS MANAGEMENT -------------------- */
   
   /**
    * Save session UI settings (zoom, connector gap, display modes, etc.)
@@ -233,7 +233,7 @@ interface EventStoreState {
   /** Computes full datetime (ISO string) from day date + session start time for chronological ordering */
   getSessionDateTime: (sessionId: string) => string | null;
 
-  /* -------------------- Ã°Å¸â€œÅ  Adjacency Recording -------------------- */
+  /* -------------------- Adjacency Recording -------------------- */
   recordSessionAdjacency: (
     eventId: string,
     sessionId: string,
@@ -428,7 +428,7 @@ export const useEventStore = create<EventStoreState>()(
                             chunks: {},
                             activeGuestIds: [],
                           },
-                          // Ã°Å¸â€ â€¢ Initialize with default rules
+                          // Initialize with default rules
                           rulesConfig: { ...DEFAULT_SESSION_RULES },
                           storedViolations: [],
                         },
@@ -656,7 +656,7 @@ export const useEventStore = create<EventStoreState>()(
           return null;
         },
 
-        /* ==================== Ã°Å¸â€ â€¢ SESSION RULES MANAGEMENT ==================== */
+        /* ==================== SESSION RULES MANAGEMENT ==================== */
         
         saveSessionRules: (eventId, dayId, sessionId, rulesConfig) =>
           set((state) => {
@@ -806,7 +806,7 @@ export const useEventStore = create<EventStoreState>()(
           };
         },
 
-        /* ==================== ðŸ”’ SESSION LOCK MANAGEMENT ==================== */
+        /* ==================== SESSION LOCK MANAGEMENT ==================== */
         
         toggleSessionLock: (eventId, dayId, sessionId) =>
           set((state) => ({
@@ -873,7 +873,7 @@ export const useEventStore = create<EventStoreState>()(
           return false;
         },
 
-        /* ==================== ðŸ–¼ï¸ SESSION UI SETTINGS MANAGEMENT ==================== */
+        /* ==================== SESSION UI SETTINGS MANAGEMENT ==================== */
         
         saveSessionUISettings: (eventId, dayId, sessionId, uiSettings) =>
           set((state) => ({

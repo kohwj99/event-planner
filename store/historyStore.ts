@@ -71,6 +71,74 @@ interface HistoryStoreState {
   clear: () => void;
 }
 
+/**
+ * Estimate the byte size of a snapshot by serializing to JSON.
+ * This is an approximation -- actual in-memory size may differ due to
+ * object overhead, but JSON length closely tracks relative cost.
+ */
+function estimateSnapshotBytes(snapshot: HistorySnapshot): number {
+  try {
+    return new Blob([JSON.stringify(snapshot)]).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Format byte count into a human-readable string (B, KB, MB).
+ */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Log memory usage of the history stacks after a push.
+ * Groups: action label, snapshot size, stack depths, and total memory.
+ */
+function logHistoryMemoryUsage(
+  undoStack: HistorySnapshot[],
+  redoStack: HistorySnapshot[],
+  latestSnapshot: HistorySnapshot
+): void {
+  const latestBytes = estimateSnapshotBytes(latestSnapshot);
+  const undoBytes = undoStack.reduce((sum, s) => sum + estimateSnapshotBytes(s), 0);
+  const redoBytes = redoStack.reduce((sum, s) => sum + estimateSnapshotBytes(s), 0);
+  const totalBytes = undoBytes + redoBytes;
+
+  const tableCount = latestSnapshot.tables.length;
+  const seatCount = latestSnapshot.tables.reduce((sum, t) => sum + t.seats.length, 0);
+
+  console.groupCollapsed(
+    `[HistoryStore] Pushed "${latestSnapshot.label}" | ` +
+    `Snapshot: ${formatBytes(latestBytes)} | ` +
+    `Total: ${formatBytes(totalBytes)}`
+  );
+  console.table({
+    "Latest Snapshot": {
+      action: latestSnapshot.label,
+      size: formatBytes(latestBytes),
+      tables: tableCount,
+      seats: seatCount,
+      includesRulesConfig: latestSnapshot.rulesConfig !== null,
+    },
+    "Undo Stack": {
+      depth: undoStack.length,
+      size: formatBytes(undoBytes),
+    },
+    "Redo Stack": {
+      depth: redoStack.length,
+      size: formatBytes(redoBytes),
+    },
+    "Total": {
+      snapshots: undoStack.length + redoStack.length,
+      size: formatBytes(totalBytes),
+    },
+  });
+  console.groupEnd();
+}
+
 export const useHistoryStore = create<HistoryStoreState>()(
   devtools(
     (set, get) => ({
@@ -78,7 +146,7 @@ export const useHistoryStore = create<HistoryStoreState>()(
       redoStack: [],
       maxStackSize: 50,
 
-      pushSnapshot: (snapshot) =>
+      pushSnapshot: (snapshot) => {
         set((state) => {
           const newStack = [...state.undoStack, snapshot];
           // Trim oldest entries if exceeding max size
@@ -89,7 +157,12 @@ export const useHistoryStore = create<HistoryStoreState>()(
             undoStack: newStack,
             redoStack: [], // Any new action invalidates the redo stack
           };
-        }),
+        });
+
+        // Log memory usage after the push has been applied
+        const { undoStack, redoStack } = get();
+        logHistoryMemoryUsage(undoStack, redoStack, snapshot);
+      },
 
       undo: (currentSnapshot) => {
         const state = get();

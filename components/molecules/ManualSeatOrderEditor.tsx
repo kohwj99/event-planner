@@ -206,7 +206,7 @@ export default function ManualSeatOrderEditor({
   // Initialize from current ordering when it changes externally
   useEffect(() => {
     if (currentOrdering.length === effectiveTotalSeats) {
-      // Build map from position â†’ seat number
+      // Build map from position -> seat number
       const newMap = new Map<number, number>();
       currentOrdering.forEach((seatNum, posIndex) => {
         newMap.set(posIndex, seatNum);
@@ -499,7 +499,7 @@ export default function ManualSeatOrderEditor({
             <strong>Current Sequence:</strong>{' '}
             {getCurrentOrdering()
               .map((num, idx) => (num > 0 ? num : '?'))
-              .join(' â†’ ')}
+              .join(' -> ')}
           </Typography>
         </Paper>
       )}

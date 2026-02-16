@@ -49,7 +49,7 @@ export interface EnhancedAdjacency {
 
 /**
  * Determines which side of a rectangle table a seat is on based on its position index.
- * Seats are arranged: top (Lâ†’R), right (Tâ†’B), bottom (Râ†’L), left (Bâ†’T)
+ * Seats are arranged: top (L-to-R), right (T-to-B), bottom (R-to-L), left (B-to-T)
  */
 export function getSeatSide(
   seatPosition: number,
@@ -198,10 +198,10 @@ export function getSameSideNeighborPositions(
  * IMPORTANT: This implements the key adjacency rule for rectangle tables.
  * The opposite seat calculation accounts for the fact that seats are arranged
  * in different directions on opposite sides:
- * - Top goes Lâ†’R (index 0 = leftmost)
- * - Bottom goes Râ†’L (index 0 = rightmost)
- * - Right goes Tâ†’B (index 0 = topmost)
- * - Left goes Bâ†’T (index 0 = bottommost)
+ * - Top goes L-to-R (index 0 = leftmost)
+ * - Bottom goes R-to-L (index 0 = rightmost)
+ * - Right goes T-to-B (index 0 = topmost)
+ * - Left goes B-to-T (index 0 = bottommost)
  * 
  * So for a seat at top[i], the opposite is at bottom[top - 1 - i]
  */
@@ -219,7 +219,7 @@ export function getOppositeSeatPosition(
     case "top":
       // Opposite is bottom side - only if they have same count
       if (top !== bottom) return null;
-      // Top goes Lâ†’R (index 0 = leftmost), Bottom goes Râ†’L (index 0 = rightmost)
+      // Top goes L-to-R (index 0 = leftmost), Bottom goes R-to-L (index 0 = rightmost)
       // So top[i] is opposite to bottom[top - 1 - i]
       const bottomStartPos = top + right;
       const oppositeBottomIndex = top - 1 - indexInSide;
@@ -228,14 +228,14 @@ export function getOppositeSeatPosition(
     case "bottom":
       // Opposite is top side - only if they have same count
       if (top !== bottom) return null;
-      // Bottom goes Râ†’L, Top goes Lâ†’R
+      // Bottom goes R-to-L, Top goes L-to-R
       const oppositeTopIndex = bottom - 1 - indexInSide;
       return oppositeTopIndex;
       
     case "left":
       // Opposite is right side - only if they have same count
       if (left !== right) return null;
-      // Left goes Bâ†’T (index 0 = bottom), Right goes Tâ†’B (index 0 = top)
+      // Left goes B-to-T (index 0 = bottom), Right goes T-to-B (index 0 = top)
       // So left[i] is opposite to right[left - 1 - i]
       const rightStartPos = top;
       const oppositeRightIndex = left - 1 - indexInSide;
@@ -244,7 +244,7 @@ export function getOppositeSeatPosition(
     case "right":
       // Opposite is left side - only if they have same count
       if (left !== right) return null;
-      // Right goes Tâ†’B, Left goes Bâ†’T
+      // Right goes T-to-B, Left goes B-to-T
       const leftStartPos = top + right + bottom;
       const oppositeLeftIndex = right - 1 - indexInSide;
       return leftStartPos + oppositeLeftIndex;
@@ -265,10 +265,10 @@ export function getOppositeSeatPosition(
  * the nearest seat on the perpendicular side at that corner.
  * 
  * Corner connections:
- * - Top-left corner: First seat of top â†” Last seat of left
- * - Top-right corner: Last seat of top â†” First seat of right
- * - Bottom-right corner: First seat of bottom â†” Last seat of right
- * - Bottom-left corner: Last seat of bottom â†” First seat of left
+ * - Top-left corner: First seat of top <-> Last seat of left
+ * - Top-right corner: Last seat of top <-> First seat of right
+ * - Bottom-right corner: First seat of bottom <-> Last seat of right
+ * - Bottom-left corner: Last seat of bottom <-> First seat of left
  */
 export function getEdgeAdjacentSeatPositions(
   seatPosition: number,
