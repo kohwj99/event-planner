@@ -609,7 +609,7 @@ export default function SwapSeatModal({
                       fontWeight="bold"
                       sx={{ mb: 1, px: 1 }}
                     >
-                      âœ“ Perfect Swaps (No Violations)
+                      Perfect Swaps (No Violations)
                     </Typography>
                     {perfectSwaps.map(renderCandidateItem)}
                   </>
@@ -623,7 +623,7 @@ export default function SwapSeatModal({
                       fontWeight="bold"
                       sx={{ mt: perfectSwaps.length > 0 ? 2 : 0, mb: 1, px: 1 }}
                     >
-                      âš  Swaps with Violations
+                      Swaps with Violations
                     </Typography>
                     {imperfectSwaps.map(renderCandidateItem)}
                   </>
@@ -675,7 +675,7 @@ export default function SwapSeatModal({
                       <Stack spacing={0.5} sx={{ mt: 1 }}>
                         {selectedCandidate.violationsAfterSwap.slice(0, 5).map((v, idx) => (
                           <Typography key={idx} variant="caption" display="block">
-                            | {v.type === 'sit-together' ? 'ðŸ¤' : 'ðŸš«'} {v.guest1Name} & {v.guest2Name}
+                            | {v.type === 'sit-together' ? 'Together' : 'Apart'} {v.guest1Name} & {v.guest2Name}
                           </Typography>
                         ))}
                         {selectedCandidate.violationsAfterSwap.length > 5 && (
