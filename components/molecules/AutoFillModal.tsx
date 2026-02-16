@@ -829,7 +829,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
                       Define rank partitions to randomize. Guests within each partition will be shuffled randomly
                       while maintaining their group position relative to other ranks.
                       <br />
-                      <strong>Formula:</strong> minRank <= rank &lt; maxRank
+                      <strong>Formula:</strong> minRank ≤ rank &lt; maxRank
                     </Typography>
 
                     <Stack spacing={1.5}>
