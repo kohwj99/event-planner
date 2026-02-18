@@ -209,6 +209,18 @@ export const DEFAULT_RANDOMIZE_ORDER: RandomizeOrderConfig = {
 };
 
 /**
+ * Options passed to the autoFillSeats algorithm
+ */
+export interface AutoFillOptions {
+  includeHost?: boolean;
+  includeExternal?: boolean;
+  sortRules?: SortRule[];
+  tableRules?: TableRules;
+  proximityRules?: ProximityRules;
+  randomizeOrder?: RandomizeOrderConfig;
+}
+
+/**
  * Complete session rules configuration - stored with each session
  * This allows rules to persist when navigating between sessions
  */
