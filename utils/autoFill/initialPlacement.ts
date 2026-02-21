@@ -30,6 +30,7 @@ import { LockedGuestLocation } from './autoFillTypes';
 import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSorting';
 import { canPlaceGuestInSeat, getNextCompatibleGuest, getNextCompatibleGuestOfType } from './seatCompatibility';
 import { wouldViolateSitAwayWithLocked } from './lockedGuestHelpers';
+import { reorderForSitTogetherClusters } from './proximityReordering';
 
 /**
  * Perform the initial placement of guests into seats across all tables.
@@ -57,6 +58,17 @@ export function performInitialPlacement(
 
   const comparatorWithTieBreak = makeComparatorWithHostTieBreak(comparator || ((_a, _b) => 0));
   let allCandidates = [...hostCandidates, ...externalCandidates].sort(comparatorWithTieBreak);
+
+  // Reorder so that sit-together cluster members are placed immediately after
+  // the highest-priority member of their cluster, preventing cross-table moves
+  // that could demote high-priority guests during sit-together optimization
+  if (proximityRules?.sitTogether && proximityRules.sitTogether.length > 0) {
+    allCandidates = reorderForSitTogetherClusters(
+      allCandidates,
+      proximityRules.sitTogether,
+      comparatorWithTieBreak
+    );
+  }
 
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
   // This ensures proximity rules are still enforced properly
