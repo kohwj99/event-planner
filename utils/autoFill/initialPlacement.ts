@@ -31,6 +31,7 @@ import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSort
 import { canPlaceGuestInSeat, getNextCompatibleGuest, getNextCompatibleGuestOfType } from './seatCompatibility';
 import { wouldViolateSitAwayWithLocked } from './lockedGuestHelpers';
 import { reorderForSitTogetherClusters } from './proximityReordering';
+import { reorderForTagSimilarity } from './tagReordering';
 
 /**
  * Perform the initial placement of guests into seats across all tables.
@@ -69,6 +70,11 @@ export function performInitialPlacement(
       comparatorWithTieBreak
     );
   }
+
+  // Reorder so that guests with identical tag sets are placed consecutively.
+  // This is a soft preference that runs after sit-together clustering (hard constraint)
+  // and before randomization. Guests with no tags are unaffected.
+  allCandidates = reorderForTagSimilarity(allCandidates, comparatorWithTieBreak);
 
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
   // This ensures proximity rules are still enforced properly

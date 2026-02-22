@@ -26,22 +26,25 @@ import {
 import { useState, useMemo } from 'react';
 import { Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
-import { 
-  Delete, 
-  Search, 
-  UploadFile, 
-  Edit, 
-  Save, 
+import {
+  Delete,
+  Search,
+  UploadFile,
+  Edit,
+  Save,
   Cancel,
   Download,
   Add,
   Visibility,
   Restaurant,
+  LocalOffer,
 } from '@mui/icons-material';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import MealPlanModal from './MealPlanModal';
+import TagModal from './TagModal';
+import { toUpperCamelCase } from '@/utils/tagUtils';
 
 const KNOWN_COLUMNS = ['name', 'country', 'company', 'title', 'ranking'];
 
@@ -74,7 +77,11 @@ export default function MasterGuestListModal({
   // Meal Plan Modal state
   const [mealPlanModalOpen, setMealPlanModalOpen] = useState(false);
   const [selectedGuestForMealPlan, setSelectedGuestForMealPlan] = useState<Guest | null>(null);
-  
+
+  // Tag Modal state
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [selectedGuestForTag, setSelectedGuestForTag] = useState<Guest | null>(null);
+
   const [addForm, setAddForm] = useState<Omit<Guest, 'id' | 'fromHost'>>({
     name: '',
     country: '',
@@ -82,6 +89,7 @@ export default function MasterGuestListModal({
     title: '',
     ranking: 10,
     mealPlans: [],
+    tags: [],
   });
 
   if (!event) return null;
@@ -112,6 +120,18 @@ export default function MasterGuestListModal({
     allGuests.forEach(g => {
       if (g.mealPlans && g.mealPlans.length > max) {
         max = g.mealPlans.length;
+      }
+    });
+    return max;
+  }, [event]);
+
+  // Calculate max tags across all guests for display
+  const maxTags = useMemo(() => {
+    const allGuests = [...(event?.masterHostGuests || []), ...(event?.masterExternalGuests || [])];
+    let max = 0;
+    allGuests.forEach(g => {
+      if (g.tags && g.tags.length > max) {
+        max = g.tags.length;
       }
     });
     return max;
@@ -180,28 +200,48 @@ export default function MasterGuestListModal({
   };
 
   /**
-   * Parse guest data from uploaded file
-   * Any columns after Ranking are treated as Meal Plan 1, 2, 3, etc.
+   * Parse guest data from uploaded file.
+   * Columns after Ranking with header "#" are imported as tags (UpperCamelCase).
+   * All other columns after Ranking are treated as Meal Plan 1, 2, 3, etc.
    */
   const parseGuestData = (data: any[], headers: string[]): Omit<Guest, 'id' | 'fromHost'>[] => {
     // Normalize headers to lowercase for comparison
     const normalizedHeaders = headers.map(h => (h || '').toLowerCase().trim());
-    
+
     // Find the index of the Ranking column
     const rankingIndex = normalizedHeaders.findIndex(h => h === 'ranking');
-    
-    // Get additional columns after Ranking (these are meal plans)
+
+    // Separate columns after Ranking into tag columns (header === '#') and meal plan columns
+    const tagHeaders: string[] = [];
     const mealPlanHeaders: string[] = [];
     if (rankingIndex !== -1) {
       for (let i = rankingIndex + 1; i < headers.length; i++) {
-        if (headers[i] && headers[i].trim()) {
-          mealPlanHeaders.push(headers[i]);
+        const rawHeader = headers[i];
+        if (!rawHeader || !rawHeader.trim()) continue;
+
+        if (rawHeader.trim() === '#') {
+          tagHeaders.push(rawHeader);
+        } else {
+          mealPlanHeaders.push(rawHeader);
         }
       }
     }
-    
+
     return data.map((row: any) => {
-      // Extract meal plans from additional columns
+      // Extract tags from # columns
+      const tags: string[] = [];
+      tagHeaders.forEach((header) => {
+        const value = row[header] || '';
+        const trimmed = String(value).trim();
+        if (trimmed) {
+          const normalized = toUpperCamelCase(trimmed);
+          if (normalized && !tags.includes(normalized)) {
+            tags.push(normalized);
+          }
+        }
+      });
+
+      // Extract meal plans from non-# columns
       const mealPlans: string[] = [];
       mealPlanHeaders.forEach((header) => {
         const value = row[header] || row[header.toLowerCase()] || '';
@@ -212,7 +252,7 @@ export default function MasterGuestListModal({
           mealPlans.push('');
         }
       });
-      
+
       // Filter out trailing empty meal plans but keep ones in between
       let lastNonEmptyIndex = -1;
       for (let i = mealPlans.length - 1; i >= 0; i--) {
@@ -221,8 +261,8 @@ export default function MasterGuestListModal({
           break;
         }
       }
-      const trimmedMealPlans = lastNonEmptyIndex >= 0 
-        ? mealPlans.slice(0, lastNonEmptyIndex + 1) 
+      const trimmedMealPlans = lastNonEmptyIndex >= 0
+        ? mealPlans.slice(0, lastNonEmptyIndex + 1)
         : [];
 
       // Parse ranking - use parseFloat to preserve decimals like 1.5, 2.3, etc.
@@ -237,6 +277,7 @@ export default function MasterGuestListModal({
         title: row.Title || row.title || '',
         ranking,
         mealPlans: trimmedMealPlans,
+        tags,
       };
     }).filter(g => g.name.trim() !== '');
   };
@@ -264,6 +305,7 @@ export default function MasterGuestListModal({
         'Meal Plan 1': 'Vegetarian',
         'Meal Plan 2': 'No Nuts',
         'Meal Plan 3': '',
+        '#': 'Cybersecurity',
       }
     ];
 
@@ -276,32 +318,37 @@ export default function MasterGuestListModal({
   const handleExportCurrent = () => {
     if (guests.length === 0) return;
 
-    // Find max meal plans to create consistent columns
+    // Find max meal plans and max tags to create consistent columns
     let maxMealPlansInExport = 0;
+    let maxTagsInExport = 0;
     guests.forEach(g => {
       if (g.mealPlans && g.mealPlans.length > maxMealPlansInExport) {
         maxMealPlansInExport = g.mealPlans.length;
       }
-    });
-
-    const exportData = guests.map(g => {
-      const base: any = {
-        Name: g.name,
-        Country: g.country,
-        Company: g.company,
-        Title: g.title,
-        Ranking: g.ranking,
-      };
-      
-      // Add meal plan columns
-      for (let i = 0; i < maxMealPlansInExport; i++) {
-        base[`Meal Plan ${i + 1}`] = g.mealPlans?.[i] || '';
+      if (g.tags && g.tags.length > maxTagsInExport) {
+        maxTagsInExport = g.tags.length;
       }
-      
-      return base;
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
+    // Build header order: base columns, meal plans, then tags
+    // Tags use '#' as header; multiple tag columns all share the '#' header key.
+    // XLSX.utils.json_to_sheet would merge duplicate keys, so we build the sheet manually.
+    const headerRow = [
+      'Name', 'Country', 'Company', 'Title', 'Ranking',
+      ...Array.from({ length: maxMealPlansInExport }, (_, i) => `Meal Plan ${i + 1}`),
+      ...Array.from({ length: maxTagsInExport }, () => '#'),
+    ];
+
+    const dataRows = guests.map(g => {
+      const row: (string | number)[] = [
+        g.name, g.country, g.company, g.title, g.ranking,
+        ...Array.from({ length: maxMealPlansInExport }, (_, i) => g.mealPlans?.[i] || ''),
+        ...Array.from({ length: maxTagsInExport }, (_, i) => g.tags?.[i] || ''),
+      ];
+      return row;
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, tab === 'host' ? 'Host Guests' : 'External Guests');
     XLSX.writeFile(wb, `${tab}_guests_${event.name.replace(/\s+/g, '_')}.xlsx`);
@@ -353,6 +400,7 @@ export default function MasterGuestListModal({
       title: '',
       ranking: 10,
       mealPlans: [],
+      tags: [],
     });
   };
 
@@ -374,8 +422,25 @@ export default function MasterGuestListModal({
 
   const handleSaveMealPlans = (guestId: string, mealPlans: string[]) => {
     const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
-    const updatedList = guests.map(g => 
+    const updatedList = guests.map(g =>
       g.id === guestId ? { ...g, mealPlans } : g
+    );
+
+    updateEventDetails(eventId, {
+      [listKey]: updatedList,
+    });
+  };
+
+  /* -------------------- TAG HANDLERS -------------------- */
+  const handleOpenTagModal = (guest: Guest) => {
+    setSelectedGuestForTag(guest);
+    setTagModalOpen(true);
+  };
+
+  const handleSaveTags = (guestId: string, tags: string[]) => {
+    const listKey = fromHost ? 'masterHostGuests' : 'masterExternalGuests';
+    const updatedList = guests.map(g =>
+      g.id === guestId ? { ...g, tags } : g
     );
 
     updateEventDetails(eventId, {
@@ -398,6 +463,11 @@ export default function MasterGuestListModal({
               {maxMealPlans > 0 && (
                 <Typography variant="caption" color="secondary" sx={{ ml: 2 }}>
                   Up to {maxMealPlans} meal plan{maxMealPlans > 1 ? 's' : ''} imported
+                </Typography>
+              )}
+              {maxTags > 0 && (
+                <Typography variant="caption" color="info.main" sx={{ ml: 2 }}>
+                  Up to {maxTags} tag{maxTags > 1 ? 's' : ''} assigned
                 </Typography>
               )}
             </Box>
@@ -467,7 +537,10 @@ export default function MasterGuestListModal({
               Ranking supports decimals (e.g., 1.5, 2.3) for finer priority control
             </Typography>
             <Typography variant="caption" display="block" color="primary">
-              Any columns after Ranking will be imported as Meal Plan 1, 2, 3, etc.
+              Non-# columns after Ranking will be imported as Meal Plan 1, 2, 3, etc.
+            </Typography>
+            <Typography variant="caption" display="block" color="info.main">
+              Columns with header # will be imported as tags (stored in UpperCamelCase)
             </Typography>
           </Box>
 
@@ -561,7 +634,7 @@ export default function MasterGuestListModal({
           <Box
             sx={{
               display: 'grid',
-              gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px auto',
+              gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px 80px auto',
               gap: 1,
               px: 1.5,
               py: 1,
@@ -577,6 +650,7 @@ export default function MasterGuestListModal({
             <Typography variant="caption" fontWeight="bold">Title</Typography>
             <Typography variant="caption" fontWeight="bold">Rank</Typography>
             <Typography variant="caption" fontWeight="bold">Meal Plans</Typography>
+            <Typography variant="caption" fontWeight="bold">Tags</Typography>
             <Typography variant="caption" fontWeight="bold">Track</Typography>
             <Typography variant="caption" fontWeight="bold">Actions</Typography>
           </Box>
@@ -604,13 +678,14 @@ export default function MasterGuestListModal({
                 const isEditing = editingId === guest.id;
                 const isTracked = isGuestTracked(eventId, guest.id);
                 const mealPlanCount = guest.mealPlans?.filter(mp => mp).length || 0;
+                const tagCount = guest.tags?.length || 0;
 
                 return (
                   <Box
                     key={guest.id}
                     sx={{
                       display: 'grid',
-                      gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px auto',
+                      gridTemplateColumns: '180px 100px 160px 160px 80px 100px 80px 80px auto',
                       gap: 1,
                       alignItems: 'center',
                       p: 1.5,
@@ -661,6 +736,14 @@ export default function MasterGuestListModal({
                           color={mealPlanCount > 0 ? 'success' : 'default'}
                         />
 
+                        {/* Tags - not editable inline */}
+                        <Chip
+                          icon={<LocalOffer />}
+                          label={tagCount}
+                          size="small"
+                          color={tagCount > 0 ? 'info' : 'default'}
+                        />
+
                         {/* Track toggle disabled while editing */}
                         <Box />
 
@@ -693,6 +776,18 @@ export default function MasterGuestListModal({
                             size="small"
                             color={mealPlanCount > 0 ? 'success' : 'default'}
                             onClick={() => handleOpenMealPlanModal(guest)}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+
+                        {/* Tags Button */}
+                        <Tooltip title={tagCount > 0 ? `${tagCount} tag(s)` : 'No tags'}>
+                          <Chip
+                            icon={<LocalOffer />}
+                            label={tagCount}
+                            size="small"
+                            color={tagCount > 0 ? 'info' : 'default'}
+                            onClick={() => handleOpenTagModal(guest)}
                             sx={{ cursor: 'pointer' }}
                           />
                         </Tooltip>
@@ -752,6 +847,17 @@ export default function MasterGuestListModal({
         }}
         guest={selectedGuestForMealPlan}
         onSave={handleSaveMealPlans}
+      />
+
+      {/* Tag Modal */}
+      <TagModal
+        open={tagModalOpen}
+        onClose={() => {
+          setTagModalOpen(false);
+          setSelectedGuestForTag(null);
+        }}
+        guest={selectedGuestForTag}
+        onSave={handleSaveTags}
       />
     </>
   );
