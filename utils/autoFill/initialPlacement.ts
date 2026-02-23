@@ -25,7 +25,7 @@
  */
 
 import { SeatMode } from '@/types/Seat';
-import { TableRules, ProximityRules, RandomizeOrderConfig } from '@/types/Event';
+import { TableRules, ProximityRules, RandomizeOrderConfig, TagSitTogetherGroup } from '@/types/Event';
 import { LockedGuestLocation } from './autoFillTypes';
 import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSorting';
 import { canPlaceGuestInSeat, getNextCompatibleGuest, getNextCompatibleGuestOfType } from './seatCompatibility';
@@ -52,7 +52,8 @@ export function performInitialPlacement(
   comparator?: (a: any, b: any) => number,
   proximityRules?: ProximityRules,
   randomizeOrder?: RandomizeOrderConfig,
-  guestsInProximityRules?: Set<string>
+  guestsInProximityRules?: Set<string>,
+  tagGroups?: TagSitTogetherGroup[]
 ): Map<string, string> {
   const seatToGuest = new Map<string, string>();
   const assignedGuests = new Set<string>(lockedGuestIds);
@@ -74,7 +75,10 @@ export function performInitialPlacement(
   // Reorder so that guests with identical tag sets are placed consecutively.
   // This is a soft preference that runs after sit-together clustering (hard constraint)
   // and before randomization. Guests with no tags are unaffected.
-  allCandidates = reorderForTagSimilarity(allCandidates, comparatorWithTieBreak);
+  // Skip when explicit tag groups exist - the tagGroupOptimization pass handles those.
+  if (!tagGroups || tagGroups.length === 0) {
+    allCandidates = reorderForTagSimilarity(allCandidates, comparatorWithTieBreak);
+  }
 
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
   // This ensures proximity rules are still enforced properly

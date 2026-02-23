@@ -35,6 +35,8 @@ import {
   Star as StarIcon,
   Visibility as VisibilityIcon,
   Shuffle as ShuffleIcon,
+  Label as LabelIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import { useGuestStore, Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
@@ -55,6 +57,7 @@ import {
   DEFAULT_SESSION_RULES,
   DEFAULT_RANDOMIZE_ORDER,
   StoredProximityViolation,
+  TagSitTogetherGroup,
 } from '@/types/Event';
 import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 
@@ -139,6 +142,11 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     partitions: [],
   });
 
+  // Tag-Based Grouping state
+  const [tagGroups, setTagGroups] = useState<TagSitTogetherGroup[]>([]);
+  const [selectedTag, setSelectedTag] = useState<string>('');
+  const [pendingGuestIds, setPendingGuestIds] = useState<Set<string>>(new Set());
+
   // VIP Recommendations UI state
   const [showRecommendations, setShowRecommendations] = useState(true);
   const [acceptedRecommendations, setAcceptedRecommendations] = useState<Set<string>>(new Set());
@@ -188,6 +196,9 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     setSitTogetherRules([]);
     setSitAwayRules([]);
     setRandomizeOrder({ enabled: false, partitions: [] });
+    setTagGroups([]);
+    setSelectedTag('');
+    setPendingGuestIds(new Set());
     setAcceptedRecommendations(new Set());
   };
 
@@ -274,6 +285,11 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
           if (savedRules.randomizeOrder) {
             setRandomizeOrder(savedRules.randomizeOrder);
           }
+
+          // Load tag groups
+          if (savedRules.tagGroups && savedRules.tagGroups.length > 0) {
+            setTagGroups(savedRules.tagGroups);
+          }
         } else {
           console.log('No saved rules for session, using defaults:', sessionId);
           // Defaults already set by resetToDefaults() above
@@ -299,6 +315,68 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
     });
     return lookup;
   }, [allGuests]);
+
+  // --- Tag-Based Grouping computed values ---
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    allGuests.forEach(g => (g.tags ?? []).forEach(tag => tagSet.add(tag)));
+    return Array.from(tagSet).sort();
+  }, [allGuests]);
+
+  const guestsWithSelectedTag = useMemo(() => {
+    if (!selectedTag) return [];
+    return allGuests.filter(g => (g.tags ?? []).includes(selectedTag));
+  }, [allGuests, selectedTag]);
+
+  // Detect clashes: guests appearing in more than one tag group
+  const guestClashes = useMemo(() => {
+    const guestToGroups = new Map<string, TagSitTogetherGroup[]>();
+    tagGroups.forEach(group => {
+      group.guestIds.forEach(guestId => {
+        if (!guestToGroups.has(guestId)) guestToGroups.set(guestId, []);
+        guestToGroups.get(guestId)!.push(group);
+      });
+    });
+    const clashes = new Map<string, TagSitTogetherGroup[]>();
+    guestToGroups.forEach((groups, guestId) => {
+      if (groups.length > 1) clashes.set(guestId, groups);
+    });
+    return clashes;
+  }, [tagGroups]);
+
+  // --- Tag Group Handlers ---
+  const togglePendingGuest = (guestId: string) => {
+    setPendingGuestIds(prev => {
+      const next = new Set(prev);
+      if (next.has(guestId)) next.delete(guestId);
+      else next.add(guestId);
+      return next;
+    });
+  };
+
+  const createTagGroup = () => {
+    if (pendingGuestIds.size < 2 || !selectedTag) return;
+    const newGroup: TagSitTogetherGroup = {
+      id: `tag-group-${Date.now()}`,
+      tag: selectedTag,
+      guestIds: Array.from(pendingGuestIds),
+    };
+    setTagGroups(prev => [...prev, newGroup]);
+    setPendingGuestIds(new Set());
+    setSelectedTag('');
+  };
+
+  const removeTagGroup = (groupId: string) => {
+    setTagGroups(prev => prev.filter(g => g.id !== groupId));
+  };
+
+  const removeGuestFromTagGroup = (groupId: string, guestId: string) => {
+    setTagGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      const newGuestIds = g.guestIds.filter(id => id !== guestId);
+      return { ...g, guestIds: newGuestIds };
+    }).filter(g => g.guestIds.length >= 2));
+  };
 
   // Calculate VIP recommendations based on adjacency history
   const vipRecommendations = useMemo((): VIPRecommendation[] => {
@@ -600,6 +678,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
         sitAway: sitAwayRules.filter(r => r.guest1Id && r.guest2Id),
       },
       randomizeOrder: randomizeOrder,
+      tagGroups: tagGroups,
     };
   };
 
@@ -635,6 +714,7 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
         tableRules,
         proximityRules,
         randomizeOrder: isRandomizeOrderVisible ? randomizeOrder : undefined,
+        tagGroups: tagGroups.length > 0 ? tagGroups : undefined,
       });
 
       // After autofill completes, save the rules and violations to the session
@@ -1049,6 +1129,217 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
           )}
 
           <Divider />
+
+          {/* ========== TAG-BASED GROUPING ========== */}
+          {availableTags.length > 0 && (
+            <>
+              <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8eaf6' }}>
+                <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                  <LabelIcon color="primary" />
+                  <FormLabel component="legend" sx={{ fontWeight: 600 }}>
+                    Tag-Based Grouping
+                  </FormLabel>
+                  {tagGroups.length > 0 && (
+                    <Chip label={`${tagGroups.length} group${tagGroups.length > 1 ? 's' : ''}`} size="small" color="primary" />
+                  )}
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+                  Select a tag to see guests, then create groups. Guests in a group will be seated at the same table.
+                </Typography>
+
+                {/* Tag Selector */}
+                <Autocomplete
+                  size="small"
+                  options={availableTags}
+                  value={selectedTag || null}
+                  onChange={(_, value) => {
+                    setSelectedTag(value || '');
+                    setPendingGuestIds(new Set());
+                  }}
+                  renderInput={(params) => <TextField {...params} placeholder="Select a tag..." />}
+                  sx={{ mb: 2 }}
+                />
+
+                {/* Guest List for Selected Tag */}
+                {selectedTag && guestsWithSelectedTag.length > 0 && (
+                  <Box sx={{ mb: 2 }}>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1}>
+                      <Typography variant="subtitle2" fontWeight={600}>
+                        Guests with tag &quot;{selectedTag}&quot; ({guestsWithSelectedTag.length})
+                      </Typography>
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => setPendingGuestIds(new Set(guestsWithSelectedTag.map(g => g.id)))}
+                        >
+                          Select All
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="text"
+                          onClick={() => setPendingGuestIds(new Set())}
+                        >
+                          Deselect All
+                        </Button>
+                      </Stack>
+                    </Stack>
+
+                    <Stack spacing={0.5} sx={{ maxHeight: 200, overflowY: 'auto' }}>
+                      {guestsWithSelectedTag.map((guest) => {
+                        // Check if guest is already in another tag group
+                        const existingGroups = tagGroups.filter(g => g.guestIds.includes(guest.id));
+
+                        return (
+                          <Stack
+                            key={guest.id}
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                            sx={{
+                              p: 0.5,
+                              borderRadius: 1,
+                              bgcolor: pendingGuestIds.has(guest.id) ? '#c5cae9' : 'white',
+                              cursor: 'pointer',
+                              '&:hover': { bgcolor: pendingGuestIds.has(guest.id) ? '#9fa8da' : '#f5f5f5' },
+                            }}
+                            onClick={() => togglePendingGuest(guest.id)}
+                          >
+                            <Checkbox
+                              size="small"
+                              checked={pendingGuestIds.has(guest.id)}
+                              sx={{ p: 0.5 }}
+                            />
+                            <Typography variant="body2" sx={{ flex: 1 }}>
+                              {guest.name} ({guest.company})
+                            </Typography>
+                            <Chip
+                              label={guest.fromHost ? 'Host' : 'External'}
+                              size="small"
+                              variant="outlined"
+                              color={guest.fromHost ? 'primary' : 'default'}
+                            />
+                            <Chip
+                              icon={<StarIcon sx={{ fontSize: 12 }} />}
+                              label={guest.ranking}
+                              size="small"
+                              color={getRankingColor(guest.ranking)}
+                            />
+                            {existingGroups.length > 0 && (
+                              <Tooltip title={`Already in group${existingGroups.length > 1 ? 's' : ''}: ${existingGroups.map(g => g.tag).join(', ')}`}>
+                                <Chip
+                                  icon={<WarningIcon sx={{ fontSize: 12 }} />}
+                                  label={`In: ${existingGroups.map(g => g.tag).join(', ')}`}
+                                  size="small"
+                                  color="warning"
+                                  variant="outlined"
+                                />
+                              </Tooltip>
+                            )}
+                          </Stack>
+                        );
+                      })}
+                    </Stack>
+
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={createTagGroup}
+                      disabled={pendingGuestIds.size < 2}
+                      sx={{ mt: 1 }}
+                    >
+                      Create Group ({pendingGuestIds.size} selected)
+                    </Button>
+                  </Box>
+                )}
+
+                {/* Clash Warning */}
+                {guestClashes.size > 0 && (
+                  <Alert severity="warning" icon={<WarningIcon />} sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      Group overlap detected - guests can only be seated with one group:
+                    </Typography>
+                    {Array.from(guestClashes.entries()).map(([guestId, groups]) => {
+                      const guest = guestLookup[guestId];
+                      return (
+                        <Stack key={guestId} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                          <Typography variant="caption" fontWeight={600}>
+                            {guest?.name || guestId}
+                          </Typography>
+                          <Typography variant="caption">is in:</Typography>
+                          {groups.map(group => (
+                            <Stack key={group.id} direction="row" spacing={0.5} alignItems="center">
+                              <Chip label={group.tag} size="small" variant="outlined" />
+                              <IconButton
+                                size="small"
+                                onClick={() => removeGuestFromTagGroup(group.id, guestId)}
+                                sx={{ p: 0.25 }}
+                              >
+                                <CloseIcon sx={{ fontSize: 14 }} />
+                              </IconButton>
+                            </Stack>
+                          ))}
+                        </Stack>
+                      );
+                    })}
+                  </Alert>
+                )}
+
+                {/* Created Groups */}
+                {tagGroups.length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight={600} gutterBottom>
+                      Created Groups
+                    </Typography>
+                    <Stack spacing={1}>
+                      {tagGroups.map((group) => (
+                        <Box
+                          key={group.id}
+                          sx={{
+                            p: 1,
+                            border: '1px solid #7986cb',
+                            borderRadius: 1,
+                            bgcolor: 'white',
+                          }}
+                        >
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.5}>
+                            <Chip
+                              icon={<LabelIcon sx={{ fontSize: 14 }} />}
+                              label={group.tag}
+                              size="small"
+                              color="primary"
+                              variant="outlined"
+                            />
+                            <IconButton onClick={() => removeTagGroup(group.id)} size="small" color="error">
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Stack>
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                            {group.guestIds.map(guestId => {
+                              const guest = guestLookup[guestId];
+                              const isClashing = guestClashes.has(guestId);
+                              return (
+                                <Chip
+                                  key={guestId}
+                                  label={guest?.name || guestId}
+                                  size="small"
+                                  color={isClashing ? 'warning' : 'default'}
+                                  onDelete={() => removeGuestFromTagGroup(group.id, guestId)}
+                                  deleteIcon={<CloseIcon sx={{ fontSize: 14 }} />}
+                                />
+                              );
+                            })}
+                          </Stack>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
+              </Paper>
+              <Divider />
+            </>
+          )}
 
           {/* ========== PROXIMITY RULES ========== */}
           <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9' }}>
