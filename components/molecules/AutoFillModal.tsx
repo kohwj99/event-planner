@@ -25,6 +25,8 @@ import {
   Alert,
   Tooltip,
   Badge,
+  Backdrop,
+  CircularProgress,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -768,7 +770,30 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
   }, [sessionId, loadSessionRules]);
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog
+      open={open}
+      onClose={isProcessing ? undefined : onClose}
+      fullWidth
+      maxWidth="md"
+      aria-busy={isProcessing}
+      sx={{ '& .MuiDialog-paper': { position: 'relative' } }}
+    >
+      <Backdrop
+        open={isProcessing}
+        sx={{
+          position: 'absolute',
+          zIndex: (theme) => theme.zIndex.modal + 1,
+          backgroundColor: 'rgba(255, 255, 255, 0.8)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
+        }}
+      >
+        <CircularProgress size={48} />
+        <Typography variant="body1" color="text.secondary">
+          Running Auto-Fill...
+        </Typography>
+      </Backdrop>
       <DialogTitle>
         <Stack direction="row" alignItems="center" justifyContent="space-between">
           <Typography variant="h6">Auto-Fill Seats Configuration</Typography>

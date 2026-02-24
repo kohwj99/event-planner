@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState, useRef, ChangeEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useNavigation } from "@/components/providers/NavigationProvider";
 import {
   Container,
   Typography,
   Button,
-  CircularProgress,
   Box,
   Snackbar,
   Alert
@@ -27,11 +26,12 @@ import { CreateEventDialog, CreateEventFormData } from "@/components/molecules/C
 import { EmptyEventsState } from "@/components/molecules/EmptyEventState";
 import { EventCard } from "@/components/organisms/EventCard";
 import { ImportEventDialog } from "@/components/molecules/ImportEventDialog";
+import PageLoader from "@/components/atoms/PageLoader";
 import { ExportEventDialog } from "@/components/molecules/ExportEventDialog";
 
 
 export default function HomePage() {
-  const router = useRouter();
+  const { navigateWithLoading } = useNavigation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Store
@@ -72,7 +72,7 @@ export default function HomePage() {
   // ==================== NAVIGATION ====================
   const handleNavigate = (id: string) => {
     setActiveEvent(id);
-    router.push(`/events/${id}`);
+    navigateWithLoading(`/events/${id}`, 'Loading event...');
   };
 
   // ==================== CREATE EVENT ====================
@@ -182,16 +182,7 @@ export default function HomePage() {
 
   // ==================== RENDER ====================
   if (!isReady) {
-    return (
-      <Box sx={{ bgcolor: "#f8f9fa", minHeight: "100vh", py: 6 }}>
-        <Container maxWidth="lg">
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh', gap: 2 }}>
-            <CircularProgress size={48} />
-            <Typography variant="body1" color="text.secondary">Loading events...</Typography>
-          </Box>
-        </Container>
-      </Box>
-    );
+    return <PageLoader message="Loading events..." />;
   }
 
   return (

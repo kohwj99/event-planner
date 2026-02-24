@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { useNavigation } from '@/components/providers/NavigationProvider';
 import { useEventStore } from '@/store/eventStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useSeatStore } from '@/store/seatStore';
@@ -11,7 +12,6 @@ import {
   Typography,
   Button,
   Stack,
-  CircularProgress,
 } from '@mui/material';
 import {
   EventSeat,
@@ -28,10 +28,11 @@ import SessionDetailLayout from './layout';
 import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
+import PageLoader from '@/components/atoms/PageLoader';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
-  const router = useRouter();
+  const { navigateWithLoading } = useNavigation();
 
   // 🆕 Use session loader hook - now returns UI settings and lock state
   const { 
@@ -97,9 +98,9 @@ export default function SessionDetailPage() {
   const handleBack = () => {
     saveCurrentSession();
     if (sessionData) {
-      router.push(`/events/${sessionData.eventId}`);
+      navigateWithLoading(`/events/${sessionData.eventId}`, 'Loading event...');
     } else {
-      router.push('/');
+      navigateWithLoading('/');
     }
   };
 
@@ -126,18 +127,7 @@ export default function SessionDetailPage() {
 
   // Show loading spinner during initial load
   if (!isMounted || isLoading || !isHydrated) {
-    return (
-      <Box
-        sx={{
-          height: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <PageLoader message="Loading session..." />;
   }
 
   if (!sessionData) {

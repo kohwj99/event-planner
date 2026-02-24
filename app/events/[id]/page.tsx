@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
+import { useNavigation } from "@/components/providers/NavigationProvider";
 import { useEventStore } from "@/store/eventStore";
 import { EventType } from "@/types/Event";
 import {
   Typography, Box
 } from "@mui/material";
 
+import PageLoader from "@/components/atoms/PageLoader";
 import EventDetailHeader from "@/components/organisms/EventDetailHeader";
 import DayColumn from "@/components/organisms/DayColumn";
 import CreateSessionModal from "@/components/molecules/CreateSessionModal";
@@ -16,7 +18,7 @@ import SessionGuestListModal from "@/components/molecules/SessionGuestListModal"
 
 export default function EventDetailPage() {
   const { id } = useParams() as { id: string };
-  const router = useRouter();
+  const { navigateWithLoading } = useNavigation();
 
   // Store Access
   const event = useEventStore(state => state.events.find(e => e.id === id));
@@ -27,6 +29,16 @@ export default function EventDetailPage() {
 
   // Tracking Store
   const setSessionTracking = useEventStore(state => state.setSessionTracking);
+
+  // Hydration
+  const _hasHydrated = useEventStore(state => state._hasHydrated);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const isReady = isMounted && _hasHydrated;
 
   // Local State
   const [sessionModal, setSessionModal] = useState({ open: false, dayId: "" });
@@ -54,6 +66,10 @@ export default function EventDetailPage() {
     sessionName: "",
     dayId: ""
   });
+
+  if (!isReady) {
+    return <PageLoader message="Loading event..." />;
+  }
 
   if (!event) return <div>Event not found</div>;
 
@@ -154,7 +170,7 @@ export default function EventDetailPage() {
       {/* --- HEADER --- */}
       <EventDetailHeader
         event={event}
-        onBack={() => router.push("/")}
+        onBack={() => navigateWithLoading("/")}
         onAddDay={handleAddDay}
       />
 
@@ -171,7 +187,7 @@ export default function EventDetailPage() {
               onAddSession={(dayId) => setSessionModal({ open: true, dayId })}
               onDeleteDay={handleDeleteDayClick}
               onDeleteSession={handleDeleteSessionClick}
-              onSessionClick={(sessionId) => router.push(`/session/${sessionId}`)}
+              onSessionClick={(sessionId) => navigateWithLoading(`/session/${sessionId}`, 'Loading session...')}
               onManageSessionGuests={handleManageSessionGuests}
             />
           ))}

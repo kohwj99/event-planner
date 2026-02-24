@@ -15,7 +15,6 @@ import {
   Tabs,
   TextField,
   Typography,
-  MenuItem,
   InputAdornment,
   Chip,
   Alert,
@@ -34,19 +33,22 @@ import {
   Save,
   Cancel,
   Download,
-  Add,
   Visibility,
   Restaurant,
   LocalOffer,
 } from '@mui/icons-material';
 import { v4 as uuidv4 } from 'uuid';
-import * as XLSX from 'xlsx';
-import Papa from 'papaparse';
 import MealPlanModal from './MealPlanModal';
 import TagModal from './TagModal';
-import { toUpperCamelCase } from '@/utils/tagUtils';
-
-const KNOWN_COLUMNS = ['name', 'country', 'company', 'title', 'ranking'];
+import AddGuestForm from '@/components/atoms/AddGuestForm';
+import {
+  parseExcelFile,
+  parseCSVFile,
+  buildGuestTemplateWorkbook,
+  buildCurrentGuestsWorkbook,
+  downloadWorkbook,
+  ParsedGuest,
+} from '@/utils/guestImportExportHelper';
 
 interface MasterGuestListModalProps {
   open: boolean;
@@ -81,16 +83,6 @@ export default function MasterGuestListModal({
   // Tag Modal state
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [selectedGuestForTag, setSelectedGuestForTag] = useState<Guest | null>(null);
-
-  const [addForm, setAddForm] = useState<Omit<Guest, 'id' | 'fromHost'>>({
-    name: '',
-    country: '',
-    company: '',
-    title: '',
-    ranking: 10,
-    mealPlans: [],
-    tags: [],
-  });
 
   if (!event) return null;
 
@@ -147,14 +139,18 @@ export default function MasterGuestListModal({
 
     try {
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      let parsed: ParsedGuest[] = [];
 
       if (fileExtension === 'csv') {
-        await handleCSVUpload(file);
+        parsed = await parseCSVFile(file);
       } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        await handleExcelUpload(file);
+        parsed = await parseExcelFile(file);
       } else {
         setUploadError('Unsupported file format. Please upload CSV or Excel files.');
+        return;
       }
+
+      importGuests(parsed);
     } catch (error) {
       console.error('Upload error:', error);
       setUploadError('Failed to process file. Please check the format and try again.');
@@ -164,125 +160,7 @@ export default function MasterGuestListModal({
     }
   };
 
-  const handleCSVUpload = (file: File): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          try {
-            const guests = parseGuestData(results.data, results.meta.fields || []);
-            importGuests(guests);
-            resolve();
-          } catch (error) {
-            reject(error);
-          }
-        },
-        error: (error) => reject(error),
-      });
-    });
-  };
-
-  const handleExcelUpload = async (file: File): Promise<void> => {
-    const data = await file.arrayBuffer();
-    const workbook = XLSX.read(data);
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    
-    // Get headers from the first row
-    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
-    const headers = jsonData[0] as string[];
-    
-    // Convert to objects with headers
-    const dataWithHeaders = XLSX.utils.sheet_to_json(firstSheet) as any[];
-    
-    const guests = parseGuestData(dataWithHeaders, headers);
-    importGuests(guests);
-  };
-
-  /**
-   * Parse guest data from uploaded file.
-   * Columns after Ranking with header "#" are imported as tags (UpperCamelCase).
-   * All other columns after Ranking are treated as Meal Plan 1, 2, 3, etc.
-   */
-  const parseGuestData = (data: any[], headers: string[]): Omit<Guest, 'id' | 'fromHost'>[] => {
-    // Normalize headers to lowercase for comparison
-    const normalizedHeaders = headers.map(h => (h || '').toLowerCase().trim());
-
-    // Find the index of the Ranking column
-    const rankingIndex = normalizedHeaders.findIndex(h => h === 'ranking');
-
-    // Separate columns after Ranking into tag columns (header === '#') and meal plan columns
-    const tagHeaders: string[] = [];
-    const mealPlanHeaders: string[] = [];
-    if (rankingIndex !== -1) {
-      for (let i = rankingIndex + 1; i < headers.length; i++) {
-        const rawHeader = headers[i];
-        if (!rawHeader || !rawHeader.trim()) continue;
-
-        if (rawHeader.trim() === '#') {
-          tagHeaders.push(rawHeader);
-        } else {
-          mealPlanHeaders.push(rawHeader);
-        }
-      }
-    }
-
-    return data.map((row: any) => {
-      // Extract tags from # columns
-      const tags: string[] = [];
-      tagHeaders.forEach((header) => {
-        const value = row[header] || '';
-        const trimmed = String(value).trim();
-        if (trimmed) {
-          const normalized = toUpperCamelCase(trimmed);
-          if (normalized && !tags.includes(normalized)) {
-            tags.push(normalized);
-          }
-        }
-      });
-
-      // Extract meal plans from non-# columns
-      const mealPlans: string[] = [];
-      mealPlanHeaders.forEach((header) => {
-        const value = row[header] || row[header.toLowerCase()] || '';
-        if (value && String(value).trim()) {
-          mealPlans.push(String(value).trim());
-        } else {
-          // Keep empty string to maintain order
-          mealPlans.push('');
-        }
-      });
-
-      // Filter out trailing empty meal plans but keep ones in between
-      let lastNonEmptyIndex = -1;
-      for (let i = mealPlans.length - 1; i >= 0; i--) {
-        if (mealPlans[i]) {
-          lastNonEmptyIndex = i;
-          break;
-        }
-      }
-      const trimmedMealPlans = lastNonEmptyIndex >= 0
-        ? mealPlans.slice(0, lastNonEmptyIndex + 1)
-        : [];
-
-      // Parse ranking - use parseFloat to preserve decimals like 1.5, 2.3, etc.
-      const rawRanking = row.Ranking ?? row.ranking;
-      const parsedRanking = parseFloat(String(rawRanking));
-      const ranking = !isNaN(parsedRanking) && parsedRanking > 0 ? parsedRanking : 10;
-
-      return {
-        name: row.Name || row.name || '',
-        country: row.Country || row.country || '',
-        company: row.Company || row.company || '',
-        title: row.Title || row.title || '',
-        ranking,
-        mealPlans: trimmedMealPlans,
-        tags,
-      };
-    }).filter(g => g.name.trim() !== '');
-  };
-
-  const importGuests = (guestsData: Omit<Guest, 'id' | 'fromHost'>[]) => {
+  const importGuests = (guestsData: ParsedGuest[]) => {
     guestsData.forEach((guestData) => {
       const newGuest: Guest = {
         ...guestData,
@@ -293,65 +171,17 @@ export default function MasterGuestListModal({
     });
   };
 
-  /* -------------------- EXPORT TEMPLATE -------------------- */
+  /* -------------------- EXPORT HANDLERS -------------------- */
   const handleExportTemplate = () => {
-    const template = [
-      {
-        Name: 'John Doe',
-        Country: 'Singapore',
-        Company: 'Example Corp',
-        Title: 'CEO',
-        Ranking: 1,
-        'Meal Plan 1': 'Vegetarian',
-        'Meal Plan 2': 'No Nuts',
-        'Meal Plan 3': '',
-        '#': 'Cybersecurity',
-      }
-    ];
-
-    const ws = XLSX.utils.json_to_sheet(template);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Guest List Template');
-    XLSX.writeFile(wb, `guest_list_template_${tab}.xlsx`);
+    const wb = buildGuestTemplateWorkbook();
+    downloadWorkbook(wb, `guest_list_template_${tab}.xlsx`);
   };
 
   const handleExportCurrent = () => {
     if (guests.length === 0) return;
-
-    // Find max meal plans and max tags to create consistent columns
-    let maxMealPlansInExport = 0;
-    let maxTagsInExport = 0;
-    guests.forEach(g => {
-      if (g.mealPlans && g.mealPlans.length > maxMealPlansInExport) {
-        maxMealPlansInExport = g.mealPlans.length;
-      }
-      if (g.tags && g.tags.length > maxTagsInExport) {
-        maxTagsInExport = g.tags.length;
-      }
-    });
-
-    // Build header order: base columns, meal plans, then tags
-    // Tags use '#' as header; multiple tag columns all share the '#' header key.
-    // XLSX.utils.json_to_sheet would merge duplicate keys, so we build the sheet manually.
-    const headerRow = [
-      'Name', 'Country', 'Company', 'Title', 'Ranking',
-      ...Array.from({ length: maxMealPlansInExport }, (_, i) => `Meal Plan ${i + 1}`),
-      ...Array.from({ length: maxTagsInExport }, () => '#'),
-    ];
-
-    const dataRows = guests.map(g => {
-      const row: (string | number)[] = [
-        g.name, g.country, g.company, g.title, g.ranking,
-        ...Array.from({ length: maxMealPlansInExport }, (_, i) => g.mealPlans?.[i] || ''),
-        ...Array.from({ length: maxTagsInExport }, (_, i) => g.tags?.[i] || ''),
-      ];
-      return row;
-    });
-
-    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, tab === 'host' ? 'Host Guests' : 'External Guests');
-    XLSX.writeFile(wb, `${tab}_guests_${event.name.replace(/\s+/g, '_')}.xlsx`);
+    const sheetName = tab === 'host' ? 'Host Guests' : 'External Guests';
+    const wb = buildCurrentGuestsWorkbook(guests, sheetName);
+    downloadWorkbook(wb, `${tab}_guests_${event.name.replace(/\s+/g, '_')}.xlsx`);
   };
 
   /* -------------------- EDIT HANDLERS -------------------- */
@@ -379,29 +209,6 @@ export default function MasterGuestListModal({
 
     setEditingId(null);
     setEditForm({});
-  };
-
-  /* -------------------- ADD GUEST -------------------- */
-  const handleAddGuest = () => {
-    if (!addForm.name.trim()) return;
-    
-    const newGuest: Guest = {
-      ...addForm,
-      id: uuidv4(),
-      fromHost,
-    };
-    
-    addMasterGuest(eventId, newGuest);
-    
-    setAddForm({
-      name: '',
-      country: '',
-      company: '',
-      title: '',
-      ranking: 10,
-      mealPlans: [],
-      tags: [],
-    });
   };
 
   /* -------------------- DELETE GUEST -------------------- */
@@ -547,65 +354,11 @@ export default function MasterGuestListModal({
           <Divider sx={{ my: 2 }} />
 
           {/* Add Guest Form */}
-          <Box mb={2} p={2} bgcolor="white" borderRadius={1} border="1px solid #ddd">
-            <Typography variant="subtitle2" mb={2} fontWeight={600}>
-              Add New Guest
-            </Typography>
-            <Stack direction="row" flexWrap="wrap" spacing={1.5}>
-              <TextField
-                size="small"
-                label="Name"
-                value={addForm.name}
-                onChange={(e) => setAddForm({ ...addForm, name: e.target.value })}
-                sx={{ minWidth: 180 }}
-              />
-
-              <TextField
-                size="small"
-                label="Country"
-                value={addForm.country}
-                onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
-                sx={{ minWidth: 140 }}
-              />
-
-              <TextField
-                size="small"
-                label="Company"
-                value={addForm.company}
-                onChange={(e) => setAddForm({ ...addForm, company: e.target.value })}
-                sx={{ minWidth: 180 }}
-              />
-
-              <TextField
-                size="small"
-                label="Title"
-                value={addForm.title}
-                onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
-                sx={{ minWidth: 180 }}
-              />
-
-              <TextField
-                size="small"
-                label="Ranking"
-                type="number"
-                value={addForm.ranking}
-                onChange={(e) =>
-                  setAddForm({ ...addForm, ranking: Math.min(10, Math.max(0.1, Number(e.target.value))) })
-                }
-                inputProps={{ step: '0.1', min: '0.1', max: '10' }}
-                sx={{ minWidth: 100 }}
-              />
-
-              <Button
-                variant="contained"
-                onClick={handleAddGuest}
-                startIcon={<Add />}
-                sx={{ height: 40 }}
-              >
-                Add
-              </Button>
-            </Stack>
-          </Box>
+          <AddGuestForm
+            onAdd={(guest) => {
+              addMasterGuest(eventId, { ...guest, id: uuidv4(), fromHost });
+            }}
+          />
 
           <Divider sx={{ my: 2 }} />
 
