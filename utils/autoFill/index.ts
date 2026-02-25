@@ -8,7 +8,7 @@
 // Functions
 export { autoFillSeats, getProximityViolations } from './autoFillOrchestrator';
 export { applyRandomizeOrder, isRandomizeOrderApplicable } from './guestSorting';
-export { reorderForTagSimilarity, buildTagSignature } from './tagReordering';
+export { reorderForTagSimilarity, reorderForTagGroups, buildTagSignature } from './tagReordering';
 export { applyTagGroupOptimization } from './tagGroupOptimization';
 
 // Types - re-exported from their canonical location in types/Event.ts

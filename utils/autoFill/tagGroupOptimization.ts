@@ -9,13 +9,19 @@
  * Phase 1 - CROSS-TABLE CONSOLIDATION:
  *   When group members are spread across multiple tables, moves guests to consolidate
  *   the group on a single target table. Target selection priority:
- *   (1) table with a locked group member, (2) table with the highest-priority group
- *   member, (3) table with the most group members already present, (4) table with
- *   the most available space.
+ *   (1) table with a locked group member, (2) perfect-fit table (seat count matches
+ *   group size with compatible seat modes), (3) table with the highest-priority group
+ *   member (anchor's table), (4) table with most available space.
+ *
+ * Phase 1.5 - AGGRESSIVE DISPLACEMENT:
+ *   When Phase 1 consolidation fails and the group occupies more than half the
+ *   target table, displaces lower-priority non-group guests from the target table
+ *   to make room. Displaced guests are re-seated on other tables in priority order.
+ *   Starts from the lowest-priority occupant and iterates upward.
  *
  * Phase 2a - CONTIGUOUS BLOCK PLACEMENT:
  *   Attempts to place all group members in a connected chain of adjacent seats using
- *   BFS to find a contiguous block. When successful, all members form a chain
+ *   BFS to find a contiguous block. When successful, all members form a daisy chain
  *   (A adjacent to B adjacent to C adjacent to D).
  *
  * Phase 2b - MULTI-PASS GREEDY ADJACENCY (fallback):
@@ -42,9 +48,53 @@ import {
 } from './seatFinder';
 
 /**
+ * Check if a table's seat modes can accommodate a tag group's guest types.
+ * Returns true if there are enough compatible seats for each guest type.
+ */
+function checkSeatModeCompatibility(
+  table: any,
+  groupGuestIds: string[],
+  guestLookup: Map<string, any>,
+  lockedGuestMap: Map<string, LockedGuestLocation>
+): boolean {
+  const unlockedSeats = (table.seats || []).filter((s: any) => !s.locked);
+
+  // Count available seats by type
+  let hostOnlySeats = 0;
+  let externalOnlySeats = 0;
+  let defaultSeats = 0;
+  for (const seat of unlockedSeats) {
+    const mode = seat.mode || 'default';
+    if (mode === 'host-only') hostOnlySeats++;
+    else if (mode === 'external-only') externalOnlySeats++;
+    else defaultSeats++;
+  }
+
+  // Count group guests by type
+  let hostGuests = 0;
+  let externalGuests = 0;
+  for (const gid of groupGuestIds) {
+    if (lockedGuestMap.has(gid)) continue; // Locked guests already have seats
+    const guest = guestLookup.get(gid);
+    if (!guest) continue;
+    if (guest.fromHost) hostGuests++;
+    else externalGuests++;
+  }
+
+  // Host guests can sit in host-only or default seats
+  // External guests can sit in external-only or default seats
+  // Check if there are enough seats: host-only covers hosts, external-only covers externals,
+  // default seats cover the remainder
+  const remainingHosts = Math.max(0, hostGuests - hostOnlySeats);
+  const remainingExternals = Math.max(0, externalGuests - externalOnlySeats);
+  return remainingHosts + remainingExternals <= defaultSeats;
+}
+
+/**
  * Find the best target table for consolidating a tag group.
- * Priority: (1) table with locked group member, (2) table with highest-priority
- * group member, (3) table with most group members, (4) table with most available space.
+ * Priority: (1) table with locked group member, (2) perfect-fit table (seat count
+ * matches group size with compatible seat modes), (3) table with highest-priority
+ * group member (anchor's table), (4) table with most available space.
  */
 function findBestTargetTableForGroup(
   groupGuestIds: string[],
@@ -66,8 +116,19 @@ function findBestTargetTableForGroup(
     }
   }
 
-  // Build table distribution: which tables have group members and how many
-  const tableGuestCounts = new Map<string, number>();
+  // (2) Perfect-fit table: unlocked seat count matches group size with compatible seat modes
+  const nonLockedGroupSize = groupGuestIds.filter(gid => !lockedGuestMap.has(gid)).length;
+  for (const table of tables) {
+    const unlockedSeats = (table.seats || []).filter((s: any) => !s.locked);
+    if (unlockedSeats.length === nonLockedGroupSize) {
+      if (checkSeatModeCompatibility(table, groupGuestIds, guestLookup, lockedGuestMap)) {
+        console.log(`  Perfect-fit table found: ${table.label} (${unlockedSeats.length} seats for ${nonLockedGroupSize} guests)`);
+        return { table, hasLockedMember: false };
+      }
+    }
+  }
+
+  // Build table distribution: which tables have group members
   const tableByGuestPriority = new Map<string, any>();
 
   for (const guestId of groupGuestIds) {
@@ -75,8 +136,6 @@ function findBestTargetTableForGroup(
     if (!loc) continue;
 
     const tableId = loc.table.id;
-    tableGuestCounts.set(tableId, (tableGuestCounts.get(tableId) ?? 0) + 1);
-
     const guest = guestLookup.get(guestId);
     if (!guest) continue;
 
@@ -86,35 +145,12 @@ function findBestTargetTableForGroup(
     }
   }
 
-  // (2) Find table with highest-priority group member
+  // (3) Table with highest-priority group member (anchor's table always wins)
   let bestByPriority: { table: any; guest: any } | null = null;
   for (const [, entry] of tableByGuestPriority) {
     if (!bestByPriority || comparator(entry.guest, bestByPriority.guest) < 0) {
       bestByPriority = entry;
     }
-  }
-
-  // (3) If there's a table with the most group members, prefer it
-  let maxCount = 0;
-  let tableWithMost: any = null;
-  for (const [tableId, count] of tableGuestCounts) {
-    if (count > maxCount) {
-      maxCount = count;
-      tableWithMost = tables.find(t => t.id === tableId);
-    }
-  }
-
-  // Prefer the table with the most members if it has significantly more
-  if (tableWithMost && bestByPriority) {
-    const bestPriorityTableCount = tableGuestCounts.get(bestByPriority.table.id) ?? 0;
-    if (maxCount > bestPriorityTableCount) {
-      return { table: tableWithMost, hasLockedMember: false };
-    }
-    return { table: bestByPriority.table, hasLockedMember: false };
-  }
-
-  if (tableWithMost) {
-    return { table: tableWithMost, hasLockedMember: false };
   }
 
   if (bestByPriority) {
@@ -205,7 +241,7 @@ function buildAllTagGroupGuestIds(tagGroups: TagSitTogetherGroup[]): Set<string>
 
 /**
  * Find the best anchor seat for contiguous block placement.
- * Priority: locked group member > member with most group-adjacent neighbors > highest-priority member.
+ * Priority: locked group member > highest-priority member > member with most group-adjacent neighbors.
  */
 function findBestAnchorForBlock(
   groupGuestIds: string[],
@@ -228,7 +264,25 @@ function findBestAnchorForBlock(
     }
   }
 
-  // (2) Member with the most group-adjacent neighbors
+  // (2) Highest-priority member (by user's sort rules)
+  let bestByPriority: { seat: any; guestId: string; guest: any } | null = null;
+
+  for (const guestId of groupGuestIds) {
+    const guest = guestLookup.get(guestId);
+    if (!guest) continue;
+    const loc = findGuestSeat(guestId, [table], seatToGuest);
+    if (!loc || loc.table.id !== table.id) continue;
+
+    if (!bestByPriority || comparator(guest, bestByPriority.guest) < 0) {
+      bestByPriority = { seat: loc.seat, guestId, guest };
+    }
+  }
+
+  if (bestByPriority) {
+    return { seat: bestByPriority.seat, guestId: bestByPriority.guestId };
+  }
+
+  // (3) Member with the most group-adjacent neighbors (fallback)
   let bestByNeighbors: { seat: any; guestId: string; count: number } | null = null;
 
   for (const guestId of groupGuestIds) {
@@ -251,21 +305,7 @@ function findBestAnchorForBlock(
     return { seat: bestByNeighbors.seat, guestId: bestByNeighbors.guestId };
   }
 
-  // (3) Highest-priority member
-  let bestByPriority: { seat: any; guestId: string; guest: any } | null = null;
-
-  for (const guestId of groupGuestIds) {
-    const guest = guestLookup.get(guestId);
-    if (!guest) continue;
-    const loc = findGuestSeat(guestId, [table], seatToGuest);
-    if (!loc || loc.table.id !== table.id) continue;
-
-    if (!bestByPriority || comparator(guest, bestByPriority.guest) < 0) {
-      bestByPriority = { seat: loc.seat, guestId, guest };
-    }
-  }
-
-  return bestByPriority ? { seat: bestByPriority.seat, guestId: bestByPriority.guestId } : null;
+  return null;
 }
 
 /**
@@ -682,9 +722,188 @@ export function applyTagGroupOptimization(
         console.log(`  Group successfully consolidated on ${targetTable.label}`);
       }
 
-      // Update for Phase 2
-      groupLocations.length = 0;
-      groupLocations.push(...newLocations);
+      // =====================================================================
+      // PHASE 1.5: AGGRESSIVE DISPLACEMENT
+      // If group members are still not all on the target table, and the group
+      // occupies more than half the table, displace lower-priority non-group
+      // guests to make room. Displaced guests are re-seated on other tables.
+      // =====================================================================
+      if (newTableIds.size > 1) {
+        const unlockedTargetSeats = targetTable.seats.filter((s: any) => !s.locked);
+        const groupSizeOnTarget = newLocations.filter(loc => loc.table.id === targetTable.id).length;
+        const totalGroupSize = seatedGuestIds.filter(gid => !lockedGuestMap.has(gid)).length;
+
+        // Only attempt displacement if the group takes up more than half the table
+        if (totalGroupSize > unlockedTargetSeats.length / 2) {
+          const pendingMembers = newLocations
+            .filter(loc => loc.table.id !== targetTable.id && !loc.isLocked)
+            .map(loc => loc.guestId);
+
+          if (pendingMembers.length > 0) {
+            console.log(`  Phase 1.5: Attempting displacement for ${pendingMembers.length} remaining member(s)`);
+
+            // Find non-group, non-locked occupants on target table, sorted by priority (lowest first)
+            const targetTableOccupants: { guestId: string; seat: any; guest: any }[] = [];
+            for (const seat of unlockedTargetSeats) {
+              const occupantId = seatToGuest.get(seat.id);
+              if (!occupantId) continue;
+              if (lockedGuestMap.has(occupantId)) continue;
+              if (seatedGuestIds.includes(occupantId)) continue; // Don't displace group members
+              if (allTagGroupGuestIds.has(occupantId) && !seatedGuestIds.includes(occupantId)) continue; // Protect other tag groups
+
+              const occupantGuest = guestLookup.get(occupantId);
+              if (!occupantGuest) continue;
+              targetTableOccupants.push({ guestId: occupantId, seat, guest: occupantGuest });
+            }
+
+            // Sort: lowest priority first (highest comparator value)
+            targetTableOccupants.sort((a, b) => comparator(b.guest, a.guest));
+
+            const displacedGuests: { guestId: string; guest: any }[] = [];
+
+            for (const occupant of targetTableOccupants) {
+              if (pendingMembers.length === 0) break;
+
+              // Check if any pending group member can sit in this seat
+              let matchedMemberIdx = -1;
+              for (let i = 0; i < pendingMembers.length; i++) {
+                const memberGuest = guestLookup.get(pendingMembers[i]);
+                if (memberGuest && canPlaceGuestInSeat(memberGuest, occupant.seat)) {
+                  matchedMemberIdx = i;
+                  break;
+                }
+              }
+
+              if (matchedMemberIdx === -1) continue;
+
+              const memberId = pendingMembers[matchedMemberIdx];
+              const memberLoc = findGuestSeat(memberId, tables, seatToGuest);
+              if (!memberLoc) continue;
+
+              // Displace: remove occupant, place group member in their seat
+              seatToGuest.delete(occupant.seat.id);
+              seatToGuest.delete(memberLoc.seat.id);
+              seatToGuest.set(occupant.seat.id, memberId);
+
+              // Track the displaced guest and their original seat for re-seating
+              displacedGuests.push({ guestId: occupant.guestId, guest: occupant.guest });
+
+              // Remove from pending list
+              pendingMembers.splice(matchedMemberIdx, 1);
+
+              console.log(`    Displaced ${occupant.guest.name} to make room for ${guestLookup.get(memberId)?.name}`);
+            }
+
+            // Re-seat displaced guests on other tables (highest priority first)
+            displacedGuests.sort((a, b) => comparator(a.guest, b.guest));
+
+            for (const displaced of displacedGuests) {
+              let reseated = false;
+
+              // Try empty compatible seats on other tables first
+              for (const otherTable of tables) {
+                if (otherTable.id === targetTable.id) continue;
+
+                for (const seat of otherTable.seats) {
+                  if (seat.locked) continue;
+                  if (seatToGuest.has(seat.id)) continue;
+                  if (!canPlaceGuestInSeat(displaced.guest, seat)) continue;
+
+                  seatToGuest.set(seat.id, displaced.guestId);
+                  reseated = true;
+                  console.log(`    Re-seated ${displaced.guest.name} on ${otherTable.label}`);
+                  break;
+                }
+
+                if (reseated) break;
+              }
+
+              // If no empty seat, swap with lowest-priority non-protected guest on another table
+              if (!reseated) {
+                let worstCandidate: { guestId: string; seat: any; table: any; guest: any } | null = null;
+
+                for (const otherTable of tables) {
+                  if (otherTable.id === targetTable.id) continue;
+
+                  for (const seat of otherTable.seats) {
+                    if (seat.locked) continue;
+                    const occId = seatToGuest.get(seat.id);
+                    if (!occId) continue;
+                    if (lockedGuestMap.has(occId)) continue;
+                    if (allTagGroupGuestIds.has(occId)) continue;
+
+                    const occGuest = guestLookup.get(occId);
+                    if (!occGuest) continue;
+                    if (!canPlaceGuestInSeat(displaced.guest, seat)) continue;
+                    if (!canPlaceGuestInSeat(occGuest, seat)) continue; // Ensure they can swap back
+
+                    if (!worstCandidate || comparator(occGuest, worstCandidate.guest) > 0) {
+                      worstCandidate = { guestId: occId, seat, table: otherTable, guest: occGuest };
+                    }
+                  }
+                }
+
+                if (worstCandidate) {
+                  // Swap: displaced goes into worst candidate's seat, worst candidate becomes unseated
+                  // (worst candidate takes displaced's original position - but displaced has no seat anymore)
+                  // Simply place displaced guest in the seat, the worst candidate loses their seat
+                  // We need to find a seat for the worst candidate too - but to avoid infinite recursion,
+                  // just swap them: displaced takes worst's seat, worst goes to an empty seat if available
+                  seatToGuest.delete(worstCandidate.seat.id);
+                  seatToGuest.set(worstCandidate.seat.id, displaced.guestId);
+
+                  // Try to find an empty seat for the evicted guest
+                  let evictedReseated = false;
+                  for (const t of tables) {
+                    for (const s of t.seats) {
+                      if (s.locked || seatToGuest.has(s.id)) continue;
+                      if (!canPlaceGuestInSeat(worstCandidate.guest, s)) continue;
+                      seatToGuest.set(s.id, worstCandidate.guestId);
+                      evictedReseated = true;
+                      break;
+                    }
+                    if (evictedReseated) break;
+                  }
+
+                  reseated = true;
+                  console.log(`    Re-seated ${displaced.guest.name} by displacing ${worstCandidate.guest.name}`);
+                }
+              }
+
+              if (!reseated) {
+                console.log(`    Could not re-seat ${displaced.guest.name}`);
+              }
+            }
+          }
+
+          // Refresh locations after displacement
+          const postDisplacementLocations: typeof groupLocations = [];
+          for (const guestId of seatedGuestIds) {
+            const isLocked = lockedGuestMap.has(guestId);
+            const location = findGuestSeat(guestId, tables, seatToGuest);
+            if (location) {
+              postDisplacementLocations.push({ guestId, seat: location.seat, table: location.table, isLocked });
+            }
+          }
+
+          const postDisplacementTableIds = new Set(postDisplacementLocations.map(loc => loc.table.id));
+          if (postDisplacementTableIds.size === 1) {
+            console.log(`  Group consolidated after displacement on ${targetTable.label}`);
+          }
+
+          // Update for Phase 2
+          groupLocations.length = 0;
+          groupLocations.push(...postDisplacementLocations);
+        } else {
+          // Update for Phase 2
+          groupLocations.length = 0;
+          groupLocations.push(...newLocations);
+        }
+      } else {
+        // Update for Phase 2
+        groupLocations.length = 0;
+        groupLocations.push(...newLocations);
+      }
     }
 
     // =========================================================================
