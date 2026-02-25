@@ -26,6 +26,8 @@ import { exportToPPTX } from '@/utils/exportToPPTX';
 import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
 import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
+import ChunkLayoutModal from '@/components/molecules/ChunkLayoutModal';
+import { computeChunkLayout, ChunkLayoutConfig } from '@/utils/chunkLayoutHelper';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
 import PageLoader from '@/components/atoms/PageLoader';
@@ -63,6 +65,10 @@ export default function SessionDetailPage() {
 
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [chunkLayoutOpen, setChunkLayoutOpen] = useState(false);
+
+  // Reactive table count for ChunkLayoutModal
+  const tableCount = useSeatStore((s) => s.tables.length);
   const [sessionData, setSessionData] = useState<{
     session: any;
     dayId: string;
@@ -125,6 +131,22 @@ export default function SessionDetailPage() {
     exportToPPTX();
   };
 
+  const handleChunkLayoutApply = (config: ChunkLayoutConfig) => {
+    if (isLocked) return;
+    const currentTables = useSeatStore.getState().tables;
+    if (currentTables.length === 0) return;
+
+    captureSnapshot("Chunk Layout");
+
+    const result = computeChunkLayout(currentTables, config);
+    useSeatStore.setState({
+      tables: result.tables,
+      chunks: result.chunks,
+    });
+
+    setChunkLayoutOpen(false);
+  };
+
   // Show loading spinner during initial load
   if (!isMounted || isLoading || !isHydrated) {
     return <PageLoader message="Loading session..." />;
@@ -175,6 +197,7 @@ export default function SessionDetailPage() {
           onManageGuests={() => setGuestModalOpen(true)}
           onExport={() => setExportModalOpen(true)}
           onToggleLock={handleToggleLock}
+          onChunkLayout={() => setChunkLayoutOpen(true)}
         />
       }
     >
@@ -249,6 +272,14 @@ export default function SessionDetailPage() {
         onClose={() => setExportModalOpen(false)}
         onExportPDF={handleExportPDF}
         onExportPPTX={handleExportPPTX}
+      />
+
+      {/* Chunk Layout Modal */}
+      <ChunkLayoutModal
+        open={chunkLayoutOpen}
+        onClose={() => setChunkLayoutOpen(false)}
+        onApply={handleChunkLayoutApply}
+        tableCount={tableCount}
       />
     </SessionDetailLayout>
     </UndoRedoProvider>

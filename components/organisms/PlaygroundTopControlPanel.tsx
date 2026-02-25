@@ -22,6 +22,7 @@ import {
   Lock,
   LockOpen,
   Info,
+  GridView,
 } from '@mui/icons-material';
 import AutoFillButton from '@/components/atoms/AutoFillButton';
 
@@ -37,6 +38,7 @@ interface PlaygroundTopControlPanelProps {
   onManageGuests: () => void;
   onExport: () => void;
   onToggleLock?: () => void; // 🆕
+  onChunkLayout?: () => void;
 }
 
 export default function PlaygroundTopControlPanel({
@@ -51,6 +53,7 @@ export default function PlaygroundTopControlPanel({
   onManageGuests,
   onExport,
   onToggleLock,
+  onChunkLayout,
 }: PlaygroundTopControlPanelProps) {
   return (
     <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
@@ -108,6 +111,21 @@ export default function PlaygroundTopControlPanel({
               >
                 {isLocked ? 'Unlock' : 'Lock'}
               </Button>
+            </Tooltip>
+          )}
+
+          {onChunkLayout && (
+            <Tooltip title={isLocked ? 'Session is locked' : 'Arrange tables into chunk grid'}>
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={<GridView />}
+                  onClick={onChunkLayout}
+                  disabled={isLocked}
+                >
+                  Chunk Layout
+                </Button>
+              </span>
             </Tooltip>
           )}
 
