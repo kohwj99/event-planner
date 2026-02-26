@@ -17,20 +17,20 @@ import {
   EventSeat,
   Groups,
 } from '@mui/icons-material';
-import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
-import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
-import ExportModal from '@/components/molecules/ExportModal';
-import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
+import PlayGroundCanvas from '@/components/features/session/PlaygroundCanvas';
+import PlaygroundRightConfigPanel from '@/components/features/session/PlaygroundRightConfigPanel';
+import ExportModal from '@/components/features/session/ExportModal';
+import SeatingStatsPanel from '@/components/features/session/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
-import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
+import PlaygroundTopControlPanel from '@/components/features/session/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
-import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
-import ChunkLayoutModal from '@/components/molecules/ChunkLayoutModal';
+import SessionGuestListModal from '@/components/features/guest/SessionGuestListModal';
+import ChunkLayoutModal from '@/components/features/session/ChunkLayoutModal';
 import { computeChunkLayout, ChunkLayoutConfig } from '@/utils/chunkLayoutHelper';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
-import PageLoader from '@/components/atoms/PageLoader';
+import PageLoader from '@/components/shared/atoms/PageLoader';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };

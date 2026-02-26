@@ -9,12 +9,12 @@ import {
   Typography, Box
 } from "@mui/material";
 
-import PageLoader from "@/components/atoms/PageLoader";
-import EventDetailHeader from "@/components/organisms/EventDetailHeader";
-import DayColumn from "@/components/organisms/DayColumn";
-import CreateSessionModal from "@/components/molecules/CreateSessionModal";
-import ConfirmDeleteModal from "@/components/molecules/ConfirmDeleteModal";
-import SessionGuestListModal from "@/components/molecules/SessionGuestListModal";
+import PageLoader from "@/components/shared/atoms/PageLoader";
+import EventDetailHeader from "@/components/features/event/EventDetailHeader";
+import DayColumn from "@/components/features/event/DayColumn";
+import CreateSessionModal from "@/components/features/session/CreateSessionModal";
+import ConfirmDeleteModal from "@/components/shared/molecules/ConfirmDeleteModal";
+import SessionGuestListModal from "@/components/features/guest/SessionGuestListModal";
 
 export default function EventDetailPage() {
   const { id } = useParams() as { id: string };

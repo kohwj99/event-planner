@@ -22,12 +22,12 @@ import {
   createRemappedEvent,
   downloadEventAsJSON
 } from "@/utils/eventImportUtils";
-import { CreateEventDialog, CreateEventFormData } from "@/components/molecules/CreateEventDialog";
-import { EmptyEventsState } from "@/components/molecules/EmptyEventState";
-import { EventCard } from "@/components/organisms/EventCard";
-import { ImportEventDialog } from "@/components/molecules/ImportEventDialog";
-import PageLoader from "@/components/atoms/PageLoader";
-import { ExportEventDialog } from "@/components/molecules/ExportEventDialog";
+import { CreateEventDialog, CreateEventFormData } from "@/components/features/event/CreateEventDialog";
+import { EmptyEventsState } from "@/components/shared/molecules/EmptyEventState";
+import { EventCard } from "@/components/features/event/EventCard";
+import { ImportEventDialog } from "@/components/features/event/ImportEventDialog";
+import PageLoader from "@/components/shared/atoms/PageLoader";
+import { ExportEventDialog } from "@/components/features/event/ExportEventDialog";
 
 
 export default function HomePage() {

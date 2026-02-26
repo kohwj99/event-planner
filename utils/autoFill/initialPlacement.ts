@@ -31,7 +31,7 @@ import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSort
 import { canPlaceGuestInSeat, getNextCompatibleGuest, getNextCompatibleGuestOfType } from './seatCompatibility';
 import { wouldViolateSitAwayWithLocked } from './lockedGuestHelpers';
 import { reorderForSitTogetherClusters } from './proximityReordering';
-import { reorderForTagSimilarity, reorderForTagGroups } from './tagReordering';
+import { reorderForTagGroups } from './tagReordering';
 
 /**
  * Perform the initial placement of guests into seats across all tables.
@@ -73,13 +73,10 @@ export function performInitialPlacement(
   }
 
   // Reorder so that tag group members are placed consecutively after their anchor.
-  // When explicit tag groups exist, use group membership to pull members up right
-  // after the highest-priority anchor. Otherwise, fall back to tag similarity grouping.
+  // Only applies when the user has explicitly created tag groups in the AutoFill modal.
   // Runs after sit-together clustering (hard constraint) and before randomization.
   if (tagGroups && tagGroups.length > 0) {
     allCandidates = reorderForTagGroups(allCandidates, tagGroups, comparatorWithTieBreak);
-  } else {
-    allCandidates = reorderForTagSimilarity(allCandidates, comparatorWithTieBreak);
   }
 
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
