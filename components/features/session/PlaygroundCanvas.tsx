@@ -29,6 +29,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import TableRestaurant from '@mui/icons-material/TableRestaurant';
 import CameraAlt from '@mui/icons-material/CameraAlt';
+import LocalOffer from '@mui/icons-material/LocalOffer';
 
 import AddTableModal, { TableConfig } from '@/components/features/session/AddTableModal';
 import ColorModeToggle from '@/components/shared/atoms/ColorModeToggle';
@@ -81,6 +82,7 @@ export default function PlaygroundCanvas({
   const [connectorGap, setConnectorGap] = useState<number>(8);
   const [hideTableBodies, setHideTableBodies] = useState<boolean>(false);
   const [isPhotoMode, setIsPhotoMode] = useState<boolean>(false);
+  const [showTagPills, setShowTagPills] = useState<boolean>(false);
 
   // Flag to prevent notifying parent while we're syncing from parent's props
   const isSyncingFromParent = useRef(false);
@@ -163,7 +165,8 @@ export default function PlaygroundCanvas({
       setConnectorGap(initialUISettings.connectorGap ?? 8);
       setHideTableBodies(initialUISettings.hideTableBodies ?? false);
       setIsPhotoMode(initialUISettings.isPhotoMode ?? false);
-      
+      setShowTagPills(initialUISettings.showTagPills ?? false);
+
       // Colorblind mode is already applied by useSessionLoader
       
       // Reset flag after state updates are processed
@@ -195,16 +198,17 @@ export default function PlaygroundCanvas({
         hideTableBodies,
         isPhotoMode,
         isColorblindMode,
+        showTagPills,
         zoomLevel,
       };
       console.log('[PlaygroundCanvas] Notifying parent of user changes:', settings);
       onUISettingsChange(settings);
     }, 200);
-    
+
     return () => {
       if (notifyTimeout.current) clearTimeout(notifyTimeout.current);
     };
-  }, [connectorGap, hideTableBodies, isPhotoMode, isColorblindMode, zoomLevel, onUISettingsChange]);
+  }, [connectorGap, hideTableBodies, isPhotoMode, isColorblindMode, showTagPills, zoomLevel, onUISettingsChange]);
 
   // ============================================================================
   // LOCKED MODE HANDLERS - wrap store functions to check lock state
@@ -449,6 +453,7 @@ export default function PlaygroundCanvas({
         guestLookup,
         selectedMealPlanIndex,
         isPhotoMode,
+        showTagPills,
         handleSelectSeat,
         handleLockSeat,
         handleClearSeat
@@ -461,7 +466,8 @@ export default function PlaygroundCanvas({
         connectorGap,
         selectedMealPlanIndex,
         colorScheme,
-        isPhotoMode
+        isPhotoMode,
+        showTagPills
       );
     });
 
@@ -505,7 +511,7 @@ export default function PlaygroundCanvas({
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    hideTableBodies, isPhotoMode, isLocked, captureSnapshot
+    hideTableBodies, isPhotoMode, showTagPills, isLocked, captureSnapshot
   ]);
 
   // ============================================================================
@@ -691,6 +697,30 @@ export default function PlaygroundCanvas({
                     <CameraAlt fontSize="small" sx={{ color: isPhotoMode ? 'secondary.main' : 'text.disabled' }} />
                     <Typography variant="caption" color={isPhotoMode ? 'text.primary' : 'text.disabled'}>
                       Photo Mode
+                    </Typography>
+                  </Stack>
+                }
+                sx={{ m: 0 }}
+              />
+            </Tooltip>
+          </Box>
+
+          <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Tooltip title="Show tag pills on guest boxes" placement="left">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={showTagPills}
+                    onChange={(e) => setShowTagPills(e.target.checked)}
+                    size="small"
+                    color="info"
+                  />
+                }
+                label={
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <LocalOffer fontSize="small" sx={{ color: showTagPills ? 'info.main' : 'text.disabled' }} />
+                    <Typography variant="caption" color={showTagPills ? 'text.primary' : 'text.disabled'}>
+                      Show Tags
                     </Typography>
                   </Stack>
                 }

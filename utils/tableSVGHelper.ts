@@ -20,6 +20,7 @@ import {
   getGuestBoxColors as getConfigGuestBoxColors,
   getSeatStrokeDashArray as getConfigStrokeDashArray,
   getSeatStrokeWidth,
+  getTagPillColor,
 } from '@/utils/colorConfig';
 
 // ============================================================================
@@ -77,6 +78,9 @@ export interface GuestBoxData {
   nameText: string;
   metaText: string;
   starsText: string;
+  hasTags: boolean;
+  tags: string[];
+  tagsOverflow: boolean;
 }
 
 // ============================================================================
@@ -328,7 +332,8 @@ export function generateGuestBoxData(
   tableDatum: Table,
   guestLookup: Record<string, Guest>,
   connectorGap: number,
-  selectedMealPlanIndex: number | null
+  selectedMealPlanIndex: number | null,
+  showTagPills: boolean = false
 ): GuestBoxData[] {
   const boxData: GuestBoxData[] = [];
 
@@ -359,11 +364,13 @@ export function generateGuestBoxData(
 
     const hasStars = stars.length > 0;
     const hasMealPlan = selectedMealPlanIndex !== null;
+    const hasTags = showTagPills && (guest.tags?.length ?? 0) > 0;
     const starsHeight = hasStars ? 14 : 0;
     const mealPlanHeight = hasMealPlan ? 14 : 0;
+    const tagRowHeight = hasTags ? 14 : 0;
     const contentHeight = 28;
     const padding = 12;
-    const height = padding + starsHeight + contentHeight + mealPlanHeight;
+    const height = padding + starsHeight + contentHeight + mealPlanHeight + tagRowHeight;
 
     boxDimensions.push({ width, height, seat: s, guest });
   });
@@ -395,6 +402,23 @@ export function generateGuestBoxData(
 
     const hasStars = stars.length > 0;
     const hasMealPlan = selectedMealPlanIndex !== null;
+    const tags = guest.tags ?? [];
+    const hasTags = showTagPills && tags.length > 0;
+
+    // Check if tag pills would overflow the box width
+    let tagsOverflow = false;
+    if (hasTags) {
+      const PILL_CHAR_WIDTH = 5.5;
+      const PILL_HPAD = 12;
+      const PILL_GAP = 3;
+      const availableWidth = width - 12;
+      let totalPillWidth = 0;
+      for (const tag of tags) {
+        totalPillWidth += tag.length * PILL_CHAR_WIDTH + PILL_HPAD;
+      }
+      totalPillWidth += Math.max(0, tags.length - 1) * PILL_GAP;
+      tagsOverflow = totalPillWidth > availableWidth;
+    }
 
     const seatR = s.radius ?? 8;
 
@@ -420,6 +444,9 @@ export function generateGuestBoxData(
       nameText: name,
       metaText: line2,
       starsText: stars,
+      hasTags,
+      tags,
+      tagsOverflow,
     });
   });
 
@@ -669,7 +696,8 @@ export function renderGuestBoxes(
   seatsWithGuest: Seat[],
   boxData: GuestBoxData[],
   selectedMealPlanIndex: number | null,
-  colorScheme: ColorScheme
+  colorScheme: ColorScheme,
+  showTagPills: boolean = false
 ): void {
   const guestBoxes = group
     .selectAll<SVGGElement, Seat>('g.guest-box')
@@ -738,6 +766,77 @@ export function renderGuestBoxes(
     gbox.select('text.guest-name').attr('x', b.x).attr('y', nameY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colors.text).text(nameText);
     gbox.select('text.guest-meta').attr('x', b.x).attr('y', metaY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.metaText).text(metaText);
     gbox.select('text.guest-meal-plan').attr('x', b.x).attr('y', mealPlanY).attr('text-anchor', 'middle').attr('dominant-baseline', 'middle').attr('fill', colorScheme.ui.mealPlanText).text(hasMealPlan ? `${mealPlanText}` : '');
+
+    // Tag pills rendering
+    gbox.selectAll('g.tag-pills-group').remove();
+    gbox.selectAll('text.tag-overflow-indicator').remove();
+    gbox.select('title').remove();
+
+    if (showTagPills && b.hasTags && b.tags.length > 0) {
+      const tagY = currentY + (hasMealPlan ? 14 : 0) + 1;
+
+      if (b.tagsOverflow) {
+        // Overflow: show count indicator + tooltip
+        gbox.append('text')
+          .attr('class', 'tag-overflow-indicator')
+          .attr('x', b.x)
+          .attr('y', tagY + 8)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'middle')
+          .attr('font-size', 8)
+          .attr('fill', colorScheme.ui.metaText)
+          .text(`[${b.tags.length} tags]`);
+      } else {
+        // Fit: render tag pills inline
+        const tagGroup = gbox.append('g').attr('class', 'tag-pills-group');
+        const PILL_HEIGHT = 12;
+        const PILL_CHAR_WIDTH = 5.5;
+        const PILL_HPAD = 12;
+        const PILL_GAP = 3;
+        const PILL_RADIUS = 6;
+
+        let totalWidth = 0;
+        const pillWidths: number[] = [];
+        for (const tag of b.tags) {
+          const pw = tag.length * PILL_CHAR_WIDTH + PILL_HPAD;
+          pillWidths.push(pw);
+          totalWidth += pw;
+        }
+        totalWidth += Math.max(0, b.tags.length - 1) * PILL_GAP;
+
+        let pillX = b.x - totalWidth / 2;
+
+        b.tags.forEach((tag, i) => {
+          const pw = pillWidths[i];
+          tagGroup.append('rect')
+            .attr('x', pillX)
+            .attr('y', tagY)
+            .attr('width', pw)
+            .attr('height', PILL_HEIGHT)
+            .attr('rx', PILL_RADIUS)
+            .attr('ry', PILL_RADIUS)
+            .attr('fill', getTagPillColor(tag));
+
+          tagGroup.append('text')
+            .attr('x', pillX + pw / 2)
+            .attr('y', tagY + PILL_HEIGHT / 2 + 1)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .attr('font-size', 7)
+            .attr('fill', '#FFFFFF')
+            .attr('font-weight', '500')
+            .text(tag);
+
+          pillX += pw + PILL_GAP;
+        });
+      }
+
+      // Add native SVG tooltip with all tag names
+      gbox.append('title').text(`Tags: ${b.tags.join(', ')}`);
+      gbox.style('pointer-events', 'all');
+    } else {
+      gbox.style('pointer-events', 'none');
+    }
 
     // Update connector
     group
@@ -919,6 +1018,7 @@ function renderPhotoSeats(
   colorScheme: ColorScheme,
   guestLookup: Record<string, Guest>,
   selectedMealPlanIndex: number | null,
+  showTagPills: boolean,
   onSeatClick: (tableId: string, seatId: string) => void,
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
@@ -1048,6 +1148,67 @@ function renderPhotoSeats(
         .attr('fill', colorScheme.ui.mealPlanText)
         .text(mealPlan ? `${mealPlan}` : '');
 
+      // Tag pills (between meta and meal plan)
+      grp.selectAll('g.photo-tags').remove();
+      grp.select('title').remove();
+
+      if (showTagPills && guest.tags && guest.tags.length > 0) {
+        const tags = guest.tags;
+        const tagsGroup = grp.append('g').attr('class', 'photo-tags');
+        const PILL_CHAR_WIDTH = 5;
+        const PILL_HPAD = 8;
+        const PILL_GAP = 2;
+        const PILL_HEIGHT = 10;
+        const PILL_RADIUS = 5;
+        const availWidth = PHOTO_BOX_SIZE - 8;
+        const tagRowY = 70;
+
+        let totalWidth = 0;
+        const pillWidths: number[] = [];
+        for (const tag of tags) {
+          const pw = tag.length * PILL_CHAR_WIDTH + PILL_HPAD;
+          pillWidths.push(pw);
+          totalWidth += pw;
+        }
+        totalWidth += Math.max(0, tags.length - 1) * PILL_GAP;
+
+        if (totalWidth > availWidth) {
+          tagsGroup.append('text')
+            .attr('x', cx)
+            .attr('y', tagRowY + 5)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .attr('font-size', 7)
+            .attr('fill', colorScheme.ui.metaText)
+            .text(`[${tags.length} tags]`);
+        } else {
+          let pillX = cx - totalWidth / 2;
+          tags.forEach((tag, i) => {
+            const pw = pillWidths[i];
+            tagsGroup.append('rect')
+              .attr('x', pillX)
+              .attr('y', tagRowY)
+              .attr('width', pw)
+              .attr('height', PILL_HEIGHT)
+              .attr('rx', PILL_RADIUS)
+              .attr('ry', PILL_RADIUS)
+              .attr('fill', getTagPillColor(tag));
+            tagsGroup.append('text')
+              .attr('x', pillX + pw / 2)
+              .attr('y', tagRowY + PILL_HEIGHT / 2 + 1)
+              .attr('text-anchor', 'middle')
+              .attr('dominant-baseline', 'middle')
+              .attr('font-size', 6)
+              .attr('fill', '#FFFFFF')
+              .attr('font-weight', '500')
+              .text(tag);
+            pillX += pw + PILL_GAP;
+          });
+        }
+
+        grp.append('title').text(`Tags: ${tags.join(', ')}`);
+      }
+
     } else {
       // Empty Seat State
       const nameText = grp.select('text.photo-name')
@@ -1098,6 +1259,7 @@ export function renderSeats(
   guestLookup: Record<string, Guest>,
   selectedMealPlanIndex: number | null,
   isPhotoMode: boolean,
+  showTagPills: boolean,
   onSeatClick: (tableId: string, seatId: string) => void,
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
@@ -1108,7 +1270,7 @@ export function renderSeats(
     group.selectAll('text.seat-number').remove();
 
     // Render Photo Mode
-    renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, onSeatClick, onSeatRightClick, onSeatDoubleClick);
+    renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, showTagPills, onSeatClick, onSeatRightClick, onSeatDoubleClick);
   } else {
     // Clean up Photo Elements
     group.selectAll('g.photo-seat-group').remove();
@@ -1173,7 +1335,8 @@ export function renderTableGuestDisplay(
   connectorGap: number,
   selectedMealPlanIndex: number | null,
   colorScheme: ColorScheme,
-  isPhotoMode: boolean
+  isPhotoMode: boolean,
+  showTagPills: boolean = false
 ): void {
   // If in Photo Mode, hide standard display
   if (isPhotoMode) {
@@ -1184,8 +1347,8 @@ export function renderTableGuestDisplay(
 
   // Standard Logic
   const seatsWithGuest = (tableDatum.seats || []).filter((s) => s.assignedGuestId);
-  const boxData = generateGuestBoxData(tableDatum, guestLookup, connectorGap, selectedMealPlanIndex);
+  const boxData = generateGuestBoxData(tableDatum, guestLookup, connectorGap, selectedMealPlanIndex, showTagPills);
   relaxGuestBoxPositions(boxData, 100, 6);
   renderConnectors(group, seatsWithGuest, tableDatum, boxData, colorScheme);
-  renderGuestBoxes(group, seatsWithGuest, boxData, selectedMealPlanIndex, colorScheme);
+  renderGuestBoxes(group, seatsWithGuest, boxData, selectedMealPlanIndex, colorScheme, showTagPills);
 }

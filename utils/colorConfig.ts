@@ -488,6 +488,44 @@ export function hasGoodContrast(color1: string, color2: string): boolean {
 }
 
 // ============================================================================
+// TAG PILL COLORS
+// ============================================================================
+
+const TAG_PILL_PALETTE = [
+  '#5C6BC0', // indigo
+  '#26A69A', // teal
+  '#7E57C2', // deep purple
+  '#42A5F5', // blue
+  '#66BB6A', // green
+  '#EF5350', // red
+  '#FFA726', // orange
+  '#EC407A', // pink
+  '#78909C', // blue-grey
+  '#8D6E63', // brown
+  '#AB47BC', // purple
+  '#29B6F6', // light blue
+];
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+/**
+ * Get a deterministic pill background color for a tag string.
+ * Same tag always gets the same color.
+ */
+export function getTagPillColor(tag: string): string {
+  const index = hashString(tag) % TAG_PILL_PALETTE.length;
+  return TAG_PILL_PALETTE[index];
+}
+
+// ============================================================================
 // PALETTE INFO (for legend/documentation)
 // ============================================================================
 

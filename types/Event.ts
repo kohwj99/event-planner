@@ -24,6 +24,8 @@ export interface SessionUISettings {
   isPhotoMode: boolean;
   /** Colorblind-friendly color scheme */
   isColorblindMode: boolean;
+  /** Whether to show tag pills on guest boxes */
+  showTagPills: boolean;
   /** Canvas zoom level */
   zoomLevel: number;
   /** Canvas pan X position */
@@ -40,6 +42,7 @@ export const DEFAULT_SESSION_UI_SETTINGS: SessionUISettings = {
   hideTableBodies: false,
   isPhotoMode: false,
   isColorblindMode: false,
+  showTagPills: false,
   zoomLevel: 1,
   panX: 0,
   panY: 0,
