@@ -1,6 +1,7 @@
 import { Guest } from "@/store/guestStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
+import { DrawObject } from "@/types/DrawObject";
 
 // Shared list of types
 export type EventType = 
@@ -345,7 +346,8 @@ export interface Session {
     chunks: Record<string, Chunk>;
     activeGuestIds: string[];
     selectedMealPlanIndex?: number | null; // null = None, 0 = Meal Plan 1, etc.
-    uiSettings?: SessionUISettings;        // 🎨 UI display settings
+    uiSettings?: SessionUISettings;        // UI display settings
+    drawObjects?: DrawObject[];            // Draw layer objects
   };
   
   // ⚙️ Session Rules Configuration - persists autofill settings

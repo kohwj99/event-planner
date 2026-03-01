@@ -60,6 +60,21 @@ function inlineComputedStyles(svgElement: SVGSVGElement): void {
 }
 
 /**
+ * Ensure draw-layer is positioned between chunks-layer and tables-layer
+ * in a cloned SVG. This guarantees draw objects render above chunk
+ * backgrounds but below tables/seats in exports.
+ * Target order: chunks-layer -> draw-layer -> tables-layer
+ */
+function ensureDrawLayerBetweenChunksAndTables(svgElement: SVGSVGElement): void {
+  const zoomLayer = svgElement.querySelector("g.zoom-layer");
+  const drawLayer = svgElement.querySelector("g.draw-layer");
+  const tablesLayer = svgElement.querySelector("g.tables-layer");
+  if (zoomLayer && drawLayer && tablesLayer) {
+    zoomLayer.insertBefore(drawLayer, tablesLayer);
+  }
+}
+
+/**
  * Export each chunk as one PDF page maintaining exact aspect ratio.
  * The chunk aspect ratio (CHUNK_WIDTH:CHUNK_HEIGHT = 2000:1200 = 5:3) is preserved.
  * Uses high resolution rasterization for quality output.
@@ -115,11 +130,26 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   const chunks = useSeatStore.getState().getAllChunksSorted();
   if (!chunks || chunks.length === 0) {
     // fallback: capture whole container
-    const canvas = await html2canvas(container, { 
-      backgroundColor: "#fff", 
+    // Temporarily ensure draw-layer is between chunks and tables for export
+    const liveZoom = svg?.querySelector("g.zoom-layer");
+    const liveDrawLayer = svg?.querySelector("g.draw-layer");
+    const liveTablesLayer = svg?.querySelector("g.tables-layer");
+    const drawLayerWasOnTop = liveZoom && liveDrawLayer && liveDrawLayer === liveZoom.lastElementChild;
+    if (drawLayerWasOnTop && liveZoom && liveDrawLayer && liveTablesLayer) {
+      liveZoom.insertBefore(liveDrawLayer, liveTablesLayer);
+    }
+
+    const canvas = await html2canvas(container, {
+      backgroundColor: "#fff",
       scale: RASTER_SCALE,
-      useCORS: true 
+      useCORS: true
     });
+
+    // Restore draw-layer to top if it was raised (draw mode active)
+    if (drawLayerWasOnTop && liveZoom && liveDrawLayer) {
+      liveZoom.appendChild(liveDrawLayer);
+    }
+
     const img = canvas.toDataURL("image/jpeg");
     const ratio = Math.min(pdfW_pt / (canvas.width / RASTER_SCALE), pdfH_pt / (canvas.height / RASTER_SCALE));
     const drawW = (canvas.width / RASTER_SCALE) * ratio;
@@ -134,6 +164,9 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   // Helper: capture exactly one chunk area into a canvas
   async function captureChunkCanvas(row: number, col: number) {
     const clone = svg!.cloneNode(true) as SVGSVGElement;
+
+    // Ensure draw-layer renders behind plan layer in the export
+    ensureDrawLayerBetweenChunksAndTables(clone);
 
     // Reset transform on zoom-layer to get world coordinates
     const zoomLayer = clone.querySelector("g.zoom-layer") as SVGGElement | null;
@@ -230,7 +263,10 @@ export async function exportToPDF(elementId: string, filename = "SeatPlan.pdf") 
   }
 
   const overviewClone = svg.cloneNode(true) as SVGSVGElement;
-  
+
+  // Ensure draw-layer renders behind plan layer in the overview export
+  ensureDrawLayerBetweenChunksAndTables(overviewClone);
+
   const zoomLayer2 = overviewClone.querySelector("g.zoom-layer") as SVGGElement | null;
   if (zoomLayer2) zoomLayer2.setAttribute("transform", "");
   

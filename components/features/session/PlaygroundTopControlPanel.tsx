@@ -11,6 +11,8 @@ import {
   Alert,
   Divider,
   Tooltip,
+  ToggleButtonGroup,
+  ToggleButton,
 } from '@mui/material';
 import {
   ArrowBack,
@@ -23,22 +25,27 @@ import {
   LockOpen,
   Info,
   GridView,
+  EventSeat,
+  Draw,
 } from '@mui/icons-material';
 import AutoFillButton from '@/components/features/session/AutoFillButton';
+import { CanvasLayer } from '@/store/drawUIStore';
 
 interface PlaygroundTopControlPanelProps {
   sessionName: string;
   sessionType: string;
   formattedDate: string;
   hasNoGuests: boolean;
-  isLocked?: boolean; // 🆕
+  isLocked?: boolean;
+  activeLayer?: CanvasLayer;
   onBack: () => void;
   onSave: () => void;
   onReset: () => void;
   onManageGuests: () => void;
   onExport: () => void;
-  onToggleLock?: () => void; // 🆕
+  onToggleLock?: () => void;
   onChunkLayout?: () => void;
+  onLayerChange?: (layer: CanvasLayer) => void;
 }
 
 export default function PlaygroundTopControlPanel({
@@ -47,6 +54,7 @@ export default function PlaygroundTopControlPanel({
   formattedDate,
   hasNoGuests,
   isLocked = false,
+  activeLayer = 'plan',
   onBack,
   onSave,
   onReset,
@@ -54,7 +62,9 @@ export default function PlaygroundTopControlPanel({
   onExport,
   onToggleLock,
   onChunkLayout,
+  onLayerChange,
 }: PlaygroundTopControlPanelProps) {
+  const isDrawMode = activeLayer === 'draw';
   return (
     <Paper elevation={2} sx={{ p: 2, zIndex: 10 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -94,6 +104,25 @@ export default function PlaygroundTopControlPanel({
           </Box>
         </Stack>
 
+        {/* CENTER - Layer Toggle */}
+        {onLayerChange && (
+          <ToggleButtonGroup
+            value={activeLayer}
+            exclusive
+            onChange={(_, val) => val && onLayerChange(val as CanvasLayer)}
+            size="small"
+          >
+            <ToggleButton value="plan">
+              <EventSeat sx={{ mr: 0.5, fontSize: 18 }} />
+              Plan
+            </ToggleButton>
+            <ToggleButton value="draw">
+              <Draw sx={{ mr: 0.5, fontSize: 18 }} />
+              Draw
+            </ToggleButton>
+          </ToggleButtonGroup>
+        )}
+
         {/* RIGHT */}
         <Stack direction="row" spacing={2} alignItems="center">
           <Divider orientation="vertical" flexItem />
@@ -115,13 +144,13 @@ export default function PlaygroundTopControlPanel({
           )}
 
           {onChunkLayout && (
-            <Tooltip title={isLocked ? 'Session is locked' : 'Arrange tables into chunk grid'}>
+            <Tooltip title={isLocked ? 'Session is locked' : isDrawMode ? 'Switch to Plan layer' : 'Arrange tables into chunk grid'}>
               <span>
                 <Button
                   variant="outlined"
                   startIcon={<GridView />}
                   onClick={onChunkLayout}
-                  disabled={isLocked}
+                  disabled={isLocked || isDrawMode}
                 >
                   Chunk Layout
                 </Button>
@@ -131,22 +160,20 @@ export default function PlaygroundTopControlPanel({
 
           <Divider orientation="vertical" flexItem />
 
-          {/* 🆕 Disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : ''}>
+          <Tooltip title={isLocked ? 'Session is locked' : isDrawMode ? 'Switch to Plan layer' : ''}>
             <span>
               <Button
                 variant="contained"
                 startIcon={<Groups />}
                 onClick={onManageGuests}
-                disabled={isLocked}
+                disabled={isLocked || isDrawMode}
               >
                 Manage Guests
               </Button>
             </span>
           </Tooltip>
 
-          {/* 🆕 Pass disabled prop */}
-          <AutoFillButton disabled={isLocked} />
+          <AutoFillButton disabled={isLocked || isDrawMode} />
 
           <Button
             variant="contained"
@@ -157,15 +184,14 @@ export default function PlaygroundTopControlPanel({
             Export
           </Button>
 
-          {/* 🆕 Disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : ''}>
+          <Tooltip title={isLocked ? 'Session is locked' : isDrawMode ? 'Switch to Plan layer' : ''}>
             <span>
               <Button
                 variant="contained"
                 color="error"
                 startIcon={<RestartAlt />}
                 onClick={onReset}
-                disabled={isLocked}
+                disabled={isLocked || isDrawMode}
               >
                 Reset
               </Button>

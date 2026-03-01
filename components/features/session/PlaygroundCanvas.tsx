@@ -38,6 +38,7 @@ import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 import { useSeatStore } from '@/store/seatStore';
 import { useGuestStore, Guest } from '@/store/guestStore';
 import { useColorScheme, useColorModeStore } from '@/store/colorModeStore';
+import { useDrawUIStore, CanvasLayer } from '@/store/drawUIStore';
 import { createRoundTable, createRectangleTable } from '@/utils/generateTable';
 import { CHUNK_HEIGHT, CHUNK_WIDTH } from '@/types/Chunk';
 import { Table } from '@/types/Table';
@@ -49,6 +50,11 @@ import {
   renderTableGuestDisplay,
 } from '@/utils/tableSVGHelper';
 
+// Import draw layer helpers
+import { renderDrawLayer, setupDrawCreation } from '@/utils/drawObjectSVGHelper';
+// Ensure shape registry is loaded (side-effect import)
+import '@/utils/drawShapeRegistry';
+
 // ============================================================================
 // COMPONENT PROPS
 // ============================================================================
@@ -57,6 +63,8 @@ interface PlaygroundCanvasProps {
   sessionType?: EventType | null;
   /** When true, all editing is disabled (view-only mode) */
   isLocked?: boolean;
+  /** Which canvas layer is currently active */
+  activeLayer?: CanvasLayer;
   /** UI settings from useSessionLoader - changes when session changes */
   initialUISettings?: SessionUISettings | null;
   /** Callback when user changes settings */
@@ -67,9 +75,10 @@ interface PlaygroundCanvasProps {
 // MAIN COMPONENT
 // ============================================================================
 
-export default function PlaygroundCanvas({ 
+export default function PlaygroundCanvas({
   sessionType = null,
   isLocked = false,
+  activeLayer = 'plan',
   initialUISettings,
   onUISettingsChange,
 }: PlaygroundCanvasProps) {
@@ -117,6 +126,18 @@ export default function PlaygroundCanvas({
   } = useSeatStore();
 
   const captureSnapshot = useCaptureSnapshot();
+
+  // Draw layer state
+  const drawObjects = useSeatStore((s) => s.drawObjects);
+  const selectedDrawObjectId = useSeatStore((s) => s.selectedDrawObjectId);
+  const addDrawObject = useSeatStore((s) => s.addDrawObject);
+  const moveDrawObject = useSeatStore((s) => s.moveDrawObject);
+  const updateDrawObject = useSeatStore((s) => s.updateDrawObject);
+  const setSelectedDrawObject = useSeatStore((s) => s.setSelectedDrawObject);
+  const activeDrawTool = useDrawUIStore((s) => s.activeDrawTool);
+  const defaultDrawStyle = useDrawUIStore((s) => s.defaultStyle);
+
+  const isDrawMode = activeLayer === 'draw';
 
   const hostGuests = useGuestStore((s) => s.hostGuests);
   const externalGuests = useGuestStore((s) => s.externalGuests);
@@ -284,6 +305,7 @@ export default function PlaygroundCanvas({
     const g = svg.append('g').attr('class', 'zoom-layer');
     gLayerRef.current = g.node();
     g.append('g').attr('class', 'chunks-layer');
+    g.append('g').attr('class', 'draw-layer');    // Draw layer: between chunks (backgrounds) and tables
     g.append('g').attr('class', 'tables-layer');
 
     const zoom = d3
@@ -302,8 +324,42 @@ export default function PlaygroundCanvas({
     svg.on('click', () => {
       setSelectedTable(null);
       selectSeat('', null);
+      setSelectedDrawObject(null);
     });
   }, []);
+
+  // ============================================================================
+  // LAYER ORDERING
+  // Plan mode: chunks -> draw -> tables (draw visible on top of backgrounds, below tables)
+  // Draw mode: chunks -> tables -> draw (draw on top for full interactivity)
+  // ============================================================================
+
+  useEffect(() => {
+    const gEl = gLayerRef.current;
+    if (!gEl) return;
+    const zoomLayer = d3.select(gEl);
+    const drawLayerSel = zoomLayer.select<SVGGElement>('.draw-layer');
+    const chunksLayerSel = zoomLayer.select<SVGGElement>('.chunks-layer');
+
+    if (isDrawMode) {
+      // Bring draw-layer to front (last child = renders on top of everything)
+      drawLayerSel.raise();
+      // Disable pointer events on chunks so draw objects receive clicks
+      chunksLayerSel.style('pointer-events', 'none');
+    } else {
+      // Place draw-layer between chunks and tables:
+      // chunks (1st) -> draw (2nd) -> tables (3rd)
+      // This keeps draw objects fully visible above chunk backgrounds
+      // but below all plan layer components (tables/seats)
+      const tablesLayerNode = zoomLayer.select<SVGGElement>('.tables-layer').node();
+      const drawLayerNode = drawLayerSel.node();
+      if (tablesLayerNode && drawLayerNode) {
+        gEl.insertBefore(drawLayerNode, tablesLayerNode);
+      }
+      // Restore chunks pointer events
+      chunksLayerSel.style('pointer-events', null);
+    }
+  }, [isDrawMode]);
 
   // ============================================================================
   // CHUNKS RENDERING
@@ -362,7 +418,7 @@ export default function PlaygroundCanvas({
       .append('g')
       .attr('class', 'table-group')
       .attr('transform', (d) => `translate(${d.x},${d.y})`)
-      .style('cursor', isLocked ? 'default' : 'grab');
+      .style('cursor', isLocked || isDrawMode ? 'default' : 'grab');
 
     enter.each(function (this: SVGGElement, d: Table) {
       const grp = d3.select(this);
@@ -407,8 +463,10 @@ export default function PlaygroundCanvas({
 
     const merged = enter.merge(tableGroups as any).attr('transform', (d) => `translate(${d.x},${d.y})`);
 
-    // Update cursor based on lock state
-    merged.style('cursor', isLocked ? 'default' : 'grab');
+    // Update cursor based on lock/draw state
+    merged.style('cursor', isLocked || isDrawMode ? 'default' : 'grab');
+    // Disable table pointer events in draw mode
+    merged.style('pointer-events', isDrawMode ? 'none' : 'all');
 
     merged.each(function (d) {
       const grp = d3.select(this);
@@ -454,6 +512,7 @@ export default function PlaygroundCanvas({
         selectedMealPlanIndex,
         isPhotoMode,
         showTagPills,
+        connectorGap,
         handleSelectSeat,
         handleLockSeat,
         handleClearSeat
@@ -471,10 +530,10 @@ export default function PlaygroundCanvas({
       );
     });
 
-    // Drag behavior - only enable when not locked
+    // Drag behavior - only enable when not locked and in plan mode
     const svgSelection = d3.select(svgEl);
-    
-    if (!isLocked) {
+
+    if (!isLocked && !isDrawMode) {
       const drag = d3.drag<SVGGElement, Table>()
         .on('start', function () {
           svgSelection.on('.zoom', null);
@@ -511,7 +570,108 @@ export default function PlaygroundCanvas({
     selectedTableId, selectedSeatId, selectedMealPlanIndex,
     ensureChunkExists, assignTableToChunk, expandWorldIfNeeded,
     cleanupEmptyChunks, connectorGap, guestLookup, colorScheme,
-    hideTableBodies, isPhotoMode, showTagPills, isLocked, captureSnapshot
+    hideTableBodies, isPhotoMode, showTagPills, isLocked, captureSnapshot,
+    isDrawMode,
+  ]);
+
+  // ============================================================================
+  // DRAW LAYER RENDERING
+  // ============================================================================
+
+  useEffect(() => {
+    const gEl = gLayerRef.current;
+    if (!gEl) return;
+
+    const drawLayerGroup = d3.select(gEl).select<SVGGElement>('.draw-layer');
+
+    renderDrawLayer(
+      drawLayerGroup,
+      drawObjects,
+      selectedDrawObjectId,
+      isDrawMode,
+      isLocked,
+      {
+        onSelect: setSelectedDrawObject,
+        onMove: (id, x, y) => {
+          moveDrawObject(id, x, y);
+          expandWorldIfNeeded();
+        },
+        onDragEnd: () => {
+          cleanupEmptyChunks();
+        },
+        onResize: (id, w, h) => {
+          useSeatStore.getState().resizeDrawObject(id, w, h);
+          expandWorldIfNeeded();
+        },
+        onUpdate: (id, data) => updateDrawObject(id, data),
+        onAdd: addDrawObject,
+        captureSnapshot,
+      },
+    );
+  }, [
+    drawObjects, selectedDrawObjectId, isDrawMode, isLocked,
+    setSelectedDrawObject, moveDrawObject, updateDrawObject,
+    addDrawObject, captureSnapshot,
+  ]);
+
+  // ============================================================================
+  // DRAW CREATION (CLICK-DRAG TO CREATE)
+  // ============================================================================
+
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    const gEl = gLayerRef.current;
+    if (!svgEl || !gEl || !isDrawMode || isLocked || activeDrawTool === 'select') {
+      return;
+    }
+
+    // Disable zoom when creating draw objects
+    const svgSelection = d3.select(svgEl);
+    svgSelection.on('.zoom', null);
+
+    const nextZIndex = drawObjects.length > 0
+      ? Math.max(...drawObjects.map((o) => o.zIndex)) + 1
+      : 0;
+
+    const cleanup = setupDrawCreation(
+      svgEl,
+      gEl,
+      activeDrawTool,
+      defaultDrawStyle,
+      nextZIndex,
+      {
+        onSelect: setSelectedDrawObject,
+        onMove: (id, x, y) => {
+          moveDrawObject(id, x, y);
+          expandWorldIfNeeded();
+        },
+        onDragEnd: () => {
+          cleanupEmptyChunks();
+        },
+        onResize: (id, w, h) => {
+          useSeatStore.getState().resizeDrawObject(id, w, h);
+          expandWorldIfNeeded();
+        },
+        onUpdate: (id, data) => updateDrawObject(id, data),
+        onAdd: (obj) => {
+          addDrawObject(obj);
+          expandWorldIfNeeded();
+        },
+        captureSnapshot,
+      },
+    );
+
+    return () => {
+      cleanup();
+      // Re-enable zoom
+      if (zoomBehavior.current) {
+        svgSelection.call(zoomBehavior.current as any);
+      }
+    };
+  }, [
+    isDrawMode, isLocked, activeDrawTool, defaultDrawStyle,
+    drawObjects.length, setSelectedDrawObject, moveDrawObject,
+    updateDrawObject, addDrawObject, captureSnapshot,
   ]);
 
   // ============================================================================
@@ -620,20 +780,22 @@ export default function PlaygroundCanvas({
             </Tooltip>
           )}
 
-          {/* Add Table FAB - disabled when locked */}
-          <Tooltip title={isLocked ? 'Session is locked' : 'Add Table'} placement="left">
-            <span>
-              <Fab 
-                color="primary" 
-                size="medium" 
-                onClick={handleAddTableClick}
-                disabled={isLocked}
-                sx={{ opacity: isLocked ? 0.5 : 1 }}
-              >
-                <AddIcon />
-              </Fab>
-            </span>
-          </Tooltip>
+          {/* Add Table FAB - disabled when locked or in draw mode */}
+          {!isDrawMode && (
+            <Tooltip title={isLocked ? 'Session is locked' : 'Add Table'} placement="left">
+              <span>
+                <Fab
+                  color="primary"
+                  size="medium"
+                  onClick={handleAddTableClick}
+                  disabled={isLocked}
+                  sx={{ opacity: isLocked ? 0.5 : 1 }}
+                >
+                  <AddIcon />
+                </Fab>
+              </span>
+            </Tooltip>
+          )}
         </Stack>
 
         {/* Controls Card */}

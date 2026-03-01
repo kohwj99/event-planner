@@ -87,7 +87,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const sessionData = getSessionById(currentSessionId);
     if (!sessionData) return;
 
-    const { tables, chunks, selectedMealPlanIndex, violations } = useSeatStore.getState();
+    const { tables, chunks, selectedMealPlanIndex, violations, drawObjects } = useSeatStore.getState();
 
     // Collect all assigned guest IDs from seats
     const activeGuestIds = new Set<string>();
@@ -108,7 +108,8 @@ export const useSessionLoader = (sessionId: string | null) => {
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
-      uiSettings, // Include UI settings in seat plan
+      uiSettings,
+      drawObjects,
     });
 
     // Save violations to session
@@ -187,6 +188,8 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedTableId: null,
         selectedSeatId: null,
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
+        drawObjects: seatPlan.drawObjects ?? [],
+        selectedDrawObjectId: null,
       });
       
       // Load UI settings

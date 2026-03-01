@@ -112,6 +112,7 @@ interface EventStoreState {
     selectedMealPlanIndex?: number | null;
     uiSettings?: SessionUISettings;
     isLocked?: boolean;
+    drawObjects?: import("@/types/DrawObject").DrawObject[];
   } | null;
 
   /* -------------------- SESSION RULES MANAGEMENT -------------------- */
@@ -648,6 +649,7 @@ export const useEventStore = create<EventStoreState>()(
                   selectedMealPlanIndex: session.seatPlan.selectedMealPlanIndex ?? null,
                   uiSettings: session.seatPlan.uiSettings ?? { ...DEFAULT_SESSION_UI_SETTINGS },
                   isLocked: session.isLocked ?? false,
+                  drawObjects: session.seatPlan.drawObjects ?? [],
                 };
               }
             }
