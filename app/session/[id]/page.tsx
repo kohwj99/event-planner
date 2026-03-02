@@ -19,6 +19,7 @@ import {
 } from '@mui/icons-material';
 import PlayGroundCanvas from '@/components/features/session/PlaygroundCanvas';
 import PlaygroundRightConfigPanel from '@/components/features/session/PlaygroundRightConfigPanel';
+import DrawRightConfigPanel from '@/components/features/session/DrawRightConfigPanel';
 import ExportModal from '@/components/features/session/ExportModal';
 import SeatingStatsPanel from '@/components/features/session/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
@@ -30,6 +31,7 @@ import ChunkLayoutModal from '@/components/features/session/ChunkLayoutModal';
 import { computeChunkLayout, ChunkLayoutConfig } from '@/utils/chunkLayoutHelper';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
+import { useDrawUIStore } from '@/store/drawUIStore';
 import PageLoader from '@/components/shared/atoms/PageLoader';
 
 export default function SessionDetailPage() {
@@ -62,6 +64,10 @@ export default function SessionDetailPage() {
 
   // Seat Store - for reset
   const resetTables = useSeatStore((s) => s.resetTables);
+
+  // Draw UI Store - layer toggle
+  const activeLayer = useDrawUIStore((s) => s.activeLayer);
+  const setActiveLayer = useDrawUIStore((s) => s.setActiveLayer);
 
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -191,6 +197,7 @@ export default function SessionDetailPage() {
           formattedDate={formattedDate}
           hasNoGuests={hasNoGuests}
           isLocked={isLocked}
+          activeLayer={activeLayer}
           onBack={handleBack}
           onSave={handleSave}
           onReset={handleReset}
@@ -198,6 +205,7 @@ export default function SessionDetailPage() {
           onExport={() => setExportModalOpen(true)}
           onToggleLock={handleToggleLock}
           onChunkLayout={() => setChunkLayoutOpen(true)}
+          onLayerChange={setActiveLayer}
         />
       }
     >
@@ -234,9 +242,10 @@ export default function SessionDetailPage() {
           {/* Canvas Area */}
           <div className="flex-1 relative overflow-hidden" id="playground-canvas">
             {/* 🆕 Pass UI settings and lock state to canvas */}
-            <PlayGroundCanvas 
+            <PlayGroundCanvas
               sessionType={session.sessionType}
               isLocked={isLocked}
+              activeLayer={activeLayer}
               initialUISettings={uiSettings}
               onUISettingsChange={handleUISettingsChange}
             />
@@ -248,9 +257,13 @@ export default function SessionDetailPage() {
             />
           </div>
 
-          {/* Right Panel - 🆕 Pass lock state */}
+          {/* Right Panel - conditional based on active layer */}
           <div className="w-80 bg-gray-100 border-l border-gray-300 overflow-y-auto">
-            <PlaygroundRightConfigPanel isLocked={isLocked} />
+            {activeLayer === 'plan' ? (
+              <PlaygroundRightConfigPanel isLocked={isLocked} />
+            ) : (
+              <DrawRightConfigPanel isLocked={isLocked} />
+            )}
           </div>
         </div>
       )}

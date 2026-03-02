@@ -13,6 +13,7 @@
  */
 
 import { SitTogetherRule } from '@/types/Event';
+import { Guest } from '@/store/guestStore';
 import { UnionFind } from './unionFind';
 
 /**
@@ -43,8 +44,8 @@ export function buildSitTogetherClusters(rules: SitTogetherRule[]): Map<string, 
 export function getOptimalClusterOrder(
   clusterGuestIds: string[],
   rules: SitTogetherRule[],
-  guestLookup: Map<string, any>,
-  comparator: (a: any, b: any) => number
+  guestLookup: Map<string, Guest>,
+  comparator: (a: Guest, b: Guest) => number
 ): string[] {
   if (clusterGuestIds.length <= 2) {
     // For pairs, sort by priority

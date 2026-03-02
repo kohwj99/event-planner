@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
+import { DrawObject } from "@/types/DrawObject";
 import { SessionRulesConfig } from "@/types/Event";
 
 /**
@@ -24,7 +25,13 @@ export type HistoryActionLabel =
   | "Update Seat Order"
   | "AutoFill"
   | "Reset Tables"
-  | "Chunk Layout";
+  | "Chunk Layout"
+  | "Add Draw Object"
+  | "Move Draw Object"
+  | "Resize Draw Object"
+  | "Edit Draw Object"
+  | "Delete Draw Object"
+  | "Style Draw Object";
 
 /**
  * A snapshot of the mutable session state at a point in time.
@@ -37,6 +44,8 @@ export interface HistorySnapshot {
   tables: Table[];
   /** Deep clone of seatStore.chunks */
   chunks: Record<string, Chunk>;
+  /** Deep clone of seatStore.drawObjects */
+  drawObjects: DrawObject[];
   /** Only populated for AutoFill actions -- the rulesConfig from before the autofill */
   rulesConfig: SessionRulesConfig | null;
   /** Human-readable label for this action */
@@ -110,6 +119,7 @@ function logHistoryMemoryUsage(
 
   const tableCount = latestSnapshot.tables.length;
   const seatCount = latestSnapshot.tables.reduce((sum, t) => sum + t.seats.length, 0);
+  const drawObjectCount = latestSnapshot.drawObjects.length;
 
   console.groupCollapsed(
     `[HistoryStore] Pushed "${latestSnapshot.label}" | ` +
@@ -122,6 +132,7 @@ function logHistoryMemoryUsage(
       size: formatBytes(latestBytes),
       tables: tableCount,
       seats: seatCount,
+      drawObjects: drawObjectCount,
       includesRulesConfig: latestSnapshot.rulesConfig !== null,
     },
     "Undo Stack": {

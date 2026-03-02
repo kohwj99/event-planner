@@ -1,6 +1,12 @@
 // src/utils/violationDetector.ts - FIXED: Now handles rectangle table opposite and edge adjacencies
-import { Table, RectangleSeatsConfig } from '@/types/Table';
+import { Table } from '@/types/Table';
 import { Seat } from '@/types/Seat';
+import { Guest } from '@/store/guestStore';
+import {
+  getSameSideNeighborPositions,
+  getOppositeSeatPosition,
+  getEdgeAdjacentSeatPositions,
+} from '@/utils/adjacencyHelper';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -22,205 +28,6 @@ export interface ProximityViolation {
 export interface ProximityRules {
   sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>;
   sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }>;
-}
-
-// ============================================================================
-// RECTANGLE TABLE ADJACENCY HELPERS
-// ============================================================================
-
-type RectangleSide = "top" | "bottom" | "left" | "right";
-
-/**
- * Determines which side of a rectangle table a seat is on based on its position index.
- */
-function getSeatSide(
-  seatPosition: number,
-  config: RectangleSeatsConfig
-): RectangleSide | null {
-  const { top, right, bottom, left } = config;
-  
-  if (seatPosition < top) {
-    return "top";
-  } else if (seatPosition < top + right) {
-    return "right";
-  } else if (seatPosition < top + right + bottom) {
-    return "bottom";
-  } else if (seatPosition < top + right + bottom + left) {
-    return "left";
-  }
-  
-  return null;
-}
-
-/**
- * Gets the index of a seat within its side (0-based from start of side)
- */
-function getSeatIndexInSide(
-  seatPosition: number,
-  config: RectangleSeatsConfig
-): number {
-  const { top, right, bottom } = config;
-  const side = getSeatSide(seatPosition, config);
-  
-  switch (side) {
-    case "top":
-      return seatPosition;
-    case "right":
-      return seatPosition - top;
-    case "bottom":
-      return seatPosition - top - right;
-    case "left":
-      return seatPosition - top - right - bottom;
-    default:
-      return -1;
-  }
-}
-
-/**
- * Finds the seat position that is directly opposite to the given seat.
- * Returns null if the opposite side has a different number of seats.
- */
-function getOppositeSeatPosition(
-  seatPosition: number,
-  config: RectangleSeatsConfig
-): number | null {
-  const { top, right, bottom, left } = config;
-  const side = getSeatSide(seatPosition, config);
-  const indexInSide = getSeatIndexInSide(seatPosition, config);
-  
-  if (indexInSide < 0 || side === null) return null;
-  
-  switch (side) {
-    case "top":
-      if (top !== bottom) return null;
-      const bottomStartPos = top + right;
-      const oppositeBottomIndex = top - 1 - indexInSide;
-      return bottomStartPos + oppositeBottomIndex;
-      
-    case "bottom":
-      if (top !== bottom) return null;
-      const oppositeTopIndex = bottom - 1 - indexInSide;
-      return oppositeTopIndex;
-      
-    case "left":
-      if (left !== right) return null;
-      const rightStartPos = top;
-      const oppositeRightIndex = left - 1 - indexInSide;
-      return rightStartPos + oppositeRightIndex;
-      
-    case "right":
-      if (left !== right) return null;
-      const leftStartPos = top + right + bottom;
-      const oppositeLeftIndex = right - 1 - indexInSide;
-      return leftStartPos + oppositeLeftIndex;
-      
-    default:
-      return null;
-  }
-}
-
-/**
- * Gets edge/corner adjacent seats for corner seats on rectangle tables.
- */
-function getEdgeAdjacentPositions(
-  seatPosition: number,
-  config: RectangleSeatsConfig
-): number[] {
-  const { top, right, bottom, left } = config;
-  const side = getSeatSide(seatPosition, config);
-  const indexInSide = getSeatIndexInSide(seatPosition, config);
-  
-  if (!side) return [];
-  
-  const edgeSeats: number[] = [];
-  
-  switch (side) {
-    case "top":
-      if (indexInSide === 0 && left > 0) {
-        edgeSeats.push(top + right + bottom + left - 1);
-      }
-      if (indexInSide === top - 1 && right > 0) {
-        edgeSeats.push(top);
-      }
-      break;
-      
-    case "right":
-      if (indexInSide === 0 && top > 0) {
-        edgeSeats.push(top - 1);
-      }
-      if (indexInSide === right - 1 && bottom > 0) {
-        edgeSeats.push(top + right);
-      }
-      break;
-      
-    case "bottom":
-      if (indexInSide === 0 && right > 0) {
-        edgeSeats.push(top + right - 1);
-      }
-      if (indexInSide === bottom - 1 && left > 0) {
-        edgeSeats.push(top + right + bottom);
-      }
-      break;
-      
-    case "left":
-      if (indexInSide === 0 && bottom > 0) {
-        edgeSeats.push(top + right + bottom - 1);
-      }
-      if (indexInSide === left - 1 && top > 0) {
-        edgeSeats.push(0);
-      }
-      break;
-  }
-  
-  return edgeSeats;
-}
-
-/**
- * Gets the count of seats on a given side
- */
-function getSideCount(side: RectangleSide, config: RectangleSeatsConfig): number {
-  return config[side];
-}
-
-/**
- * Gets the starting position index for a given side
- */
-function getSideStartPosition(side: RectangleSide, config: RectangleSeatsConfig): number {
-  const { top, right, bottom } = config;
-  switch (side) {
-    case "top": return 0;
-    case "right": return top;
-    case "bottom": return top + right;
-    case "left": return top + right + bottom;
-    default: return 0;
-  }
-}
-
-/**
- * Gets the same-side neighbors for a seat (respecting side boundaries)
- */
-function getSameSideNeighbors(
-  seatPosition: number,
-  config: RectangleSeatsConfig
-): number[] {
-  const side = getSeatSide(seatPosition, config);
-  if (!side) return [];
-  
-  const indexInSide = getSeatIndexInSide(seatPosition, config);
-  const sideCount = getSideCount(side, config);
-  const sideStart = getSideStartPosition(side, config);
-  
-  const neighbors: number[] = [];
-  
-  if (indexInSide > 0) {
-    neighbors.push(sideStart + indexInSide - 1);
-  }
-  
-  if (indexInSide < sideCount - 1) {
-    neighbors.push(sideStart + indexInSide + 1);
-  }
-  
-  return neighbors;
 }
 
 // ============================================================================
@@ -248,7 +55,7 @@ function getAllAdjacentSeatIds(seat: Seat, table: Table): string[] {
     const seatPosition = seat.position;
     
     // Add same-side neighbors
-    const sideNeighbors = getSameSideNeighbors(seatPosition, config);
+    const sideNeighbors = getSameSideNeighborPositions(seatPosition, config);
     sideNeighbors.forEach(pos => {
       const neighborSeat = table.seats.find(s => s.position === pos);
       if (neighborSeat) {
@@ -266,7 +73,7 @@ function getAllAdjacentSeatIds(seat: Seat, table: Table): string[] {
     }
     
     // Add edge adjacencies
-    const edgePositions = getEdgeAdjacentPositions(seatPosition, config);
+    const edgePositions = getEdgeAdjacentSeatPositions(seatPosition, config);
     edgePositions.forEach(pos => {
       const edgeSeat = table.seats.find(s => s.position === pos);
       if (edgeSeat) {
@@ -382,7 +189,7 @@ function areSeatsAdjacent(seat1: Seat, seat2: Seat, table: Table): boolean {
 export function detectProximityViolations(
   tables: Table[],
   proximityRules: ProximityRules,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ): ProximityViolation[] {
   const violations: ProximityViolation[] = [];
 
@@ -499,7 +306,7 @@ export function detectViolationsAfterSwap(
   table2Id: string,
   seat2Id: string,
   proximityRules: ProximityRules,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ): ProximityViolation[] {
   // Deep clone tables for simulation (preserves shape and rectangleSeats)
   const simulatedTables = JSON.parse(JSON.stringify(tables)) as Table[];
@@ -511,7 +318,7 @@ export function detectViolationsAfterSwap(
   const simSeat2 = simTable2?.seats.find((s) => s.id === seat2Id);
 
   if (!simSeat1 || !simSeat2) {
-    console.warn('Swap simulation failed: seats not found');
+    // Swap simulation failed: seats not found
     return [];
   }
 
@@ -547,7 +354,7 @@ export function detectViolationsAfterAssignment(
   seatId: string,
   guestId: string,
   proximityRules: ProximityRules,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ): ProximityViolation[] {
   // Deep clone tables for simulation
   const simulatedTables = JSON.parse(JSON.stringify(tables)) as Table[];
@@ -557,7 +364,7 @@ export function detectViolationsAfterAssignment(
   const simSeat = simTable?.seats.find((s) => s.id === seatId);
 
   if (!simTable || !simSeat) {
-    console.warn('Assignment simulation failed: table or seat not found');
+    // Assignment simulation failed: table or seat not found
     return [];
   }
 
@@ -661,7 +468,7 @@ export function validateSeatAssignment(
   guestId: string,
   tables: Table[],
   proximityRules: ProximityRules,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ): {
   isValid: boolean;
   warnings: string[];

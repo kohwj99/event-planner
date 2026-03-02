@@ -12,6 +12,8 @@
  */
 
 import { ProximityRules } from '@/types/Event';
+import { Seat } from '@/types/Seat';
+import { Table } from '@/types/Table';
 import { LockedGuestLocation } from './autoFillTypes';
 import { getSitAwayGuests } from './proximityRuleHelpers';
 import { getAdjacentSeats } from './seatFinder';
@@ -20,7 +22,7 @@ import { getAdjacentSeats } from './seatFinder';
  * Build a map of guestId -> LockedGuestLocation for all locked seats across all tables.
  * A seat is considered locked if seat.locked === true and it has an assigned guest.
  */
-export function buildLockedGuestMap(tables: any[]): Map<string, LockedGuestLocation> {
+export function buildLockedGuestMap(tables: Table[]): Map<string, LockedGuestLocation> {
   const lockedMap = new Map<string, LockedGuestLocation>();
 
   for (const table of tables) {
@@ -47,8 +49,8 @@ export function buildLockedGuestMap(tables: any[]): Map<string, LockedGuestLocat
  */
 export function wouldViolateSitAwayWithLocked(
   guestId: string,
-  seat: any,
-  allSeats: any[],
+  seat: Seat,
+  allSeats: Seat[],
   lockedGuestMap: Map<string, LockedGuestLocation>,
   proximityRules: ProximityRules
 ): boolean {

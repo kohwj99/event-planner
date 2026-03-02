@@ -1,5 +1,6 @@
 import { Chunk, CHUNK_HEIGHT, CHUNK_WIDTH } from "@/types/Chunk";
 import { Table } from "@/types/Table";
+import { DrawObject } from "@/types/DrawObject";
 import { moveTableGeometry } from "@/utils/tableGeometryHelper";
 import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
@@ -12,6 +13,7 @@ import {
   removeTableFromChunk,
 } from "@/utils/chunkHelper";
 import { detectProximityViolations, ProximityViolation } from "@/utils/violationDetector";
+import { Guest } from "@/store/guestStore";
 import {
   validateGuestSeatAssignment,
   validateSeatSwap,
@@ -37,7 +39,11 @@ interface SeatStoreState {
   // Violation detection state
   violations: ProximityViolation[];
   proximityRules: ProximityRules | null;
-  guestLookup: Record<string, any>;
+  guestLookup: Record<string, Guest>;
+
+  // Draw layer state
+  drawObjects: DrawObject[];
+  selectedDrawObjectId: string | null;
 
   // Table & Seat operations
   addTable: (table: Table) => void;
@@ -59,7 +65,7 @@ interface SeatStoreState {
 
   // Violation detection actions
   setProximityRules: (rules: ProximityRules | null) => void;
-  setGuestLookup: (lookup: Record<string, any>) => void;
+  setGuestLookup: (lookup: Record<string, Guest>) => void;
   detectViolations: () => void;
 
   // Table-level operations
@@ -68,6 +74,15 @@ interface SeatStoreState {
   deleteTable: (tableId: string) => void;
   replaceTable: (tableId: string, newTable: Table) => void;
   clearAllSeatsInTable: (tableId: string) => void;
+
+  // Draw object operations
+  addDrawObject: (obj: DrawObject) => void;
+  updateDrawObject: (id: string, data: Partial<DrawObject>) => void;
+  moveDrawObject: (id: string, x: number, y: number) => void;
+  resizeDrawObject: (id: string, width: number, height: number) => void;
+  deleteDrawObject: (id: string) => void;
+  setSelectedDrawObject: (id: string | null) => void;
+  setDrawObjects: (objects: DrawObject[]) => void;
 
   // Chunk management
   ensureChunkExists: (row: number, col: number) => void;
@@ -114,6 +129,8 @@ export const useSeatStore = create<SeatStoreState>()(
         violations: [],
         proximityRules: null,
         guestLookup: {},
+        drawObjects: [],
+        selectedDrawObjectId: null,
 
         /* ---------- TABLE MANAGEMENT ---------- */
         addTable: (table) => {
@@ -340,6 +357,8 @@ export const useSeatStore = create<SeatStoreState>()(
             selectedSeatId: null,
             selectedMealPlanIndex: null,
             violations: [],
+            drawObjects: [],
+            selectedDrawObjectId: null,
           }),
 
         findGuestSeat: (guestId) => {
@@ -622,6 +641,47 @@ export const useSeatStore = create<SeatStoreState>()(
           get().detectViolations();
         },
 
+        /* ---------- DRAW OBJECT OPERATIONS ---------- */
+
+        addDrawObject: (obj) =>
+          set((state) => ({
+            drawObjects: [...state.drawObjects, obj],
+          })),
+
+        updateDrawObject: (id, data) =>
+          set((state) => ({
+            drawObjects: state.drawObjects.map((o) =>
+              o.id === id ? { ...o, ...data } : o
+            ),
+          })),
+
+        moveDrawObject: (id, x, y) =>
+          set((state) => ({
+            drawObjects: state.drawObjects.map((o) =>
+              o.id === id ? { ...o, x, y } : o
+            ),
+          })),
+
+        resizeDrawObject: (id, width, height) =>
+          set((state) => ({
+            drawObjects: state.drawObjects.map((o) =>
+              o.id === id ? { ...o, width, height } : o
+            ),
+          })),
+
+        deleteDrawObject: (id) =>
+          set((state) => ({
+            drawObjects: state.drawObjects.filter((o) => o.id !== id),
+            selectedDrawObjectId:
+              state.selectedDrawObjectId === id ? null : state.selectedDrawObjectId,
+          })),
+
+        setSelectedDrawObject: (id) =>
+          set({ selectedDrawObjectId: id }),
+
+        setDrawObjects: (objects) =>
+          set({ drawObjects: objects }),
+
         /* ---------- CHUNK MANAGEMENT ---------- */
         ensureChunkExists: (row, col) =>
           set((state) => {
@@ -638,11 +698,16 @@ export const useSeatStore = create<SeatStoreState>()(
           }),
 
         expandWorldIfNeeded: () => {
-          const { tables, chunks } = get();
-          if (tables.length === 0) return;
+          const { tables, chunks, drawObjects } = get();
+          if (tables.length === 0 && drawObjects.length === 0) return;
 
-          const maxX = Math.max(...tables.map((t) => t.x + t.radius));
-          const maxY = Math.max(...tables.map((t) => t.y + t.radius));
+          // Consider both tables and draw objects for boundary calculations
+          const tableMaxX = tables.length > 0 ? Math.max(...tables.map((t) => t.x + t.radius)) : 0;
+          const tableMaxY = tables.length > 0 ? Math.max(...tables.map((t) => t.y + t.radius)) : 0;
+          const drawMaxX = drawObjects.length > 0 ? Math.max(...drawObjects.map((d) => d.x + d.width)) : 0;
+          const drawMaxY = drawObjects.length > 0 ? Math.max(...drawObjects.map((d) => d.y + d.height)) : 0;
+          const maxX = Math.max(tableMaxX, drawMaxX);
+          const maxY = Math.max(tableMaxY, drawMaxY);
 
           const maxChunkRow = Math.max(...Object.values(chunks).map((c) => c.row));
           const maxChunkCol = Math.max(...Object.values(chunks).map((c) => c.col));
@@ -678,9 +743,24 @@ export const useSeatStore = create<SeatStoreState>()(
         cleanupEmptyChunks: () => {
           set((state) => {
             const chunks = { ...state.chunks };
-            const occupied = Object.values(chunks).filter(
-              (c) => c.tables.length > 0
-            );
+            const drawObjects = state.drawObjects;
+
+            // A chunk is "occupied" if it has tables OR overlapping draw objects
+            const occupied = Object.values(chunks).filter((c) => {
+              if (c.tables.length > 0) return true;
+              // Check if any draw object overlaps this chunk
+              const chunkLeft = c.col * CHUNK_WIDTH;
+              const chunkTop = c.row * CHUNK_HEIGHT;
+              const chunkRight = chunkLeft + CHUNK_WIDTH;
+              const chunkBottom = chunkTop + CHUNK_HEIGHT;
+              return drawObjects.some(
+                (d) =>
+                  d.x < chunkRight &&
+                  d.x + d.width > chunkLeft &&
+                  d.y < chunkBottom &&
+                  d.y + d.height > chunkTop
+              );
+            });
 
             if (occupied.length === 0) {
               const key0 = getChunkKey(0, 0);

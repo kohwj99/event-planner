@@ -26,7 +26,7 @@ import {
   Info,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 import AssignGuestModal from '@/components/features/session/AssignGuestModal';
 import SwapSeatModal from '@/components/features/session/SwapSeatModal';
@@ -61,7 +61,7 @@ export default function PlaygroundRightConfigPanel({ isLocked = false }: Playgro
   const { hostGuests, externalGuests } = useGuestStore();
   const guestLookup = [...hostGuests, ...externalGuests].reduce(
     (acc, g) => ((acc[g.id] = g), acc),
-    {} as Record<string, any>
+    {} as Record<string, Guest>
   );
 
   // Seat-level modals

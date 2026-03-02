@@ -28,7 +28,7 @@ import {
   Block,
   CheckCircle,
 } from '@mui/icons-material';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useSeatStore } from '@/store/seatStore';
 import { SeatMode, SEAT_MODE_CONFIGS } from '@/types/Seat';
 import { partitionGuestsBySeatMode, getSeatModeIncompatibilityReason } from '@/utils/seatValidation';
@@ -130,7 +130,7 @@ export default function AssignGuestModal({
     onClose();
   };
 
-  const renderGuestItem = (guest: any, isDisabled: boolean = false) => {
+  const renderGuestItem = (guest: Guest, isDisabled: boolean = false) => {
     const isSelected = selectedGuestId === guest.id;
     const incompatibilityReason = isDisabled 
       ? getSeatModeIncompatibilityReason(seatMode, guest.fromHost)

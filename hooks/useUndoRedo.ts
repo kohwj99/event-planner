@@ -8,6 +8,7 @@ import {
 } from "@/store/historyStore";
 import { Table } from "@/types/Table";
 import { Chunk } from "@/types/Chunk";
+import { DrawObject } from "@/types/DrawObject";
 import { SessionRulesConfig } from "@/types/Event";
 
 interface UseUndoRedoOptions {
@@ -18,14 +19,15 @@ interface UseUndoRedoOptions {
 }
 
 /**
- * Deep clone tables and chunks to create an immutable snapshot.
+ * Deep clone tables, chunks, and drawObjects to create an immutable snapshot.
  * Uses structuredClone for proper handling of nested objects/arrays.
  */
 function deepCloneState(
   tables: Table[],
-  chunks: Record<string, Chunk>
-): { tables: Table[]; chunks: Record<string, Chunk> } {
-  return structuredClone({ tables, chunks });
+  chunks: Record<string, Chunk>,
+  drawObjects: DrawObject[]
+): { tables: Table[]; chunks: Record<string, Chunk>; drawObjects: DrawObject[] } {
+  return structuredClone({ tables, chunks, drawObjects });
 }
 
 /**
@@ -35,11 +37,12 @@ function buildCurrentSnapshot(
   label: HistoryActionLabel,
   rulesConfig: SessionRulesConfig | null = null
 ): HistorySnapshot {
-  const { tables, chunks } = useSeatStore.getState();
-  const cloned = deepCloneState(tables, chunks);
+  const { tables, chunks, drawObjects } = useSeatStore.getState();
+  const cloned = deepCloneState(tables, chunks, drawObjects);
   return {
     tables: cloned.tables,
     chunks: cloned.chunks,
+    drawObjects: cloned.drawObjects,
     rulesConfig: rulesConfig ? structuredClone(rulesConfig) : null,
     label,
   };
@@ -105,10 +108,11 @@ export function useUndoRedo({ sessionId, isLocked }: UseUndoRedoOptions) {
    * Recomputes violations after restoration.
    */
   const restoreSnapshot = useCallback((snapshot: HistorySnapshot) => {
-    // Restore tables and chunks to seatStore atomically
+    // Restore tables, chunks, and drawObjects to seatStore atomically
     useSeatStore.setState({
       tables: snapshot.tables,
       chunks: snapshot.chunks,
+      drawObjects: snapshot.drawObjects ?? [],
     });
 
     // Recompute violations from the restored state

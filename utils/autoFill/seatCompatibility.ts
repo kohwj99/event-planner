@@ -9,13 +9,14 @@
  * ensure seat mode constraints are always respected.
  */
 
-import { SeatMode, canGuestSitInSeat } from '@/types/Seat';
+import { Seat, SeatMode, canGuestSitInSeat } from '@/types/Seat';
+import { Guest } from '@/store/guestStore';
 
 /**
  * Check if a guest can be placed in a seat based on the seat's mode restriction.
  * Delegates to the canonical canGuestSitInSeat from types/Seat.
  */
-export function canPlaceGuestInSeat(guest: any, seat: any): boolean {
+export function canPlaceGuestInSeat(guest: Guest, seat: Seat): boolean {
   const mode: SeatMode = seat.mode || 'default';
   const guestFromHost = guest.fromHost === true;
   return canGuestSitInSeat(guestFromHost, mode);
@@ -26,10 +27,10 @@ export function canPlaceGuestInSeat(guest: any, seat: any): boolean {
  * Returns the first match (candidates are pre-sorted by priority).
  */
 export function getNextCompatibleGuest(
-  allCandidates: any[],
+  allCandidates: Guest[],
   assignedGuests: Set<string>,
-  seat: any
-): any | null {
+  seat: Seat
+): Guest | null {
   const available = allCandidates.filter(g =>
     !assignedGuests.has(g.id) && canPlaceGuestInSeat(g, seat)
   );
@@ -42,11 +43,11 @@ export function getNextCompatibleGuest(
  * who is compatible with the given seat.
  */
 export function getNextCompatibleGuestOfType(
-  allCandidates: any[],
+  allCandidates: Guest[],
   assignedGuests: Set<string>,
   isHost: boolean,
-  seat: any
-): any | null {
+  seat: Seat
+): Guest | null {
   const available = allCandidates.filter(g =>
     !assignedGuests.has(g.id) &&
     g.fromHost === isHost &&
@@ -61,10 +62,10 @@ export function getNextCompatibleGuestOfType(
  * Candidates are assumed to be pre-sorted by the comparator.
  */
 export function getNextGuestFromUnifiedList(
-  allCandidates: any[],
+  allCandidates: Guest[],
   assignedGuests: Set<string>,
-  _comparator: (a: any, b: any) => number
-): any | null {
+  _comparator: (a: Guest, b: Guest) => number
+): Guest | null {
   const available = allCandidates.filter(g => !assignedGuests.has(g.id));
   if (available.length === 0) return null;
   return available[0];
@@ -75,10 +76,10 @@ export function getNextGuestFromUnifiedList(
  * from a unified candidate list. Does not check seat mode compatibility.
  */
 export function getNextGuestOfType(
-  allCandidates: any[],
+  allCandidates: Guest[],
   assignedGuests: Set<string>,
   isHost: boolean
-): any | null {
+): Guest | null {
   const available = allCandidates.filter(g =>
     !assignedGuests.has(g.id) && g.fromHost === isHost
   );

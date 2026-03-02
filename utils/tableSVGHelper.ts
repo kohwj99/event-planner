@@ -27,8 +27,9 @@ import {
 // CONSTANTS
 // ============================================================================
 
-export const PHOTO_BOX_SIZE = 90; // Fixed size for Photo Mode squares
-export const PHOTO_BOX_GAP = 8;   // Gap between boxes in Photo Mode
+export const PHOTO_BOX_SIZE = 90;       // Fixed width for Photo Mode squares
+export const PHOTO_BOX_GAP = 8;         // Gap between boxes in Photo Mode
+export const PHOTO_BOX_TAG_EXTRA = 20;  // Extra height when tags are shown
 
 /**
  * Visual multiplier for seat circle rendering.
@@ -857,8 +858,10 @@ export function renderGuestBoxes(
  */
 function calculateSmartPhotoPositions(
   tableDatum: Table,
-  boxSize: number,
-  gap: number
+  boxWidth: number,
+  boxHeight: number,
+  gap: number,
+  distanceOffset: number = 0
 ): PhotoLayoutResult {
   const positions = new Map<string, { x: number; y: number }>();
   const seats = tableDatum.seats || [];
@@ -867,7 +870,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // ROUND TABLE UNCHANGED
+  // ROUND TABLE
   // ============================================================
   if (tableDatum.shape === 'round') {
     const seatsWithAngles = seats
@@ -878,9 +881,10 @@ function calculateSmartPhotoPositions(
       })
       .sort((a, b) => a.angle - b.angle);
 
-    const minCircumference = seats.length * (boxSize + gap);
+    const maxBoxDim = Math.max(boxWidth, boxHeight);
+    const minCircumference = seats.length * (maxBoxDim + gap);
     const minRadius = minCircumference / (2 * Math.PI);
-    const baseRadius = (tableDatum.radius || 60) + boxSize / 2 + 10;
+    const baseRadius = (tableDatum.radius || 60) + maxBoxDim / 2 + 10 + distanceOffset;
     const finalRadius = Math.max(baseRadius, minRadius);
     const angleStep = (2 * Math.PI) / seats.length;
     const startAngle = seatsWithAngles[0].angle;
@@ -897,7 +901,7 @@ function calculateSmartPhotoPositions(
   }
 
   // ============================================================
-  // RECTANGLE TABLE PHOTO MODE AUTO-SIZING (NEW)
+  // RECTANGLE TABLE PHOTO MODE AUTO-SIZING
   // ============================================================
 
   const w = tableDatum.width || 160;
@@ -935,7 +939,7 @@ function calculateSmartPhotoPositions(
   });
 
   // ============================================================
-  // NEW: Compute REQUIRED table dimensions from photo boxes
+  // Compute REQUIRED table dimensions from photo boxes
   // ============================================================
 
   const topCount = groups.top.items.length;
@@ -943,17 +947,20 @@ function calculateSmartPhotoPositions(
   const leftCount = groups.left.items.length;
   const rightCount = groups.right.items.length;
 
-  const SIDE_PADDING = boxSize / 2 + gap;
+  // Top/bottom sides: boxes laid out horizontally (use boxWidth)
+  const SIDE_PADDING_H = boxWidth / 2 + gap;
+  // Left/right sides: boxes laid out vertically (use boxHeight)
+  const SIDE_PADDING_V = boxHeight / 2 + gap;
 
   const requiredWidth =
-    Math.max(topCount, bottomCount) * boxSize +
+    Math.max(topCount, bottomCount) * boxWidth +
     Math.max(0, Math.max(topCount, bottomCount) - 1) * gap +
-    SIDE_PADDING * 2;
+    SIDE_PADDING_H * 2;
 
   const requiredHeight =
-    Math.max(leftCount, rightCount) * boxSize +
+    Math.max(leftCount, rightCount) * boxHeight +
     Math.max(0, Math.max(leftCount, rightCount) - 1) * gap +
-    SIDE_PADDING * 2;
+    SIDE_PADDING_V * 2;
 
   const photoWidth = Math.max(w, requiredWidth);
   const photoHeight = Math.max(h, requiredHeight);
@@ -970,30 +977,32 @@ function calculateSmartPhotoPositions(
 
     group.items.sort((a, b) => a.sortKey - b.sortKey);
 
+    const isHorizontal = group.side === 'top' || group.side === 'bottom';
+    const spanSize = isHorizontal ? boxWidth : boxHeight;
     const count = group.items.length;
-    const totalSpan = count * boxSize + (count - 1) * gap;
-    const startOffset = -totalSpan / 2 + boxSize / 2;
+    const totalSpan = count * spanSize + (count - 1) * gap;
+    const startOffset = -totalSpan / 2 + spanSize / 2;
 
     group.items.forEach((item, i) => {
-      const offset = startOffset + i * (boxSize + gap);
+      const offset = startOffset + i * (spanSize + gap);
       let x = 0;
       let y = 0;
 
       switch (group.side) {
         case 'top':
           x = offset;
-          y = -halfPH - boxSize / 2;
+          y = -halfPH - boxHeight / 2 - distanceOffset;
           break;
         case 'bottom':
           x = offset;
-          y = halfPH + boxSize / 2;
+          y = halfPH + boxHeight / 2 + distanceOffset;
           break;
         case 'left':
-          x = -halfPW - boxSize / 2;
+          x = -halfPW - boxWidth / 2 - distanceOffset;
           y = offset;
           break;
         case 'right':
-          x = halfPW + boxSize / 2;
+          x = halfPW + boxWidth / 2 + distanceOffset;
           y = offset;
           break;
       }
@@ -1019,12 +1028,16 @@ function renderPhotoSeats(
   guestLookup: Record<string, Guest>,
   selectedMealPlanIndex: number | null,
   showTagPills: boolean,
+  connectorGap: number,
   onSeatClick: (tableId: string, seatId: string) => void,
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
 ): void {
+  // When tags are shown, use a taller box to give proper spacing
+  const effectiveBoxHeight = showTagPills ? PHOTO_BOX_SIZE + PHOTO_BOX_TAG_EXTRA : PHOTO_BOX_SIZE;
+
   const { positions: smartPositions, photoWidth, photoHeight } =
-    calculateSmartPhotoPositions(tableDatum, PHOTO_BOX_SIZE, PHOTO_BOX_GAP);
+    calculateSmartPhotoPositions(tableDatum, PHOTO_BOX_SIZE, effectiveBoxHeight, PHOTO_BOX_GAP, connectorGap);
 
   const seatGroups = group
     .selectAll<SVGGElement, Seat>('g.photo-seat-group')
@@ -1040,7 +1053,7 @@ function renderPhotoSeats(
   enter.append('rect')
     .attr('class', 'seat')
     .attr('width', PHOTO_BOX_SIZE)
-    .attr('height', PHOTO_BOX_SIZE)
+    .attr('height', effectiveBoxHeight)
     .attr('rx', 6).attr('ry', 6);
 
   // Content Text - Name uses a text element that will contain tspans for multi-line
@@ -1060,10 +1073,12 @@ function renderPhotoSeats(
 
     // Get position from Smart Layout Engine
     const pos = smartPositions.get(s.id) || { x: s.x - tableDatum.x, y: s.y - tableDatum.y };
-    grp.attr('transform', `translate(${pos.x - PHOTO_BOX_SIZE / 2}, ${pos.y - PHOTO_BOX_SIZE / 2})`);
+    grp.attr('transform', `translate(${pos.x - PHOTO_BOX_SIZE / 2}, ${pos.y - effectiveBoxHeight / 2})`);
 
     // Box Styling (Reuse Seat Colors)
     grp.select('rect.seat')
+      .attr('width', PHOTO_BOX_SIZE)
+      .attr('height', effectiveBoxHeight)
       .attr('fill', getSeatFillColor(s, colorScheme))
       .attr('stroke', getSeatStrokeColor(s, colorScheme))
       .attr('stroke-width', 2)
@@ -1128,7 +1143,7 @@ function renderPhotoSeats(
       const company = guest.company || '';
       
       // Adjust meta position based on name lines
-      const metaStartY = Math.max(PHOTO_BOX_SIZE / 2 + 6, nameStartY + nameLines.length * lineHeight + 2);
+      const metaStartY = Math.max(effectiveBoxHeight / 2 + 6, nameStartY + nameLines.length * lineHeight + 2);
       
       grp.select('text.photo-meta-line1')
         .attr('x', cx)
@@ -1142,26 +1157,30 @@ function renderPhotoSeats(
         .attr('fill', colorScheme.ui.metaText)
         .text(country);
 
-      // Meal Plan (Bottom Center)
+      // Sequential layout: country -> meal plan -> tags (top-down with proper spacing)
+      const countryBottomY = metaStartY + 11; // meta line 2 (country) baseline
+
+      // Meal plan: 9px below country
+      const mealPlanY = countryBottomY + 9;
       grp.select('text.photo-meal')
-        .attr('x', cx).attr('y', PHOTO_BOX_SIZE - 8)
+        .attr('x', cx).attr('y', mealPlanY)
         .attr('fill', colorScheme.ui.mealPlanText)
         .text(mealPlan ? `${mealPlan}` : '');
 
-      // Tag pills (between meta and meal plan)
+      // Tag pills (9px below meal plan, or 9px below country if no meal plan)
       grp.selectAll('g.photo-tags').remove();
       grp.select('title').remove();
 
       if (showTagPills && guest.tags && guest.tags.length > 0) {
         const tags = guest.tags;
-        const tagsGroup = grp.append('g').attr('class', 'photo-tags');
         const PILL_CHAR_WIDTH = 5;
         const PILL_HPAD = 8;
         const PILL_GAP = 2;
         const PILL_HEIGHT = 10;
         const PILL_RADIUS = 5;
         const availWidth = PHOTO_BOX_SIZE - 8;
-        const tagRowY = 70;
+        const tagRowY = mealPlan ? mealPlanY + 9 : countryBottomY + 9;
+        const tagsGroup = grp.append('g').attr('class', 'photo-tags');
 
         let totalWidth = 0;
         const pillWidths: number[] = [];
@@ -1220,7 +1239,7 @@ function renderPhotoSeats(
       nameText.selectAll('tspan').remove();
       nameText.append('tspan')
         .attr('x', cx)
-        .attr('y', PHOTO_BOX_SIZE / 2)
+        .attr('y', effectiveBoxHeight / 2)
         .attr('dominant-baseline', 'middle')
         .text('Empty');
 
@@ -1260,6 +1279,7 @@ export function renderSeats(
   selectedMealPlanIndex: number | null,
   isPhotoMode: boolean,
   showTagPills: boolean,
+  connectorGap: number,
   onSeatClick: (tableId: string, seatId: string) => void,
   onSeatRightClick: (tableId: string, seatId: string, locked: boolean) => void,
   onSeatDoubleClick: (tableId: string, seatId: string) => void
@@ -1270,7 +1290,7 @@ export function renderSeats(
     group.selectAll('text.seat-number').remove();
 
     // Render Photo Mode
-    renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, showTagPills, onSeatClick, onSeatRightClick, onSeatDoubleClick);
+    renderPhotoSeats(group, tableDatum, colorScheme, guestLookup, selectedMealPlanIndex, showTagPills, connectorGap, onSeatClick, onSeatRightClick, onSeatDoubleClick);
   } else {
     // Clean up Photo Elements
     group.selectAll('g.photo-seat-group').remove();

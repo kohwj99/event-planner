@@ -124,6 +124,7 @@ export function getOppositeSide(side: RectangleSide): RectangleSide {
     case "bottom": return "top";
     case "left": return "right";
     case "right": return "left";
+    default: { const _exhaustive: never = side; return _exhaustive; }
   }
 }
 

@@ -32,6 +32,7 @@ import { applySitTogetherOptimization } from './sitTogetherOptimization';
 import { applySitAwayOptimization } from './sitAwayOptimization';
 import { applyTagGroupOptimization } from './tagGroupOptimization';
 import { performFinalViolationCheck } from './violationChecker';
+import { Guest } from '@/store/guestStore';
 
 // Store violations globally for access by stats panel
 let proximityViolations: ProximityViolation[] = [];
@@ -55,7 +56,6 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   const guestStore = useGuestStore.getState();
 
   if (!includeHost && !includeExternal) {
-    console.warn("autoFillSeats: no guest lists selected; aborting.");
     return;
   }
 
@@ -65,28 +65,21 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     randomizeOrder.partitions.length > 0 &&
     isRandomizeOrderApplicable(sortRules);
 
-  console.log('Randomize order config:', {
-    enabled: randomizeOrder?.enabled,
-    partitions: randomizeOrder?.partitions?.length || 0,
-    sortRulesApplicable: isRandomizeOrderApplicable(sortRules),
-    willApply: shouldRandomize
-  });
-
   proximityViolations = [];
 
-  const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter((g: any) => !g.deleted) : [];
-  const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter((g: any) => !g.deleted) : [];
+  const hostPool = includeHost ? (guestStore.hostGuests ?? []).filter(g => !g.deleted) : [];
+  const externalPool = includeExternal ? (guestStore.externalGuests ?? []).filter(g => !g.deleted) : [];
   const allGuests = [...hostPool, ...externalPool];
 
-  const guestLookup: Record<string, any> = {};
+  const guestLookup: Record<string, Guest> = {};
   allGuests.forEach(g => guestLookup[g.id] = g);
 
   const tables = useSeatStore.getState().tables;
   const lockedGuestMap = buildLockedGuestMap(tables);
 
   const lockedGuestIds = new Set<string>();
-  seatStore.tables.forEach((t: any) =>
-    (t.seats ?? []).forEach((s: any) => {
+  seatStore.tables.forEach(t =>
+    (t.seats ?? []).forEach(s => {
       if (s.locked && s.assignedGuestId) {
         lockedGuestIds.add(s.assignedGuestId);
       }
@@ -94,11 +87,11 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
   );
 
   const totalAvailableSeats = tables.reduce((sum, table) => {
-    return sum + table.seats.filter((s: any) => !s.locked).length;
+    return sum + table.seats.filter(s => !s.locked).length;
   }, 0);
 
-  const hostCandidates = hostPool.filter((g: any) => !lockedGuestIds.has(g.id));
-  const externalCandidates = externalPool.filter((g: any) => !lockedGuestIds.has(g.id));
+  const hostCandidates = hostPool.filter(g => !lockedGuestIds.has(g.id));
+  const externalCandidates = externalPool.filter(g => !lockedGuestIds.has(g.id));
 
   const comparator = makeComparator(sortRules);
 
@@ -109,15 +102,6 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     comparator,
     totalAvailableSeats
   );
-
-  console.log('Prioritized guest pools:', {
-    hostTotal: hostCandidates.length,
-    hostPrioritized: prioritizedHost.length,
-    externalTotal: externalCandidates.length,
-    externalPrioritized: prioritizedExternal.length,
-    availableSeats: totalAvailableSeats,
-    guestsInProximityRules: guestsInProximityRules.size
-  });
 
   for (const table of seatStore.tables) {
     for (const seat of table.seats ?? []) {
@@ -184,7 +168,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
 
   for (const [seatId, guestId] of seatToGuest.entries()) {
     for (const table of tablesAfterClear) {
-      const seat = table.seats.find((s: any) => s.id === seatId);
+      const seat = table.seats.find(s => s.id === seatId);
       if (seat && !seat.locked) {
         seatStore.assignGuestToSeat(table.id, seatId, guestId);
         break;
@@ -212,23 +196,4 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
 
   // Update the store with the detected violations
   useSeatStore.setState({ violations: proximityViolations });
-
-  // Summary logging
-  console.log('========================================');
-  console.log(`AUTOFILL COMPLETE`);
-  console.log(`Total violations: ${proximityViolations.length}`);
-
-  const sitTogetherViolations = proximityViolations.filter(v => v.type === 'sit-together');
-  const sitAwayViolations = proximityViolations.filter(v => v.type === 'sit-away');
-
-  console.log(`  - Sit-together violations: ${sitTogetherViolations.length}`);
-  console.log(`  - Sit-away violations: ${sitAwayViolations.length}`);
-
-  if (proximityViolations.length > 0) {
-    console.log('Violation details:');
-    for (const v of proximityViolations) {
-      console.log(`  ${v.guest1Name} & ${v.guest2Name}: ${v.reason}`);
-    }
-  }
-  console.log('========================================');
 }

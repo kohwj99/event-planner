@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useColorModeStore } from '@/store/colorModeStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
 import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
@@ -87,7 +87,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     const sessionData = getSessionById(currentSessionId);
     if (!sessionData) return;
 
-    const { tables, chunks, selectedMealPlanIndex, violations } = useSeatStore.getState();
+    const { tables, chunks, selectedMealPlanIndex, violations, drawObjects } = useSeatStore.getState();
 
     // Collect all assigned guest IDs from seats
     const activeGuestIds = new Set<string>();
@@ -108,7 +108,8 @@ export const useSessionLoader = (sessionId: string | null) => {
       chunks,
       activeGuestIds: Array.from(activeGuestIds),
       selectedMealPlanIndex,
-      uiSettings, // Include UI settings in seat plan
+      uiSettings,
+      drawObjects,
     });
 
     // Save violations to session
@@ -187,6 +188,8 @@ export const useSessionLoader = (sessionId: string | null) => {
         selectedTableId: null,
         selectedSeatId: null,
         selectedMealPlanIndex: seatPlan.selectedMealPlanIndex ?? null,
+        drawObjects: seatPlan.drawObjects ?? [],
+        selectedDrawObjectId: null,
       });
       
       // Load UI settings
@@ -215,7 +218,7 @@ export const useSessionLoader = (sessionId: string | null) => {
 
     // CRITICAL FIX: Use the new setGuests function for bulk sync
     const sessionGuests = getSessionGuests(newSessionId);
-    let allLoadedGuests: any[] = [];
+    let allLoadedGuests: Guest[] = [];
     
     if (sessionGuests) {
       const { hostGuests, externalGuests } = sessionGuests;
@@ -234,7 +237,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     }
 
     // Build guest lookup for violation detection
-    const guestLookup: Record<string, any> = {};
+    const guestLookup: Record<string, Guest> = {};
     allLoadedGuests.forEach(g => {
       guestLookup[g.id] = g;
     });
@@ -350,7 +353,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     setGuests(hostGuests, externalGuests);
     
     // Update guest lookup in seatStore
-    const guestLookup: Record<string, any> = {};
+    const guestLookup: Record<string, Guest> = {};
     [...hostGuests, ...externalGuests].forEach(g => {
       guestLookup[g.id] = g;
     });
