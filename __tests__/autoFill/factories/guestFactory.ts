@@ -10,6 +10,7 @@ interface GuestOverrides {
   fromHost?: boolean;
   deleted?: boolean;
   mealPlans?: string[];
+  tags?: string[];
 }
 
 export function createGuest(overrides: GuestOverrides = {}) {
@@ -24,6 +25,7 @@ export function createGuest(overrides: GuestOverrides = {}) {
     fromHost: overrides.fromHost ?? true,
     deleted: overrides.deleted ?? false,
     mealPlans: overrides.mealPlans ?? [],
+    tags: overrides.tags ?? [],
   };
 }
 

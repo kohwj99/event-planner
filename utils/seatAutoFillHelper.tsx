@@ -28,4 +28,5 @@ export type {
   AutoFillOptions,
   RandomizePartition,
   RandomizeOrderConfig,
+  TagSitTogetherGroup,
 } from './autoFill';

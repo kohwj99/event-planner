@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { useNavigation } from '@/components/providers/NavigationProvider';
 import { useEventStore } from '@/store/eventStore';
 import { useGuestStore } from '@/store/guestStore';
 import { useSeatStore } from '@/store/seatStore';
@@ -11,27 +12,29 @@ import {
   Typography,
   Button,
   Stack,
-  CircularProgress,
 } from '@mui/material';
 import {
   EventSeat,
   Groups,
 } from '@mui/icons-material';
-import PlayGroundCanvas from '@/components/organisms/PlaygroundCanvas';
-import PlaygroundRightConfigPanel from '@/components/organisms/PlaygroundRightConfigPanel';
-import ExportModal from '@/components/molecules/ExportModal';
-import SeatingStatsPanel from '@/components/molecules/SeatingStatsPanel';
+import PlayGroundCanvas from '@/components/features/session/PlaygroundCanvas';
+import PlaygroundRightConfigPanel from '@/components/features/session/PlaygroundRightConfigPanel';
+import ExportModal from '@/components/features/session/ExportModal';
+import SeatingStatsPanel from '@/components/features/session/SeatingStatsPanel';
 import { exportToPDF } from '@/utils/exportToPDF';
 import { exportToPPTX } from '@/utils/exportToPPTX';
-import PlaygroundTopControlPanel from '@/components/organisms/PlaygroundTopControlPanel';
+import PlaygroundTopControlPanel from '@/components/features/session/PlaygroundTopControlPanel';
 import SessionDetailLayout from './layout';
-import SessionGuestListModal from '@/components/molecules/SessionGuestListModal';
+import SessionGuestListModal from '@/components/features/guest/SessionGuestListModal';
+import ChunkLayoutModal from '@/components/features/session/ChunkLayoutModal';
+import { computeChunkLayout, ChunkLayoutConfig } from '@/utils/chunkLayoutHelper';
 import { useUndoRedo } from '@/hooks/useUndoRedo';
 import { UndoRedoProvider } from '@/components/providers/UndoRedoProvider';
+import PageLoader from '@/components/shared/atoms/PageLoader';
 
 export default function SessionDetailPage() {
   const { id: sessionId } = useParams() as { id: string };
-  const router = useRouter();
+  const { navigateWithLoading } = useNavigation();
 
   // 🆕 Use session loader hook - now returns UI settings and lock state
   const { 
@@ -62,6 +65,10 @@ export default function SessionDetailPage() {
 
   const [guestModalOpen, setGuestModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [chunkLayoutOpen, setChunkLayoutOpen] = useState(false);
+
+  // Reactive table count for ChunkLayoutModal
+  const tableCount = useSeatStore((s) => s.tables.length);
   const [sessionData, setSessionData] = useState<{
     session: any;
     dayId: string;
@@ -97,9 +104,9 @@ export default function SessionDetailPage() {
   const handleBack = () => {
     saveCurrentSession();
     if (sessionData) {
-      router.push(`/events/${sessionData.eventId}`);
+      navigateWithLoading(`/events/${sessionData.eventId}`, 'Loading event...');
     } else {
-      router.push('/');
+      navigateWithLoading('/');
     }
   };
 
@@ -124,20 +131,25 @@ export default function SessionDetailPage() {
     exportToPPTX();
   };
 
+  const handleChunkLayoutApply = (config: ChunkLayoutConfig) => {
+    if (isLocked) return;
+    const currentTables = useSeatStore.getState().tables;
+    if (currentTables.length === 0) return;
+
+    captureSnapshot("Chunk Layout");
+
+    const result = computeChunkLayout(currentTables, config);
+    useSeatStore.setState({
+      tables: result.tables,
+      chunks: result.chunks,
+    });
+
+    setChunkLayoutOpen(false);
+  };
+
   // Show loading spinner during initial load
   if (!isMounted || isLoading || !isHydrated) {
-    return (
-      <Box
-        sx={{
-          height: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <PageLoader message="Loading session..." />;
   }
 
   if (!sessionData) {
@@ -185,6 +197,7 @@ export default function SessionDetailPage() {
           onManageGuests={() => setGuestModalOpen(true)}
           onExport={() => setExportModalOpen(true)}
           onToggleLock={handleToggleLock}
+          onChunkLayout={() => setChunkLayoutOpen(true)}
         />
       }
     >
@@ -259,6 +272,14 @@ export default function SessionDetailPage() {
         onClose={() => setExportModalOpen(false)}
         onExportPDF={handleExportPDF}
         onExportPPTX={handleExportPPTX}
+      />
+
+      {/* Chunk Layout Modal */}
+      <ChunkLayoutModal
+        open={chunkLayoutOpen}
+        onClose={() => setChunkLayoutOpen(false)}
+        onApply={handleChunkLayoutApply}
+        tableCount={tableCount}
       />
     </SessionDetailLayout>
     </UndoRedoProvider>

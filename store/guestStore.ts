@@ -11,6 +11,7 @@ export interface Guest {
   fromHost: boolean;    // true = host company attendee
   deleted?: boolean;    // soft-delete flag
   mealPlans?: string[]; // Variable meal plans (Meal Plan 1, 2, 3, etc.)
+  tags?: string[];      // Tags for grouping (e.g., "Cybersecurity", "Bahasa"), stored in UpperCamelCase
 }
 
 interface GuestStoreState {
@@ -23,6 +24,7 @@ interface GuestStoreState {
   resetGuests: () => void;
   setSelectedMealPlanIndex: (index: number | null) => void;
   getMaxMealPlanCount: () => number;
+  getMaxTagCount: () => number;
   /** 
    * Bulk set guests - used for syncing with eventStore session guests.
    * Preserves 'deleted' status for existing guests to maintain user's hide/show choices.
@@ -77,6 +79,18 @@ export const useGuestStore = create<GuestStoreState>()(
           allGuests.forEach((g) => {
             if (g.mealPlans && g.mealPlans.length > max) {
               max = g.mealPlans.length;
+            }
+          });
+          return max;
+        },
+
+        getMaxTagCount: () => {
+          const state = get();
+          const allGuests = [...state.hostGuests, ...state.externalGuests];
+          let max = 0;
+          allGuests.forEach((g) => {
+            if (g.tags && g.tags.length > max) {
+              max = g.tags.length;
             }
           });
           return max;

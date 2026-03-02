@@ -7,6 +7,7 @@ import {
   RandomizeOrderConfig,
   AutoFillOptions,
   RandomizePartition,
+  TagSitTogetherGroup,
 } from '@/types/Event';
 
 let ruleIdCounter = 0;
@@ -68,6 +69,19 @@ export function createRandomizeConfig(overrides: Partial<RandomizeOrderConfig> =
   return {
     enabled: false,
     partitions: [],
+    ...overrides,
+  };
+}
+
+export function createTagSitTogetherGroup(
+  tag: string,
+  guestIds: string[],
+  overrides: Partial<TagSitTogetherGroup> = {}
+): TagSitTogetherGroup {
+  return {
+    id: nextRuleId(),
+    tag,
+    guestIds,
     ...overrides,
   };
 }

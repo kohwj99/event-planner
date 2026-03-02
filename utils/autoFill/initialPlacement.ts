@@ -25,12 +25,13 @@
  */
 
 import { SeatMode } from '@/types/Seat';
-import { TableRules, ProximityRules, RandomizeOrderConfig } from '@/types/Event';
+import { TableRules, ProximityRules, RandomizeOrderConfig, TagSitTogetherGroup } from '@/types/Event';
 import { LockedGuestLocation } from './autoFillTypes';
 import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSorting';
 import { canPlaceGuestInSeat, getNextCompatibleGuest, getNextCompatibleGuestOfType } from './seatCompatibility';
 import { wouldViolateSitAwayWithLocked } from './lockedGuestHelpers';
 import { reorderForSitTogetherClusters } from './proximityReordering';
+import { reorderForTagGroups } from './tagReordering';
 
 /**
  * Perform the initial placement of guests into seats across all tables.
@@ -51,7 +52,8 @@ export function performInitialPlacement(
   comparator?: (a: any, b: any) => number,
   proximityRules?: ProximityRules,
   randomizeOrder?: RandomizeOrderConfig,
-  guestsInProximityRules?: Set<string>
+  guestsInProximityRules?: Set<string>,
+  tagGroups?: TagSitTogetherGroup[]
 ): Map<string, string> {
   const seatToGuest = new Map<string, string>();
   const assignedGuests = new Set<string>(lockedGuestIds);
@@ -70,6 +72,13 @@ export function performInitialPlacement(
     );
   }
 
+  // Reorder so that tag group members are placed consecutively after their anchor.
+  // Only applies when the user has explicitly created tag groups in the AutoFill modal.
+  // Runs after sit-together clustering (hard constraint) and before randomization.
+  if (tagGroups && tagGroups.length > 0) {
+    allCandidates = reorderForTagGroups(allCandidates, tagGroups, comparatorWithTieBreak);
+  }
+
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
   // This ensures proximity rules are still enforced properly
   if (randomizeOrder && randomizeOrder.enabled && randomizeOrder.partitions.length > 0 && guestsInProximityRules) {
@@ -77,26 +86,36 @@ export function performInitialPlacement(
     console.log(`  Total candidates: ${allCandidates.length}`);
     console.log(`  Guests in proximity rules: ${guestsInProximityRules.size}`);
 
-    // Separate guests into proximity-rule and regular
-    const proximityGuests: any[] = [];
+    // Build set of tag group guest IDs to protect from randomization
+    const tagGroupGuestIds = new Set<string>();
+    if (tagGroups) {
+      for (const group of tagGroups) {
+        for (const gid of group.guestIds) {
+          tagGroupGuestIds.add(gid);
+        }
+      }
+    }
+
+    // Separate guests into protected (proximity-rule + tag group) and regular
+    const protectedGuests: any[] = [];
     const regularGuests: any[] = [];
 
     allCandidates.forEach(guest => {
-      if (guestsInProximityRules.has(guest.id)) {
-        proximityGuests.push(guest);
+      if (guestsInProximityRules.has(guest.id) || tagGroupGuestIds.has(guest.id)) {
+        protectedGuests.push(guest);
       } else {
         regularGuests.push(guest);
       }
     });
 
-    console.log(`  Proximity guests (not randomized): ${proximityGuests.length}`);
+    console.log(`  Protected guests (not randomized): ${protectedGuests.length}`);
     console.log(`  Regular guests (will be randomized): ${regularGuests.length}`);
 
     // Randomize only the regular guests
     const randomizedRegular = applyRandomizeOrder(regularGuests, randomizeOrder);
 
-    // Recombine: proximity guests first (maintain their priority), then randomized regular
-    allCandidates = [...proximityGuests, ...randomizedRegular];
+    // Recombine: protected guests first (maintain their priority/grouping), then randomized regular
+    allCandidates = [...protectedGuests, ...randomizedRegular];
   }
 
   const sortedTables = [...tables].sort((a, b) => {

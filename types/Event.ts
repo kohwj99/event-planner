@@ -24,6 +24,8 @@ export interface SessionUISettings {
   isPhotoMode: boolean;
   /** Colorblind-friendly color scheme */
   isColorblindMode: boolean;
+  /** Whether to show tag pills on guest boxes */
+  showTagPills: boolean;
   /** Canvas zoom level */
   zoomLevel: number;
   /** Canvas pan X position */
@@ -40,6 +42,7 @@ export const DEFAULT_SESSION_UI_SETTINGS: SessionUISettings = {
   hideTableBodies: false,
   isPhotoMode: false,
   isColorblindMode: false,
+  showTagPills: false,
   zoomLevel: 1,
   panX: 0,
   panY: 0,
@@ -172,6 +175,17 @@ export interface ProximityRules {
 }
 
 /**
+ * Tag-based sit-together group.
+ * Created by the user in the AutoFill modal to group guests with a shared tag
+ * at the same table. Separate from proximity rules but processed similarly.
+ */
+export interface TagSitTogetherGroup {
+  id: string;
+  tag: string;          // Source tag name (e.g., "Cybersecurity")
+  guestIds: string[];   // 2+ guest IDs explicitly selected by user
+}
+
+/**
  * Guest list selection configuration
  */
 export interface GuestListSelection {
@@ -218,6 +232,7 @@ export interface AutoFillOptions {
   tableRules?: TableRules;
   proximityRules?: ProximityRules;
   randomizeOrder?: RandomizeOrderConfig;
+  tagGroups?: TagSitTogetherGroup[];
 }
 
 /**
@@ -227,19 +242,22 @@ export interface AutoFillOptions {
 export interface SessionRulesConfig {
   /** Which guest lists to include in autofill */
   guestListSelection: GuestListSelection;
-  
+
   /** Sorting rules for guest ordering */
   sortRules: SortRule[];
-  
+
   /** Table assignment rules (ratio, spacing) */
   tableRules: TableRules;
-  
+
   /** Proximity rules (sit together, sit away) */
   proximityRules: ProximityRules;
-  
+
   /** Randomize order configuration for shuffling within rank partitions */
   randomizeOrder?: RandomizeOrderConfig;
-  
+
+  /** Tag-based sit-together groups (user-created from tag UI) */
+  tagGroups?: TagSitTogetherGroup[];
+
   /** Timestamp when rules were last modified */
   lastModified?: string;
 }
@@ -275,6 +293,7 @@ export const DEFAULT_SESSION_RULES: SessionRulesConfig = {
     enabled: false,
     partitions: [],
   },
+  tagGroups: [],
 };
 
 /**

@@ -23,7 +23,8 @@ export type HistoryActionLabel =
   | "Clear All Seats"
   | "Update Seat Order"
   | "AutoFill"
-  | "Reset Tables";
+  | "Reset Tables"
+  | "Chunk Layout";
 
 /**
  * A snapshot of the mutable session state at a point in time.

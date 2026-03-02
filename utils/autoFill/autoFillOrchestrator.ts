@@ -10,10 +10,11 @@
  * 2. Guest prioritization: separate proximity-rule guests into priority pools
  * 3. Clear existing (unlocked) seat assignments
  * 4. Initial placement: assign guests to seats respecting table rules
- * 5. Sit-together optimization: consolidate clusters and optimize adjacency
- * 6. Sit-away optimization: separate guests who should not be adjacent
- * 7. Store assignment: write the final assignments to the Zustand store
- * 8. Final violation check: detect and report all remaining violations
+ * 5. Tag group optimization: consolidate user-created tag groups (soft constraint)
+ * 6. Sit-together optimization: consolidate clusters and optimize adjacency
+ * 7. Sit-away optimization: separate guests who should not be adjacent
+ * 8. Store assignment: write the final assignments to the Zustand store
+ * 9. Final violation check: detect and report all remaining violations
  *
  * Also manages the module-level proximityViolations state, accessible via
  * getProximityViolations() for the stats panel.
@@ -29,6 +30,7 @@ import { buildPrioritizedGuestPools } from './guestPoolBuilder';
 import { performInitialPlacement } from './initialPlacement';
 import { applySitTogetherOptimization } from './sitTogetherOptimization';
 import { applySitAwayOptimization } from './sitAwayOptimization';
+import { applyTagGroupOptimization } from './tagGroupOptimization';
 import { performFinalViolationCheck } from './violationChecker';
 
 // Store violations globally for access by stats panel
@@ -46,6 +48,7 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     tableRules,
     proximityRules = { sitTogether: [], sitAway: [] },
     randomizeOrder,
+    tagGroups,
   } = options;
 
   const seatStore = useSeatStore.getState();
@@ -135,8 +138,22 @@ export async function autoFillSeats(options: AutoFillOptions = {}) {
     comparator,
     proximityRules,
     shouldRandomize ? randomizeOrder : undefined,
-    guestsInProximityRules
+    guestsInProximityRules,
+    tagGroups
   );
+
+  // Tag group optimization: consolidate user-created tag groups onto same tables.
+  // Runs before proximity rules so that sit-together/sit-away can override if needed.
+  if (tagGroups && tagGroups.length > 0) {
+    applyTagGroupOptimization(
+      seatToGuest,
+      tablesAfterClear,
+      tagGroups,
+      allGuests,
+      comparator,
+      lockedGuestMap
+    );
+  }
 
   applySitTogetherOptimization(
     seatToGuest,
