@@ -28,6 +28,7 @@ import { EventCard } from "@/components/features/event/EventCard";
 import { ImportEventDialog } from "@/components/features/event/ImportEventDialog";
 import PageLoader from "@/components/shared/atoms/PageLoader";
 import { ExportEventDialog } from "@/components/features/event/ExportEventDialog";
+import ConfirmDeleteModal from "@/components/shared/molecules/ConfirmDeleteModal";
 import { APP_VERSION } from "@/utils/version";
 
 
@@ -59,6 +60,9 @@ export default function HomePage() {
   // Export state
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [eventToExport, setEventToExport] = useState<Event | null>(null);
+
+  // Delete confirmation state
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; eventId: string; eventName: string }>({ open: false, eventId: "", eventName: "" });
   
   // Snackbar
   const { snackbar, showSuccess, showError, closeSnackbar } = useSnackbar();
@@ -237,7 +241,10 @@ export default function HomePage() {
                   event={event}
                   onNavigate={handleNavigate}
                   onExport={handleExportClick}
-                  onDelete={deleteEvent}
+                  onDelete={(id: string) => {
+                    const event = events.find((e) => e.id === id);
+                    setDeleteModal({ open: true, eventId: id, eventName: event?.name ?? "" });
+                  }}
                 />
               </Grid>
             ))}
@@ -271,6 +278,17 @@ export default function HomePage() {
           event={eventToExport}
           onConfirm={handleExportConfirm}
           onCancel={handleExportCancel}
+        />
+
+        <ConfirmDeleteModal
+          open={deleteModal.open}
+          title="Delete Event"
+          message={`Are you sure you want to delete "${deleteModal.eventName}"? This will remove all days, sessions, and seating arrangements.`}
+          onClose={() => setDeleteModal({ open: false, eventId: "", eventName: "" })}
+          onConfirm={() => {
+            deleteEvent(deleteModal.eventId);
+            setDeleteModal({ open: false, eventId: "", eventName: "" });
+          }}
         />
 
         {/* Version */}
