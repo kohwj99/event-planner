@@ -14,7 +14,7 @@ Event and seat planning application built with Next.js (App Router), TypeScript 
 - **React:** 19.1.0
 - **Testing:** Vitest 4 with V8 coverage
 - **Export:** jspdf, pptxgenjs, html2canvas, xlsx, papaparse
-- **Other:** chroma-js (colors), uuid, react-konva (legacy, not actively used)
+- **Other:** chroma-js (colors), uuid(legacy, not actively used)
 
 ## Git Workflow
 
