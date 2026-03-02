@@ -152,7 +152,7 @@ export default function PlaygroundTopControlPanel({
                   onClick={onChunkLayout}
                   disabled={isLocked || isDrawMode}
                 >
-                  Chunk Layout
+                  Layout
                 </Button>
               </span>
             </Tooltip>
