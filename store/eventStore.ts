@@ -1284,7 +1284,7 @@ export const useEventStore = create<EventStoreState>()(
 
               // Build seat-to-guest mapping
               const seatToGuest = new Map<string, string>();
-              const guestToSeat = new Map<string, { tableId: string; seatId: string; table: any }>();
+              const guestToSeat = new Map<string, { tableId: string; seatId: string; table: Table }>();
 
               for (const table of tables) {
                 for (const seat of table.seats || []) {
@@ -1644,7 +1644,6 @@ export const useEventStore = create<EventStoreState>()(
         name: "event-master-store",
         skipHydration: true,
         onRehydrateStorage: () => (state) => {
-          console.log('EventStore: Hydration complete');
           state?.setHasHydrated(true);
         },
       }

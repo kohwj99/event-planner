@@ -28,6 +28,7 @@ import { EventCard } from "@/components/features/event/EventCard";
 import { ImportEventDialog } from "@/components/features/event/ImportEventDialog";
 import PageLoader from "@/components/shared/atoms/PageLoader";
 import { ExportEventDialog } from "@/components/features/event/ExportEventDialog";
+import { APP_VERSION } from "@/utils/version";
 
 
 export default function HomePage() {
@@ -271,6 +272,19 @@ export default function HomePage() {
           onConfirm={handleExportConfirm}
           onCancel={handleExportCancel}
         />
+
+        {/* Version */}
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{
+            position: 'fixed',
+            bottom: 8,
+            right: 16,
+          }}
+        >
+          v{APP_VERSION}
+        </Typography>
 
         {/* Snackbar */}
         <Snackbar

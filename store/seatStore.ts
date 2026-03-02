@@ -13,6 +13,7 @@ import {
   removeTableFromChunk,
 } from "@/utils/chunkHelper";
 import { detectProximityViolations, ProximityViolation } from "@/utils/violationDetector";
+import { Guest } from "@/store/guestStore";
 import {
   validateGuestSeatAssignment,
   validateSeatSwap,
@@ -38,7 +39,7 @@ interface SeatStoreState {
   // Violation detection state
   violations: ProximityViolation[];
   proximityRules: ProximityRules | null;
-  guestLookup: Record<string, any>;
+  guestLookup: Record<string, Guest>;
 
   // Draw layer state
   drawObjects: DrawObject[];
@@ -64,7 +65,7 @@ interface SeatStoreState {
 
   // Violation detection actions
   setProximityRules: (rules: ProximityRules | null) => void;
-  setGuestLookup: (lookup: Record<string, any>) => void;
+  setGuestLookup: (lookup: Record<string, Guest>) => void;
   detectViolations: () => void;
 
   // Table-level operations

@@ -503,9 +503,9 @@ export default function AutoFillModal({ open, onClose, eventId, sessionId }: Aut
   // --- Sorting Rules Handlers ---
   const addSortRule = () => setSortRules([...sortRules, { field: 'name', direction: 'asc' }]);
   const removeSortRule = (index: number) => setSortRules(sortRules.filter((_, i) => i !== index));
-  const updateSortRule = (index: number, field: keyof SortRule, value: any) => {
+  const updateSortRule = (index: number, field: keyof SortRule, value: SortRule[keyof SortRule]) => {
     const updated = [...sortRules];
-    (updated[index] as any)[field] = value;
+    updated[index] = { ...updated[index], [field]: value };
     setSortRules(updated);
   };
 

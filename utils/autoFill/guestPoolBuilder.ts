@@ -12,6 +12,7 @@
  */
 
 import { ProximityRules } from '@/types/Event';
+import { Guest } from '@/store/guestStore';
 
 /**
  * Build prioritized guest pools by separating guests into those involved in
@@ -23,12 +24,12 @@ import { ProximityRules } from '@/types/Event';
  * - guestsInProximityRules: Set of guest IDs that appear in any proximity rule
  */
 export function buildPrioritizedGuestPools(
-  hostCandidates: any[],
-  externalCandidates: any[],
+  hostCandidates: Guest[],
+  externalCandidates: Guest[],
   proximityRules: ProximityRules,
-  comparator: (a: any, b: any) => number,
+  comparator: (a: Guest, b: Guest) => number,
   _totalAvailableSeats: number
-): { prioritizedHost: any[]; prioritizedExternal: any[]; guestsInProximityRules: Set<string> } {
+): { prioritizedHost: Guest[]; prioritizedExternal: Guest[]; guestsInProximityRules: Set<string> } {
   const guestsInProximityRules = new Set<string>();
 
   proximityRules.sitTogether.forEach(rule => {
@@ -41,9 +42,9 @@ export function buildPrioritizedGuestPools(
     guestsInProximityRules.add(rule.guest2Id);
   });
 
-  function prioritizeGuests(candidates: any[]) {
-    const mustInclude: any[] = [];
-    const regular: any[] = [];
+  function prioritizeGuests(candidates: Guest[]): { mustInclude: Guest[]; regular: Guest[] } {
+    const mustInclude: Guest[] = [];
+    const regular: Guest[] = [];
 
     candidates.forEach(guest => {
       if (guestsInProximityRules.has(guest.id)) {
@@ -63,12 +64,12 @@ export function buildPrioritizedGuestPools(
   const hostGroups = prioritizeGuests(hostCandidates);
   const externalGroups = prioritizeGuests(externalCandidates);
 
-  const prioritizedHost: any[] = [
+  const prioritizedHost: Guest[] = [
     ...hostGroups.mustInclude,
     ...hostGroups.regular
   ];
 
-  const prioritizedExternal: any[] = [
+  const prioritizedExternal: Guest[] = [
     ...externalGroups.mustInclude,
     ...externalGroups.regular
   ];

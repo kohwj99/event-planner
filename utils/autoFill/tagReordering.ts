@@ -50,7 +50,7 @@ export function buildTagSignature(guest: { tags?: string[] }): string {
  */
 export function reorderForTagSimilarity(
   sortedCandidates: { id: string; tags?: string[] }[],
-  _comparator: (a: any, b: any) => number
+  _comparator: (a: { id: string; tags?: string[] }, b: { id: string; tags?: string[] }) => number
 ): typeof sortedCandidates {
   if (sortedCandidates.length === 0) {
     return sortedCandidates;

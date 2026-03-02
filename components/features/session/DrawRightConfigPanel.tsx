@@ -23,8 +23,6 @@ import {
   NearMe,
   CropSquare,
   CircleOutlined,
-  HorizontalRule,
-  TextFields,
   Delete,
   VerticalAlignTop,
   VerticalAlignBottom,
@@ -48,8 +46,6 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   select: <NearMe fontSize="small" />,
   rectangle: <CropSquare fontSize="small" />,
   ellipse: <CircleOutlined fontSize="small" />,
-  line: <HorizontalRule fontSize="small" />,
-  textbox: <TextFields fontSize="small" />,
 };
 
 export default function DrawRightConfigPanel({
@@ -277,6 +273,40 @@ export default function DrawRightConfigPanel({
               disabled={isLocked}
               sx={{ flex: 1 }}
             />
+          </Stack>
+
+          {/* ============ ROTATION ============ */}
+          <Typography variant="body2" fontWeight="bold" color="text.primary">
+            Rotation
+          </Typography>
+
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Slider
+              size="small"
+              min={0}
+              max={360}
+              step={1}
+              value={selectedObj.rotation}
+              onChange={(_, v) => {
+                captureSnapshot('Rotate Draw Object');
+                updateDrawObject(selectedObj.id, { rotation: v as number });
+              }}
+              disabled={isLocked}
+              sx={{ flex: 1 }}
+            />
+            <TextField
+              type="number"
+              size="small"
+              value={Math.round(selectedObj.rotation)}
+              onChange={(e) => {
+                captureSnapshot('Rotate Draw Object');
+                updateDrawObject(selectedObj.id, { rotation: ((Number(e.target.value) % 360) + 360) % 360 });
+              }}
+              disabled={isLocked}
+              sx={{ width: 70 }}
+              slotProps={{ htmlInput: { min: 0, max: 360, step: 1 } }}
+            />
+            <Typography variant="caption">deg</Typography>
           </Stack>
 
           <Divider />

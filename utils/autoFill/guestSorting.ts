@@ -14,15 +14,19 @@
  */
 
 import { SortField, SortRule, RandomizeOrderConfig } from '@/types/Event';
+import { Guest } from '@/store/guestStore';
 
 /**
  * Extract a field value from a guest object for sorting.
- * Handles the "organization" field alias (maps to "company" or "organization").
+ * Handles the "organization" field alias (maps to "company").
  */
-export function getGuestFieldValue(guest: any, field: SortField): string | number | undefined {
+export function getGuestFieldValue(guest: Guest, field: SortField): string | number | undefined {
   if (!guest) return undefined;
-  if (field === "organization") return (guest as any).company ?? (guest as any).organization ?? "";
-  return (guest as any)[field];
+  if (field === "organization") return guest.company ?? "";
+  if (field === "ranking") return guest.ranking;
+  if (field === "name") return guest.name;
+  if (field === "country") return guest.country;
+  return undefined;
 }
 
 /**
@@ -30,8 +34,8 @@ export function getGuestFieldValue(guest: any, field: SortField): string | numbe
  * Applies rules in order (first rule is primary sort, etc.).
  * Falls back to host-first tiebreaker, then alphabetical by name.
  */
-export function makeComparator(rules: SortRule[]) {
-  return (a: any, b: any) => {
+export function makeComparator(rules: SortRule[]): (a: Guest, b: Guest) => number {
+  return (a: Guest, b: Guest) => {
     for (const r of rules) {
       const { field, direction } = r;
       let av = getGuestFieldValue(a, field);
@@ -55,14 +59,14 @@ export function makeComparator(rules: SortRule[]) {
     }
 
     // Tiebreaker 1: Host guests come before external guests
-    const aIsHost = a?.fromHost === true;
-    const bIsHost = b?.fromHost === true;
+    const aIsHost = a.fromHost === true;
+    const bIsHost = b.fromHost === true;
     if (aIsHost && !bIsHost) return -1; // a is host, b is external -> a first
     if (!aIsHost && bIsHost) return 1;  // a is external, b is host -> b first
 
     // Tiebreaker 2: Alphabetical by name (for guests of the same type)
-    const aName = String(a?.name || "").toLowerCase();
-    const bName = String(b?.name || "").toLowerCase();
+    const aName = String(a.name || "").toLowerCase();
+    const bName = String(b.name || "").toLowerCase();
     return aName.localeCompare(bName);
   };
 }
@@ -71,8 +75,8 @@ export function makeComparator(rules: SortRule[]) {
  * Wrap a base comparator with an additional host-first tiebreak and ID fallback.
  * Used during initial placement when combining host and external candidate lists.
  */
-export function makeComparatorWithHostTieBreak(baseComparator: (a: any, b: any) => number) {
-  return (a: any, b: any) => {
+export function makeComparatorWithHostTieBreak(baseComparator: (a: Guest, b: Guest) => number): (a: Guest, b: Guest) => number {
+  return (a: Guest, b: Guest) => {
     const sortResult = baseComparator(a, b);
     if (sortResult !== 0) return sortResult;
 
@@ -106,16 +110,12 @@ export function shuffleArray<T>(array: T[]): T[] {
  * relative to guests outside the range.
  */
 export function applyRandomizeOrder(
-  sortedGuests: any[],
+  sortedGuests: Guest[],
   randomizeConfig: RandomizeOrderConfig
-): any[] {
+): Guest[] {
   if (!randomizeConfig.enabled || randomizeConfig.partitions.length === 0) {
     return sortedGuests;
   }
-
-  console.log('=== APPLYING RANDOMIZE ORDER ===');
-  console.log('Partitions:', randomizeConfig.partitions);
-  console.log('Input guests count:', sortedGuests.length);
 
   const result = [...sortedGuests];
 
@@ -123,7 +123,7 @@ export function applyRandomizeOrder(
     const { minRank, maxRank } = partition;
 
     const partitionIndices: number[] = [];
-    const partitionGuests: any[] = [];
+    const partitionGuests: Guest[] = [];
 
     result.forEach((guest, index) => {
       const guestRanking = Number(guest.ranking) || 0;
@@ -134,13 +134,7 @@ export function applyRandomizeOrder(
     });
 
     if (partitionGuests.length > 1) {
-      console.log(`Partition [${minRank}, ${maxRank}): Found ${partitionGuests.length} guests`);
-      partitionGuests.forEach(g => console.log(`  - ${g.name} (Rank: ${g.ranking})`));
-
       const shuffledGuests = shuffleArray(partitionGuests);
-
-      console.log(`After shuffle:`);
-      shuffledGuests.forEach(g => console.log(`  - ${g.name} (Rank: ${g.ranking})`));
 
       partitionIndices.forEach((originalIndex, i) => {
         result[originalIndex] = shuffledGuests[i];
@@ -148,7 +142,6 @@ export function applyRandomizeOrder(
     }
   }
 
-  console.log('=== RANDOMIZE ORDER COMPLETE ===');
   return result;
 }
 

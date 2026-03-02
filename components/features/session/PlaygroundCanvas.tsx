@@ -134,6 +134,7 @@ export default function PlaygroundCanvas({
   const moveDrawObject = useSeatStore((s) => s.moveDrawObject);
   const updateDrawObject = useSeatStore((s) => s.updateDrawObject);
   const setSelectedDrawObject = useSeatStore((s) => s.setSelectedDrawObject);
+  const deleteDrawObject = useSeatStore((s) => s.deleteDrawObject);
   const activeDrawTool = useDrawUIStore((s) => s.activeDrawTool);
   const defaultDrawStyle = useDrawUIStore((s) => s.defaultStyle);
 
@@ -673,6 +674,29 @@ export default function PlaygroundCanvas({
     drawObjects.length, setSelectedDrawObject, moveDrawObject,
     updateDrawObject, addDrawObject, captureSnapshot,
   ]);
+
+  // ============================================================================
+  // KEYBOARD DELETE FOR DRAW OBJECTS
+  // ============================================================================
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't handle when typing in form fields
+      const tag = (event.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (selectedDrawObjectId && isDrawMode && !isLocked) {
+          event.preventDefault();
+          captureSnapshot('Delete Draw Object');
+          deleteDrawObject(selectedDrawObjectId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawObjectId, isDrawMode, isLocked, captureSnapshot, deleteDrawObject]);
 
   // ============================================================================
   // ADD TABLE HANDLER

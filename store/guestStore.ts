@@ -42,9 +42,10 @@ export const useGuestStore = create<GuestStoreState>()(
 
         addGuest: (guest) =>
           set((state) => {
-            const list = guest.fromHost ? state.hostGuests : state.externalGuests;
-            const key = guest.fromHost ? "hostGuests" : "externalGuests";
-            return { [key]: [...list, guest] } as any;
+            if (guest.fromHost) {
+              return { hostGuests: [...state.hostGuests, guest] };
+            }
+            return { externalGuests: [...state.externalGuests, guest] };
           }),
 
         updateGuest: (id, guest) =>
@@ -59,13 +60,18 @@ export const useGuestStore = create<GuestStoreState>()(
 
         toggleDeleted: (id, fromHost) =>
           set((state) => {
-            const key = fromHost ? "hostGuests" : "externalGuests";
-            const list = fromHost ? state.hostGuests : state.externalGuests;
+            if (fromHost) {
+              return {
+                hostGuests: state.hostGuests.map((g) =>
+                  g.id === id ? { ...g, deleted: !g.deleted } : g
+                ),
+              };
+            }
             return {
-              [key]: list.map((g) =>
+              externalGuests: state.externalGuests.map((g) =>
                 g.id === id ? { ...g, deleted: !g.deleted } : g
               ),
-            } as any;
+            };
           }),
 
         resetGuests: () => set({ hostGuests: [], externalGuests: [] }),

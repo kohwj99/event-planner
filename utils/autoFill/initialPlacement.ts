@@ -24,7 +24,9 @@
  * - Sort tables by tableNumber and seats by seatNumber for deterministic order
  */
 
-import { SeatMode } from '@/types/Seat';
+import { Seat, SeatMode } from '@/types/Seat';
+import { Table } from '@/types/Table';
+import { Guest } from '@/store/guestStore';
 import { TableRules, ProximityRules, RandomizeOrderConfig, TagSitTogetherGroup } from '@/types/Event';
 import { LockedGuestLocation } from './autoFillTypes';
 import { makeComparatorWithHostTieBreak, applyRandomizeOrder } from './guestSorting';
@@ -43,13 +45,13 @@ import { reorderForTagGroups } from './tagReordering';
  * Returns a Map<seatId, guestId> representing the initial assignment.
  */
 export function performInitialPlacement(
-  tables: any[],
-  hostCandidates: any[],
-  externalCandidates: any[],
+  tables: Table[],
+  hostCandidates: Guest[],
+  externalCandidates: Guest[],
   lockedGuestIds: Set<string>,
   lockedGuestMap: Map<string, LockedGuestLocation>,
   tableRules?: TableRules,
-  comparator?: (a: any, b: any) => number,
+  comparator?: (a: Guest, b: Guest) => number,
   proximityRules?: ProximityRules,
   randomizeOrder?: RandomizeOrderConfig,
   guestsInProximityRules?: Set<string>,
@@ -82,10 +84,6 @@ export function performInitialPlacement(
   // Apply randomization AFTER the sort, but only to non-proximity-rule guests
   // This ensures proximity rules are still enforced properly
   if (randomizeOrder && randomizeOrder.enabled && randomizeOrder.partitions.length > 0 && guestsInProximityRules) {
-    console.log('performInitialPlacement: Applying randomization after sort');
-    console.log(`  Total candidates: ${allCandidates.length}`);
-    console.log(`  Guests in proximity rules: ${guestsInProximityRules.size}`);
-
     // Build set of tag group guest IDs to protect from randomization
     const tagGroupGuestIds = new Set<string>();
     if (tagGroups) {
@@ -97,8 +95,8 @@ export function performInitialPlacement(
     }
 
     // Separate guests into protected (proximity-rule + tag group) and regular
-    const protectedGuests: any[] = [];
-    const regularGuests: any[] = [];
+    const protectedGuests: Guest[] = [];
+    const regularGuests: Guest[] = [];
 
     allCandidates.forEach(guest => {
       if (guestsInProximityRules.has(guest.id) || tagGroupGuestIds.has(guest.id)) {
@@ -107,9 +105,6 @@ export function performInitialPlacement(
         regularGuests.push(guest);
       }
     });
-
-    console.log(`  Protected guests (not randomized): ${protectedGuests.length}`);
-    console.log(`  Regular guests (will be randomized): ${regularGuests.length}`);
 
     // Randomize only the regular guests
     const randomizedRegular = applyRandomizeOrder(regularGuests, randomizeOrder);
@@ -131,7 +126,7 @@ export function performInitialPlacement(
       return aSeatNum - bSeatNum;
     });
 
-    const unlockedSeats = seats.filter((s: any) => !s.locked);
+    const unlockedSeats = seats.filter((s: Seat) => !s.locked);
     const totalUnlockedSeats = unlockedSeats.length;
     let targetHostCount = 0;
     let targetExternalCount = 0;

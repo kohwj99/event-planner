@@ -41,7 +41,7 @@ import {
   PersonOutline,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useCaptureSnapshot } from '@/components/providers/UndoRedoProvider';
 import { getSwapCandidates, getIncompatibleSwapCandidates } from '@/utils/swapHelper';
 import type { ProximityViolation } from '@/utils/violationDetector';
@@ -52,7 +52,7 @@ interface SwapSeatModalProps {
   onClose: () => void;
   sourceTableId: string;
   sourceSeatId: string;
-  proximityRules?: { sitTogether: any[]; sitAway: any[] };
+  proximityRules?: { sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>; sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }> };
 }
 
 // Define the candidate type locally since we're having import issues
@@ -63,7 +63,7 @@ interface SwapCandidate {
   seatNumber: number;
   seatMode: SeatMode;
   guestId: string;
-  guest: any;
+  guest: Guest;
   validation: {
     isValid: boolean;
     reasons: string[];
@@ -87,7 +87,7 @@ interface IncompatibleCandidate {
   seatMode: SeatMode;
   sourceSeatMode: SeatMode;
   guestId: string;
-  guest: any;
+  guest: Guest;
   seatModeValidation: {
     isCompatible: boolean;
     guest1CanSitInSeat2: boolean;
@@ -135,7 +135,7 @@ export default function SwapSeatModal({
   );
 
   const guestLookup = useMemo(() => {
-    const lookup: Record<string, any> = {};
+    const lookup: Record<string, Guest> = {};
     allGuests.forEach((g) => (lookup[g.id] = g));
     return lookup;
   }, [allGuests]);
@@ -270,7 +270,7 @@ export default function SwapSeatModal({
     );
   };
 
-  const renderGuestCard = (guest: any, label: string, tableLabel?: string, seatNumber?: number, seatMode?: SeatMode) => {
+  const renderGuestCard = (guest: Guest, label: string, tableLabel?: string, seatNumber?: number, seatMode?: SeatMode) => {
     if (!guest) return null;
 
     const isVIP = guest.ranking <= 4;

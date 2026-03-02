@@ -12,6 +12,7 @@
  */
 
 import { SitTogetherRule } from '@/types/Event';
+import { Guest } from '@/store/guestStore';
 import { buildSitTogetherClusters } from './clusterBuilder';
 
 /**
@@ -30,10 +31,10 @@ import { buildSitTogetherClusters } from './clusterBuilder';
  * @returns New array with cluster members grouped after their anchor
  */
 export function reorderForSitTogetherClusters(
-  sortedCandidates: any[],
+  sortedCandidates: Guest[],
   sitTogetherRules: SitTogetherRule[],
-  comparator: (a: any, b: any) => number
-): any[] {
+  comparator: (a: Guest, b: Guest) => number
+): Guest[] {
   if (sitTogetherRules.length === 0 || sortedCandidates.length === 0) {
     return sortedCandidates;
   }
@@ -47,7 +48,7 @@ export function reorderForSitTogetherClusters(
 
   // For each cluster, identify the anchor and the members to pull up
   const pulledUpIds = new Set<string>();
-  const anchorToMembers = new Map<string, any[]>();
+  const anchorToMembers = new Map<string, Guest[]>();
 
   for (const [, memberIds] of clusters) {
     // Filter to only members present in the candidate array
@@ -84,7 +85,7 @@ export function reorderForSitTogetherClusters(
   }
 
   // Build the reordered array
-  const result: any[] = [];
+  const result: Guest[] = [];
   for (const guest of sortedCandidates) {
     // Skip pulled-up guests; they will be inserted after their anchor
     if (pulledUpIds.has(guest.id)) continue;

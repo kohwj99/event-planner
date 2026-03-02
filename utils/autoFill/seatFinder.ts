@@ -12,17 +12,20 @@
  * optimization, sit-away optimization, and violation checking).
  */
 
+import { Seat } from '@/types/Seat';
+import { Table } from '@/types/Table';
+import { Guest } from '@/store/guestStore';
 import { LockedGuestLocation } from './autoFillTypes';
 
 /**
  * Get all seats adjacent to a given seat.
  * Uses the seat's adjacentSeats array (pre-computed seat IDs) to look up actual seat objects.
  */
-export function getAdjacentSeats(seat: any, allSeats: any[]): any[] {
+export function getAdjacentSeats(seat: Seat, allSeats: Seat[]): Seat[] {
   if (!seat.adjacentSeats || seat.adjacentSeats.length === 0) return [];
   return seat.adjacentSeats
     .map((adjId: string) => allSeats.find((s) => s.id === adjId))
-    .filter(Boolean);
+    .filter((s): s is Seat => s !== undefined);
 }
 
 /**
@@ -32,7 +35,7 @@ export function getAdjacentSeats(seat: any, allSeats: any[]): any[] {
 export function areGuestsAdjacent(
   guest1Id: string,
   guest2Id: string,
-  tables: any[],
+  tables: Table[],
   seatToGuest: Map<string, string>,
   _lockedGuestMap: Map<string, LockedGuestLocation>
 ): boolean {
@@ -56,9 +59,9 @@ export function areGuestsAdjacent(
  */
 export function findGuestSeat(
   guestId: string,
-  tables: any[],
+  tables: Table[],
   seatToGuest: Map<string, string>
-): { seat: any; table: any } | null {
+): { seat: Seat; table: Table } | null {
   for (const table of tables) {
     for (const seat of table.seats) {
       if (seatToGuest.get(seat.id) === guestId) {
@@ -78,14 +81,14 @@ export function findGuestSeat(
  * Returns up to `count` connected seats that are not locked.
  */
 export function findContiguousSeats(
-  startSeat: any,
-  allSeats: any[],
+  startSeat: Seat,
+  allSeats: Seat[],
   count: number,
   _seatToGuest: Map<string, string>,
-  _guests: any[],
+  _guests: Guest[],
   _lockedGuestMap: Map<string, LockedGuestLocation>
-): any[] {
-  const result: any[] = [startSeat];
+): Seat[] {
+  const result: Seat[] = [startSeat];
   const visited = new Set<string>([startSeat.id]);
 
   // BFS to find adjacent seats
@@ -122,17 +125,17 @@ export function findContiguousSeats(
  * Returns seats in order of how they should be filled (adjacent to each other).
  */
 export function findContiguousSeatsForCluster(
-  table: any,
+  table: Table,
   clusterSize: number,
   seatToGuest: Map<string, string>,
   clusterGuestIds: string[],
-  guestLookup: Map<string, any>,
+  guestLookup: Map<string, Guest>,
   lockedGuestMap: Map<string, LockedGuestLocation>
-): { seats: any[]; anchorSeat: any } | null {
+): { seats: Seat[]; anchorSeat: Seat } | null {
   const allSeats = table.seats || [];
 
   // First, check if any cluster member is already locked on this table
-  let lockedAnchor: any = null;
+  let lockedAnchor: Seat | null = null;
   for (const guestId of clusterGuestIds) {
     if (lockedGuestMap.has(guestId)) {
       const lockedLoc = lockedGuestMap.get(guestId)!;
@@ -144,10 +147,10 @@ export function findContiguousSeatsForCluster(
   }
 
   // Try to find contiguous seats starting from the locked anchor or any seat
-  const startSeats = lockedAnchor ? [lockedAnchor] : allSeats.filter((s: any) => !s.locked);
+  const startSeats = lockedAnchor ? [lockedAnchor] : allSeats.filter((s) => !s.locked);
 
   for (const startSeat of startSeats) {
-    const contiguousSeats: any[] = [];
+    const contiguousSeats: Seat[] = [];
     const visited = new Set<string>();
     const queue = [startSeat];
 
@@ -189,10 +192,10 @@ export function findContiguousSeatsForCluster(
  * Get all available (not locked) seats on a table.
  */
 export function getAvailableSeatsOnTable(
-  table: any,
+  table: Table,
   _seatToGuest: Map<string, string>
-): any[] {
-  return (table.seats || []).filter((s: any) => !s.locked);
+): Seat[] {
+  return (table.seats || []).filter((s) => !s.locked);
 }
 
 /**
@@ -202,7 +205,7 @@ export function getAvailableSeatsOnTable(
 export function countClusterGuestsOnTable(
   tableId: string,
   clusterGuestIds: string[],
-  tables: any[],
+  tables: Table[],
   seatToGuest: Map<string, string>,
   _lockedGuestMap: Map<string, LockedGuestLocation>
 ): number {

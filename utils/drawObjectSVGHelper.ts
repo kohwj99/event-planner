@@ -29,6 +29,23 @@ export interface DrawLayerCallbacks {
 }
 
 /* ====================================================================
+ * HELPERS
+ * ==================================================================== */
+
+/**
+ * Build the SVG transform string for a draw object.
+ * Applies translation and optional rotation around the object's center.
+ */
+function buildTransform(d: DrawObject): string {
+  if (d.rotation) {
+    const cx = d.width / 2;
+    const cy = d.height / 2;
+    return `translate(${d.x},${d.y}) rotate(${d.rotation}, ${cx}, ${cy})`;
+  }
+  return `translate(${d.x},${d.y})`;
+}
+
+/* ====================================================================
  * MAIN RENDER: data-join on draw objects
  * ==================================================================== */
 
@@ -64,7 +81,7 @@ export function renderDrawLayer(
   const merged = enter.merge(groups);
 
   merged
-    .attr("transform", (d) => `translate(${d.x},${d.y})`)
+    .attr("transform", (d) => buildTransform(d))
     .style("pointer-events", isDrawMode && !isLocked ? "all" : "none")
     .style("cursor", isDrawMode && !isLocked ? "move" : "default");
 
@@ -78,15 +95,23 @@ export function renderDrawLayer(
     }
   });
 
-  // Resize handles for selected object
+  // Resize handles + rotation handle for selected object
   merged.each(function (d) {
     const gEl = d3.select<SVGGElement, DrawObject>(this as SVGGElement);
     gEl.selectAll(".draw-resize-handle").remove();
+    gEl.selectAll(".draw-rotation-handle").remove();
+    gEl.selectAll(".draw-rotation-line").remove();
 
     if (d.id === selectedId && isDrawMode && !isLocked) {
       renderResizeHandles(
         gEl as d3.Selection<SVGGElement, DrawObject, SVGGElement | null, unknown>,
         d,
+        callbacks,
+      );
+      renderRotationHandle(
+        gEl as d3.Selection<SVGGElement, DrawObject, SVGGElement | null, unknown>,
+        d,
+        drawLayerGroup,
         callbacks,
       );
     }
@@ -109,9 +134,9 @@ export function renderDrawLayer(
       .on("drag", function (event, d) {
         const newX = d.x + event.dx;
         const newY = d.y + event.dy;
-        d3.select(this).attr("transform", `translate(${newX},${newY})`);
         d.x = newX;
         d.y = newY;
+        d3.select(this).attr("transform", buildTransform(d));
         // Update store + expand canvas on every drag event (mirrors table drag)
         callbacks.onMove(d.id, d.x, d.y);
       })
@@ -214,20 +239,28 @@ function renderResizeHandles(
         callbacks.captureSnapshot("Resize Draw Object");
       })
       .on("drag", function (event) {
-        const result = corner.resize(event.dx, event.dy);
+        // Transform dx/dy from screen space to local object space when rotated
+        let dx = event.dx;
+        let dy = event.dy;
+        if (obj.rotation) {
+          const rad = -(obj.rotation) * Math.PI / 180;
+          dx = event.dx * Math.cos(rad) - event.dy * Math.sin(rad);
+          dy = event.dx * Math.sin(rad) + event.dy * Math.cos(rad);
+        }
+        const result = corner.resize(dx, dy);
         // Update object data for next frame
         obj.x = result.x;
         obj.y = result.y;
         obj.width = result.w;
         obj.height = result.h;
-        // Re-render parent group position
-        group.attr("transform", `translate(${obj.x},${obj.y})`);
+        // Re-render parent group position (with rotation)
+        group.attr("transform", buildTransform(obj));
         // Re-render shape (will rebuild children)
         const config = getShapeConfig(obj.shape);
         if (config) {
-          // Remove everything except resize handles
+          // Remove everything except resize handles and rotation handles
           group
-            .selectAll(":not(.draw-resize-handle)")
+            .selectAll(":not(.draw-resize-handle):not(.draw-rotation-handle):not(.draw-rotation-line)")
             .remove();
           config.render(group.node()!, obj, true);
         }
@@ -243,6 +276,92 @@ function renderResizeHandles(
 
     (handle as unknown as d3.Selection<SVGRectElement, unknown, null, undefined>).call(drag);
   });
+}
+
+/* ====================================================================
+ * ROTATION HANDLE
+ * ==================================================================== */
+
+const ROTATION_HANDLE_OFFSET = 25;
+const ROTATION_HANDLE_RADIUS = 5;
+
+/**
+ * Render a rotation handle above the top-center of a selected object.
+ * Dragging the handle rotates the object around its center.
+ */
+function renderRotationHandle(
+  group: d3.Selection<SVGGElement, DrawObject, SVGGElement | null, unknown>,
+  obj: DrawObject,
+  drawLayerGroup: d3.Selection<SVGGElement, unknown, null, undefined>,
+  callbacks: DrawLayerCallbacks,
+): void {
+  const topCenterX = obj.width / 2;
+  const topCenterY = 0;
+  const handleY = topCenterY - ROTATION_HANDLE_OFFSET;
+
+  // Connector line from top-center to the rotation handle
+  group
+    .append("line")
+    .attr("class", "draw-rotation-line")
+    .attr("x1", topCenterX)
+    .attr("y1", topCenterY)
+    .attr("x2", topCenterX)
+    .attr("y2", handleY)
+    .attr("stroke", "#1976d2")
+    .attr("stroke-width", 1.5)
+    .attr("pointer-events", "none");
+
+  // Rotation handle circle
+  const handle = group
+    .append("circle")
+    .attr("class", "draw-rotation-handle")
+    .attr("cx", topCenterX)
+    .attr("cy", handleY)
+    .attr("r", ROTATION_HANDLE_RADIUS)
+    .attr("fill", "#1976d2")
+    .attr("stroke", "#fff")
+    .attr("stroke-width", 1.5)
+    .style("cursor", "grab");
+
+  // Drag behavior for rotation
+  const drag = d3
+    .drag<SVGCircleElement, unknown>()
+    .on("start", function () {
+      callbacks.captureSnapshot("Rotate Draw Object");
+      d3.select(this).style("cursor", "grabbing");
+    })
+    .on("drag", function (event) {
+      // The object center in world space
+      const centerX = obj.x + obj.width / 2;
+      const centerY = obj.y + obj.height / 2;
+
+      // Convert mouse position to world coordinates via the draw layer's CTM
+      const svgEl = (drawLayerGroup.node()?.ownerSVGElement) as SVGSVGElement | null;
+      if (!svgEl) return;
+
+      const point = svgEl.createSVGPoint();
+      point.x = event.sourceEvent.clientX;
+      point.y = event.sourceEvent.clientY;
+      const ctm = drawLayerGroup.node()?.getScreenCTM();
+      if (!ctm) return;
+      const worldPt = point.matrixTransform(ctm.inverse());
+
+      // Calculate angle from center to mouse position
+      // atan2 gives angle from positive X axis; we want 0 = up, so add 90
+      const angle = Math.atan2(worldPt.y - centerY, worldPt.x - centerX) * (180 / Math.PI) + 90;
+
+      // Normalize to 0-360
+      obj.rotation = ((angle % 360) + 360) % 360;
+
+      // Re-render the group transform
+      group.attr("transform", buildTransform(obj));
+    })
+    .on("end", function () {
+      d3.select(this).style("cursor", "grab");
+      callbacks.onUpdate(obj.id, { rotation: obj.rotation });
+    });
+
+  (handle as unknown as d3.Selection<SVGCircleElement, unknown, null, undefined>).call(drag);
 }
 
 /* ====================================================================

@@ -17,6 +17,9 @@
  */
 
 import { ProximityRules } from '@/types/Event';
+import { Seat } from '@/types/Seat';
+import { Table } from '@/types/Table';
+import { Guest } from '@/store/guestStore';
 import { LockedGuestLocation } from './autoFillTypes';
 import { canPlaceGuestInSeat } from './seatCompatibility';
 import { getSitAwayGuests } from './proximityRuleHelpers';
@@ -29,9 +32,9 @@ import { getAdjacentSeats } from './seatFinder';
  */
 function countCurrentViolations(
   seatToGuest: Map<string, string>,
-  tables: any[],
+  tables: Table[],
   proximityRules: ProximityRules,
-  guestLookup: Map<string, any>,
+  guestLookup: Map<string, Guest>,
   lockedGuestMap: Map<string, LockedGuestLocation>
 ): number {
   let violations = 0;
@@ -82,10 +85,10 @@ function countCurrentViolations(
  */
 function findGuestSeatForViolationCheck(
   guestId: string,
-  tables: any[],
+  tables: Table[],
   seatToGuest: Map<string, string>,
   lockedGuestMap: Map<string, LockedGuestLocation>
-): { seat: any; table: any } | null {
+): { seat: Seat; table: Table } | null {
   // Check locked guests first
   if (lockedGuestMap.has(guestId)) {
     const loc = lockedGuestMap.get(guestId)!;
@@ -108,8 +111,8 @@ function findGuestSeatForViolationCheck(
  * Check if a seat is adjacent to a specific guest (considering both map and locked assignments).
  */
 function isSeatAdjacentToGuest(
-  seat: any,
-  table: any,
+  seat: Seat,
+  table: Table,
   guestId: string,
   seatToGuest: Map<string, string>,
   _lockedGuestMap: Map<string, LockedGuestLocation>
@@ -132,13 +135,13 @@ function isSeatAdjacentToGuest(
 function getCandidateSeatsNotAdjacentTo(
   guestIdToAvoid: string,
   currentSeatId: string,
-  guestToMove: any,
-  tables: any[],
+  guestToMove: Guest,
+  tables: Table[],
   seatToGuest: Map<string, string>,
   lockedGuestMap: Map<string, LockedGuestLocation>,
   preferredTableId?: string
-): { seat: any; table: any }[] {
-  const candidates: { seat: any; table: any; priority: number }[] = [];
+): { seat: Seat; table: Table }[] {
+  const candidates: { seat: Seat; table: Table; priority: number }[] = [];
 
   for (const table of tables) {
     for (const seat of table.seats) {
@@ -183,18 +186,16 @@ function getCandidateSeatsNotAdjacentTo(
  */
 export function applySitAwayOptimization(
   seatToGuest: Map<string, string>,
-  tables: any[],
+  tables: Table[],
   proximityRules: ProximityRules,
-  allGuests: any[],
-  comparator: (a: any, b: any) => number,
+  allGuests: Guest[],
+  comparator: (a: Guest, b: Guest) => number,
   lockedGuestMap: Map<string, LockedGuestLocation>
 ): void {
   const MAX_ATTEMPTS = 20;
   const guestLookup = new Map(allGuests.map(g => [g.id, g]));
 
   if (proximityRules.sitAway.length === 0) return;
-
-  console.log(`Processing ${proximityRules.sitAway.length} sit-away rules`);
 
   // Sort pairs by priority (higher priority guests first)
   const sortedPairs = [...proximityRules.sitAway]
@@ -218,14 +219,11 @@ export function applySitAwayOptimization(
 
     const { higherPriority, lowerPriority } = pairData;
 
-    console.log(`Checking sit-away: ${higherPriority.name} <-> ${lowerPriority.name}`);
-
     const higherIsLocked = lockedGuestMap.has(higherPriority.id);
     const lowerIsLocked = lockedGuestMap.has(lowerPriority.id);
 
     // If both are locked, we can't do anything
     if (higherIsLocked && lowerIsLocked) {
-      console.log(`  Both guests are locked - cannot resolve`);
       continue;
     }
 
@@ -234,13 +232,11 @@ export function applySitAwayOptimization(
     const lowerLoc = findGuestSeatForViolationCheck(lowerPriority.id, tables, seatToGuest, lockedGuestMap);
 
     if (!higherLoc || !lowerLoc) {
-      console.log(`  One or both guests not seated - skipping`);
       continue;
     }
 
     // Check if they're on different tables (already OK)
     if (higherLoc.table.id !== lowerLoc.table.id) {
-      console.log(`  Guests on different tables - already OK`);
       continue;
     }
 
@@ -252,16 +248,13 @@ export function applySitAwayOptimization(
     });
 
     if (!areCurrentlyAdjacent) {
-      console.log(`  Guests not adjacent - already OK`);
       continue;
     }
 
-    console.log(`  Guests ARE adjacent - attempting to separate`);
-
     // Determine who to move (prefer moving the lower priority, non-locked guest)
-    let guestToMove: any;
-    let guestToAvoid: any;
-    let movingLoc: { seat: any; table: any };
+    let guestToMove: Guest;
+    let guestToAvoid: Guest;
+    let movingLoc: { seat: Seat; table: Table };
 
     if (lowerIsLocked) {
       guestToMove = higherPriority;
@@ -277,7 +270,6 @@ export function applySitAwayOptimization(
     const baselineViolations = countCurrentViolations(
       seatToGuest, tables, proximityRules, guestLookup, lockedGuestMap
     );
-    console.log(`  Baseline violations: ${baselineViolations}`);
 
     // Get candidate seats (not adjacent to the guest we're avoiding)
     const candidates = getCandidateSeatsNotAdjacentTo(
@@ -290,20 +282,15 @@ export function applySitAwayOptimization(
       movingLoc.table.id // Prefer same table
     );
 
-    console.log(`  Found ${candidates.length} candidate seats`);
-
-    let resolved = false;
     let attempts = 0;
 
     for (const candidate of candidates) {
       if (attempts >= MAX_ATTEMPTS) {
-        console.log(`  Reached max attempts (${MAX_ATTEMPTS})`);
         break;
       }
       attempts++;
 
       const targetSeat = candidate.seat;
-      const _targetTable = candidate.table;
       const targetGuestId = seatToGuest.get(targetSeat.id);
 
       // Save current state for potential rollback
@@ -319,12 +306,6 @@ export function applySitAwayOptimization(
           continue; // Can't do this swap
         }
 
-        // Check if swapping would put target guest adjacent to someone they should avoid
-        const targetSitAwayGuests = getSitAwayGuests(targetGuestId, proximityRules.sitAway);
-        const _wouldCreateNewViolation = targetSitAwayGuests.some(avoidId =>
-          isSeatAdjacentToGuest(movingLoc.seat, movingLoc.table, avoidId, seatToGuest, lockedGuestMap)
-        );
-
         // Perform the swap
         seatToGuest.delete(originalMovingSeatId);
         seatToGuest.delete(targetSeat.id);
@@ -337,9 +318,6 @@ export function applySitAwayOptimization(
         );
 
         if (newViolations < baselineViolations) {
-          // Improvement! Keep the swap
-          console.log(`  Swap ${guestToMove.name} <-> ${targetGuest.name}: violations ${baselineViolations} -> ${newViolations} OK`);
-          resolved = true;
           break;
         } else {
           // No improvement, rollback
@@ -359,9 +337,6 @@ export function applySitAwayOptimization(
         );
 
         if (newViolations < baselineViolations) {
-          // Improvement! Keep the move
-          console.log(`  Move ${guestToMove.name} to empty seat: violations ${baselineViolations} -> ${newViolations} OK`);
-          resolved = true;
           break;
         } else {
           // No improvement, rollback
@@ -369,10 +344,6 @@ export function applySitAwayOptimization(
           seatToGuest.set(originalMovingSeatId, guestToMove.id);
         }
       }
-    }
-
-    if (!resolved) {
-      console.log(`  Could not resolve sit-away violation for ${higherPriority.name} & ${lowerPriority.name} after ${attempts} attempts`);
     }
   }
 }

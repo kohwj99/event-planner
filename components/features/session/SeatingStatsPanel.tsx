@@ -38,10 +38,12 @@ import {
   ExpandMore,
 } from '@mui/icons-material';
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useEventStore } from '@/store/eventStore';
 // FIXED: Import EnhancedAdjacency type along with the function
 import { getEnhancedAdjacentSeats, EnhancedAdjacency } from '@/utils/adjacencyHelper';
+import { ProximityViolation } from '@/utils/violationDetector';
+import type { Table as SeatTable } from '@/types/Table';
 // Note: violations are now read directly from seatStore
 
 interface SeatingStats {
@@ -67,20 +69,20 @@ interface SeatingStats {
   hasUnseatedGuests: boolean;
 
   // Proximity violations
-  proximityViolations: any[];
+  proximityViolations: ProximityViolation[];
 }
 
 // ADDED: Interface for current adjacency item with guest details
 interface CurrentAdjacencyItem {
   guestId: string;
-  guest: any;
+  guest: Guest;
   adjacencyType: 'side' | 'opposite' | 'edge';
 }
 
 // ADDED: Interface for current session adjacency data
 interface CurrentSessionAdjacency {
   trackedGuestId: string;
-  trackedGuest: any;
+  trackedGuest: Guest;
   isSeated: boolean;
   adjacencies: CurrentAdjacencyItem[];
   totalAdjacencies: number;
@@ -90,7 +92,7 @@ interface CurrentSessionAdjacency {
 // ADDED: Interface for historical adjacency item
 interface HistoricalAdjacencyItem {
   guestId: string;
-  guest: any;
+  guest: Guest;
   count: number;
   byType: {
     side?: number;
@@ -102,7 +104,7 @@ interface HistoricalAdjacencyItem {
 // ADDED: Interface for historical adjacency data
 interface HistoricalAdjacencyData {
   trackedGuestId: string;
-  trackedGuest: any;
+  trackedGuest: Guest;
   adjacencies: HistoricalAdjacencyItem[];
   totalAdjacencies: number;
   uniqueGuests: number;
@@ -131,7 +133,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
   const getFilteredTrackedGuestHistory = useEventStore((s) => s.getFilteredTrackedGuestHistory);
   
   const guestLookup = useMemo(() => {
-    const lookup: Record<string, any> = {};
+    const lookup: Record<string, Guest> = {};
     [...hostGuests, ...externalGuests].forEach((g) => {
       lookup[g.id] = g;
     });
@@ -194,7 +196,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
     }
 
     // Build guest-to-seat mapping
-    const guestSeatMap = new Map<string, { tableId: string; seatId: string; table: any }>();
+    const guestSeatMap = new Map<string, { tableId: string; seatId: string; table: SeatTable }>();
     tables.forEach(table => {
       table.seats.forEach(seat => {
         if (seat.assignedGuestId) {
@@ -242,7 +244,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
         })
         .filter((adj: EnhancedAdjacency) => {
           // Exclude locked seats
-          const adjSeat = table.seats.find((s: any) => s.id === adj.seatId);
+          const adjSeat = table.seats.find((s) => s.id === adj.seatId);
           return adjSeat && !adjSeat.locked;
         })
         .map((adj: EnhancedAdjacency) => ({
@@ -758,7 +760,7 @@ export default function SeatingStatsPanel({ eventId, sessionId }: SeatingStatsPa
                   </Box>
                 ) : (
                   <List dense disablePadding>
-                    {stats.proximityViolations.map((violation: any, index: number) => (
+                    {stats.proximityViolations.map((violation: ProximityViolation, index: number) => (
                       <ListItem
                         key={index}
                         sx={{

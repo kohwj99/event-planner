@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import { useEventStore } from '@/store/eventStore';
 import { useSeatStore } from '@/store/seatStore';
-import { useGuestStore } from '@/store/guestStore';
+import { useGuestStore, Guest } from '@/store/guestStore';
 import { useColorModeStore } from '@/store/colorModeStore';
 import { detectProximityViolations } from '@/utils/violationDetector';
 import { StoredProximityViolation, SessionUISettings, DEFAULT_SESSION_UI_SETTINGS } from '@/types/Event';
@@ -218,7 +218,7 @@ export const useSessionLoader = (sessionId: string | null) => {
 
     // CRITICAL FIX: Use the new setGuests function for bulk sync
     const sessionGuests = getSessionGuests(newSessionId);
-    let allLoadedGuests: any[] = [];
+    let allLoadedGuests: Guest[] = [];
     
     if (sessionGuests) {
       const { hostGuests, externalGuests } = sessionGuests;
@@ -237,7 +237,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     }
 
     // Build guest lookup for violation detection
-    const guestLookup: Record<string, any> = {};
+    const guestLookup: Record<string, Guest> = {};
     allLoadedGuests.forEach(g => {
       guestLookup[g.id] = g;
     });
@@ -353,7 +353,7 @@ export const useSessionLoader = (sessionId: string | null) => {
     setGuests(hostGuests, externalGuests);
     
     // Update guest lookup in seatStore
-    const guestLookup: Record<string, any> = {};
+    const guestLookup: Record<string, Guest> = {};
     [...hostGuests, ...externalGuests].forEach(g => {
       guestLookup[g.id] = g;
     });

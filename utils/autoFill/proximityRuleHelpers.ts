@@ -13,6 +13,7 @@
  */
 
 import { SitTogetherRule, SitAwayRule } from '@/types/Event';
+import { Guest } from '@/store/guestStore';
 
 /**
  * Check if a sit-together rule exists for the given pair of guests.
@@ -77,7 +78,7 @@ export function getSitAwayGuests(guestId: string, rules: SitAwayRule[]): string[
 /**
  * Check if a guest is a VIP (ranking 1-4).
  */
-export function isVIP(guest: any): boolean {
+export function isVIP(guest: Guest): boolean {
   const ranking = Number(guest?.ranking) || Infinity;
   return ranking >= 1 && ranking <= 4;
 }

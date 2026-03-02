@@ -1,6 +1,7 @@
 // src/utils/swapHelper.ts
 import { Table } from '@/types/Table';
 import { Seat, SeatMode } from '@/types/Seat';
+import { Guest } from '@/store/guestStore';
 import {
   validateSeatSwap,
   validateGuestSeatAssignment,
@@ -20,11 +21,52 @@ export interface SwapValidation {
   };
 }
 
+export interface ViolationDetail {
+  type: 'sit-together' | 'sit-away';
+  guest1Id: string;
+  guest2Id: string | null;
+  tableId: string;
+  seatId: string;
+}
+
+export interface SwapCandidateResult {
+  tableId: string;
+  tableLabel: string;
+  seatId: string;
+  seatNumber: number;
+  seatMode: SeatMode;
+  guestId: string;
+  guest: Guest;
+  validation: SwapValidation;
+  violationsAfterSwap: ViolationDetail[];
+  violationCount: number;
+}
+
+export interface IncompatibleSwapCandidateResult {
+  tableId: string;
+  tableLabel: string;
+  seatId: string;
+  seatNumber: number;
+  seatMode: SeatMode;
+  sourceSeatMode: SeatMode;
+  guestId: string;
+  guest: Guest;
+  seatModeValidation: {
+    isCompatible: boolean;
+    guest1CanSitInSeat2: boolean;
+    guest2CanSitInSeat1: boolean;
+    seat1Mode: SeatMode;
+    seat2Mode: SeatMode;
+    reasons: string[];
+  };
+  reasons: string[];
+}
+
 export interface ViolationPrediction {
   sitTogetherViolations: number;
   sitAwayViolations: number;
   totalViolations: number;
-  details: any[];
+  details: ViolationDetail[];
 }
 
 /**
@@ -35,7 +77,7 @@ export interface ViolationPrediction {
 export function validateSwap(
   seat1: Seat | undefined,
   seat2: Seat | undefined,
-  guestLookup?: Record<string, any>
+  guestLookup?: Record<string, Guest>
 ): SwapValidation {
   // Basic checks without guest info
   if (!seat1 || !seat2) {
@@ -136,7 +178,7 @@ function getAdjacentSeatIds(seat: Seat, allSeats: Seat[]): string[] {
 function shouldSitAway(
   guest1Id: string,
   guest2Id: string,
-  sitAwayRules: any[]
+  sitAwayRules: Array<{ id: string; guest1Id: string; guest2Id: string }>
 ): boolean {
   return sitAwayRules.some(
     (rule) =>
@@ -154,7 +196,7 @@ export function predictViolationsAfterSwap(
   seat1Id: string,
   seat2TableId: string,
   seat2Id: string,
-  proximityRules: { sitTogether: any[]; sitAway: any[] }
+  proximityRules: { sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>; sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }> }
 ): ViolationPrediction {
   // Create a deep copy of tables for simulation
   const simulatedTables = JSON.parse(JSON.stringify(tables)) as Table[];
@@ -182,7 +224,7 @@ export function predictViolationsAfterSwap(
   // Check violations
   let sitTogetherViolations = 0;
   let sitAwayViolations = 0;
-  const details: any[] = [];
+  const details: ViolationDetail[] = [];
 
   // Check all seats for violations
   simulatedTables.forEach((table) => {
@@ -255,8 +297,8 @@ export function getSwapCandidates(
   tables: Table[],
   sourceTableId: string,
   sourceSeatId: string,
-  guestLookup: Record<string, any>,
-  proximityRules: { sitTogether: any[]; sitAway: any[] }
+  guestLookup: Record<string, Guest>,
+  proximityRules: { sitTogether: Array<{ id: string; guest1Id: string; guest2Id: string }>; sitAway: Array<{ id: string; guest1Id: string; guest2Id: string }> }
 ) {
   const sourceTable = tables.find((t) => t.id === sourceTableId);
   const sourceSeat = sourceTable?.seats.find((s) => s.id === sourceSeatId);
@@ -266,7 +308,7 @@ export function getSwapCandidates(
   }
 
   const sourceGuest = guestLookup[sourceSeat.assignedGuestId];
-  const candidates: any[] = [];
+  const candidates: SwapCandidateResult[] = [];
 
   tables.forEach((table) => {
     table.seats.forEach((seat) => {
@@ -323,7 +365,7 @@ export function getIncompatibleSwapCandidates(
   tables: Table[],
   sourceTableId: string,
   sourceSeatId: string,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ) {
   const sourceTable = tables.find((t) => t.id === sourceTableId);
   const sourceSeat = sourceTable?.seats.find((s) => s.id === sourceSeatId);
@@ -339,7 +381,7 @@ export function getIncompatibleSwapCandidates(
     fromHost: sourceGuest?.fromHost ?? false,
   };
 
-  const incompatibleCandidates: any[] = [];
+  const incompatibleCandidates: IncompatibleSwapCandidateResult[] = [];
 
   tables.forEach((table) => {
     table.seats.forEach((seat) => {

@@ -11,6 +11,9 @@
  */
 
 import { ProximityRules } from '@/types/Event';
+import { Seat } from '@/types/Seat';
+import { Table } from '@/types/Table';
+import { Guest } from '@/store/guestStore';
 import { ProximityViolation } from '../violationDetector';
 import { getAdjacentSeats } from './seatFinder';
 
@@ -21,19 +24,15 @@ import { getAdjacentSeats } from './seatFinder';
  * Returns a deduplicated array of ProximityViolation objects.
  */
 export function performFinalViolationCheck(
-  tables: any[],
+  tables: Table[],
   proximityRules: ProximityRules,
-  guestLookup: Record<string, any>
+  guestLookup: Record<string, Guest>
 ): ProximityViolation[] {
   const violations: ProximityViolation[] = [];
   const processedPairs = new Set<string>(); // Track processed pairs to avoid duplicates
 
-  console.log('=== FINAL VIOLATION CHECK ===');
-  console.log(`Checking ${proximityRules.sitTogether.length} sit-together rules`);
-  console.log(`Checking ${proximityRules.sitAway.length} sit-away rules`);
-
   // Build a map of guestId -> seat location for quick lookup
-  const guestLocationMap = new Map<string, { table: any; seat: any }>();
+  const guestLocationMap = new Map<string, { table: Table; seat: Seat }>();
 
   for (const table of tables) {
     for (const seat of table.seats || []) {
@@ -59,7 +58,6 @@ export function performFinalViolationCheck(
     const guest2 = guestLookup[guest2Id];
 
     if (!guest1 || !guest2) {
-      console.log(`  Sit-together: Skipping rule - guest not found (${guest1Id} or ${guest2Id})`);
       continue;
     }
 
@@ -68,19 +66,11 @@ export function performFinalViolationCheck(
 
     // Case 1: One or both guests not seated
     if (!loc1 || !loc2) {
-      if (!loc1 && !loc2) {
-        console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - Neither seated (no violation)`);
-      } else if (!loc1) {
-        console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - ${guest1.name} not seated (no violation)`);
-      } else {
-        console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - ${guest2.name} not seated (no violation)`);
-      }
       continue;
     }
 
     // Case 2: Guests on different tables
     if (loc1.table.id !== loc2.table.id) {
-      console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - VIOLATION (different tables: ${loc1.table.label} vs ${loc2.table.label})`);
       violations.push({
         type: 'sit-together',
         guest1Id,
@@ -100,10 +90,7 @@ export function performFinalViolationCheck(
     const adjacentSeats = getAdjacentSeats(loc1.seat, loc1.table.seats);
     const isAdjacent = adjacentSeats.some(s => s.id === loc2.seat.id);
 
-    if (isAdjacent) {
-      console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - OK (adjacent)`);
-    } else {
-      console.log(`  Sit-together: ${guest1.name} & ${guest2.name} - VIOLATION (not adjacent on ${loc1.table.label})`);
+    if (!isAdjacent) {
       violations.push({
         type: 'sit-together',
         guest1Id,
@@ -134,7 +121,6 @@ export function performFinalViolationCheck(
     const guest2 = guestLookup[guest2Id];
 
     if (!guest1 || !guest2) {
-      console.log(`  Sit-away: Skipping rule - guest not found (${guest1Id} or ${guest2Id})`);
       continue;
     }
 
@@ -143,13 +129,11 @@ export function performFinalViolationCheck(
 
     // Case 1: One or both guests not seated - no violation possible
     if (!loc1 || !loc2) {
-      console.log(`  Sit-away: ${guest1.name} & ${guest2.name} - OK (one or both not seated)`);
       continue;
     }
 
     // Case 2: Guests on different tables - no violation
     if (loc1.table.id !== loc2.table.id) {
-      console.log(`  Sit-away: ${guest1.name} & ${guest2.name} - OK (different tables)`);
       continue;
     }
 
@@ -158,7 +142,6 @@ export function performFinalViolationCheck(
     const isAdjacent = adjacentSeats.some(s => s.id === loc2.seat.id);
 
     if (isAdjacent) {
-      console.log(`  Sit-away: ${guest1.name} & ${guest2.name} - VIOLATION (adjacent on ${loc1.table.label})`);
       violations.push({
         type: 'sit-away',
         guest1Id,
@@ -171,12 +154,8 @@ export function performFinalViolationCheck(
         seat2Id: loc2.seat.id,
         reason: `${guest1.name} and ${guest2.name} should not sit together but are adjacent`,
       });
-    } else {
-      console.log(`  Sit-away: ${guest1.name} & ${guest2.name} - OK (not adjacent)`);
     }
   }
-
-  console.log(`=== FINAL CHECK COMPLETE: ${violations.length} violations found ===`);
 
   return violations;
 }

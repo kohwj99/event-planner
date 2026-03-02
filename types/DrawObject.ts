@@ -2,7 +2,7 @@
  * Supported draw object shapes.
  * Extensible: add new shape types to this union and register them in drawShapeRegistry.ts.
  */
-export type DrawObjectShape = "rectangle" | "ellipse" | "line" | "textbox";
+export type DrawObjectShape = "rectangle" | "ellipse";
 
 /**
  * Visual style for a draw object.

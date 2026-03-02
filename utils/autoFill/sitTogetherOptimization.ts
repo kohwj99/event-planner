@@ -32,6 +32,9 @@ import {
   findGuestSeat,
   getAvailableSeatsOnTable,
 } from './seatFinder';
+import { Seat } from '@/types/Seat';
+import { Table } from '@/types/Table';
+import { Guest } from '@/store/guestStore';
 
 /**
  * Find the best target table for consolidating a cluster.
@@ -40,12 +43,12 @@ import {
  */
 function findBestTargetTable(
   clusterGuestIds: string[],
-  tables: any[],
+  tables: Table[],
   seatToGuest: Map<string, string>,
-  guestLookup: Map<string, any>,
-  comparator: (a: any, b: any) => number,
+  guestLookup: Map<string, Guest>,
+  comparator: (a: Guest, b: Guest) => number,
   lockedGuestMap: Map<string, LockedGuestLocation>
-): { table: any; hasLockedMember: boolean } | null {
+): { table: Table; hasLockedMember: boolean } | null {
 
   // First check for locked cluster members
   for (const guestId of clusterGuestIds) {
@@ -59,8 +62,8 @@ function findBestTargetTable(
   }
 
   // Find highest priority guest in cluster and their table
-  let highestPriorityGuest: any = null;
-  let highestPriorityGuestLoc: { seat: any; table: any } | null = null;
+  let highestPriorityGuest: Guest | null = null;
+  let highestPriorityGuestLoc: { seat: Seat; table: Table } | null = null;
 
   for (const guestId of clusterGuestIds) {
     const guest = guestLookup.get(guestId);
@@ -80,7 +83,7 @@ function findBestTargetTable(
   }
 
   // Fallback: find table with most available contiguous seats
-  let bestTable: any = null;
+  let bestTable: Table | null = null;
   let maxAvailable = 0;
 
   for (const table of tables) {
@@ -100,11 +103,11 @@ function findBestTargetTable(
  */
 function performCrossTableMove(
   guestId: string,
-  targetSeat: any,
-  targetTable: any,
-  tables: any[],
+  targetSeat: Seat,
+  targetTable: Table,
+  tables: Table[],
   seatToGuest: Map<string, string>,
-  guestLookup: Map<string, any>,
+  guestLookup: Map<string, Guest>,
   lockedGuestMap: Map<string, LockedGuestLocation>,
   _proximityRules: ProximityRules
 ): boolean {
@@ -141,13 +144,11 @@ function performCrossTableMove(
     seatToGuest.set(targetSeat.id, guestId);
     seatToGuest.set(currentSeatId, targetSeatOccupant);
 
-    console.log(`  Cross-table swap: ${guest.name} <-> ${otherGuest.name}`);
   } else {
     // Empty seat - just move
     seatToGuest.delete(currentSeatId);
     seatToGuest.set(targetSeat.id, guestId);
 
-    console.log(`  Cross-table move: ${guest.name} to ${targetTable.label}`);
   }
 
   return true;
@@ -160,10 +161,10 @@ function performCrossTableMove(
  */
 export function applySitTogetherOptimization(
   seatToGuest: Map<string, string>,
-  tables: any[],
+  tables: Table[],
   proximityRules: ProximityRules,
-  allGuests: any[],
-  comparator: (a: any, b: any) => number,
+  allGuests: Guest[],
+  comparator: (a: Guest, b: Guest) => number,
   lockedGuestMap: Map<string, LockedGuestLocation>
 ): void {
   if (proximityRules.sitTogether.length === 0) return;
@@ -173,7 +174,6 @@ export function applySitTogetherOptimization(
   // Build clusters of guests who should sit together
   const clusters = buildSitTogetherClusters(proximityRules.sitTogether);
 
-  console.log(`Processing ${clusters.size} sit-together clusters`);
 
   // Process each cluster
   for (const [_rootId, clusterGuestIds] of clusters) {
@@ -187,10 +187,9 @@ export function applySitTogetherOptimization(
       comparator
     );
 
-    console.log(`Cluster: ${orderedGuests.map(id => guestLookup.get(id)?.name || id).join(' - ')}`);
 
     // Find current locations of all cluster members
-    const clusterLocations: { guestId: string; seat: any; table: any; isLocked: boolean }[] = [];
+    const clusterLocations: { guestId: string; seat: Seat; table: Table; isLocked: boolean }[] = [];
 
     for (const guestId of orderedGuests) {
       const isLocked = lockedGuestMap.has(guestId);
@@ -214,7 +213,6 @@ export function applySitTogetherOptimization(
     // If cluster spans multiple tables, try to move guests to the same table
     // =========================================================================
     if (tableIds.size > 1) {
-      console.log(`  Cluster spans ${tableIds.size} tables - attempting cross-table consolidation`);
 
       // Find the best target table
       const targetTableResult = findBestTargetTable(
@@ -227,12 +225,10 @@ export function applySitTogetherOptimization(
       );
 
       if (!targetTableResult) {
-        console.log(`  Could not find suitable target table for cluster`);
         continue;
       }
 
       const targetTable = targetTableResult.table;
-      console.log(`  Target table: ${targetTable.label} (has locked member: ${targetTableResult.hasLockedMember})`);
 
       // Find guests that need to be moved to the target table
       const guestsToMove: string[] = [];
@@ -242,7 +238,6 @@ export function applySitTogetherOptimization(
         }
       }
 
-      console.log(`  Guests to move: ${guestsToMove.map(id => guestLookup.get(id)?.name || id).join(', ')}`);
 
       // Find guests already on target table (as anchors)
       const anchorGuests = clusterLocations
@@ -255,7 +250,7 @@ export function applySitTogetherOptimization(
         if (!guest) continue;
 
         // Get seats adjacent to anchor guests on target table
-        const adjacentSeats: any[] = [];
+        const adjacentSeats: Seat[] = [];
         for (const anchorId of anchorGuests) {
           const anchorLoc = findGuestSeat(anchorId, tables, seatToGuest);
           if (anchorLoc && anchorLoc.table.id === targetTable.id) {
@@ -303,8 +298,8 @@ export function applySitTogetherOptimization(
         // If no adjacent seat worked, try any available seat on target table
         if (!moved) {
           const allTargetSeats = targetTable.seats
-            .filter((s: any) => !s.locked && canPlaceGuestInSeat(guest, s))
-            .sort((a: any, b: any) => {
+            .filter((s: Seat) => !s.locked && canPlaceGuestInSeat(guest, s))
+            .sort((a: Seat, b: Seat) => {
               const aEmpty = !seatToGuest.get(a.id);
               const bEmpty = !seatToGuest.get(b.id);
               if (aEmpty && !bEmpty) return -1;
@@ -331,12 +326,11 @@ export function applySitTogetherOptimization(
         }
 
         if (!moved) {
-          console.log(`  Could not move ${guest.name} to ${targetTable.label}`);
         }
       }
 
       // Re-check if cluster is now on same table
-      const newLocations: { guestId: string; seat: any; table: any; isLocked: boolean }[] = [];
+      const newLocations: { guestId: string; seat: Seat; table: Table; isLocked: boolean }[] = [];
       for (const guestId of orderedGuests) {
         const isLocked = lockedGuestMap.has(guestId);
         const location = findGuestSeat(guestId, tables, seatToGuest);
@@ -347,10 +341,8 @@ export function applySitTogetherOptimization(
 
       const newTableIds = new Set(newLocations.map(loc => loc.table.id));
       if (newTableIds.size > 1) {
-        console.log(`  Cluster still spans ${newTableIds.size} tables after consolidation attempt`);
         // Continue to try within-table optimization for the largest group
       } else {
-        console.log(`  Cluster successfully consolidated on ${targetTable.label}`);
       }
 
       // Update clusterLocations for within-table optimization
@@ -409,7 +401,7 @@ export function applySitTogetherOptimization(
         if (currentAdjacentPartners.length === partnersOnTable.length) continue;
 
         // Find seats adjacent to at least one partner
-        const partnerSeats: any[] = [];
+        const partnerSeats: Seat[] = [];
         for (const partnerId of partnersOnTable) {
           const partnerLoc = findGuestSeat(partnerId, tables, seatToGuest);
           if (partnerLoc && partnerLoc.table.id === table.id) {
@@ -418,7 +410,7 @@ export function applySitTogetherOptimization(
         }
 
         // Get all seats adjacent to any partner
-        const candidateSeats: any[] = [];
+        const candidateSeats: Seat[] = [];
         for (const partnerSeat of partnerSeats) {
           const adjSeats = getAdjacentSeats(partnerSeat, allSeats);
           for (const adjSeat of adjSeats) {
@@ -431,7 +423,7 @@ export function applySitTogetherOptimization(
         }
 
         // Score each candidate seat by how many partners would be adjacent
-        let bestSeat: any = null;
+        let bestSeat: Seat | null = null;
         let bestScore = currentAdjacentPartners.length;
 
         for (const candidateSeat of candidateSeats) {
@@ -493,7 +485,6 @@ export function applySitTogetherOptimization(
                 seatToGuest.set(bestSeat.id, guestId);
                 seatToGuest.set(guestCurrentSeat.id, currentGuestInBestSeat);
 
-                console.log(`  Swapped ${guest.name} to improve cluster adjacency`);
               }
             }
           } else {
@@ -501,7 +492,6 @@ export function applySitTogetherOptimization(
             seatToGuest.delete(guestCurrentSeat.id);
             seatToGuest.set(bestSeat.id, guestId);
 
-            console.log(`  Moved ${guest.name} to empty adjacent seat`);
           }
         }
       }
@@ -552,7 +542,6 @@ export function applySitTogetherOptimization(
     // Handle cross-table case in second pass
     // =========================================================================
     if (stayingLoc.table.id !== movingLoc.table.id) {
-      console.log(`  Second pass cross-table: Moving ${movingGuest.name} to ${stayingGuest.name}'s table`);
 
       const adjacentToStaying = getAdjacentSeats(stayingLoc.seat, stayingLoc.table.seats);
 
@@ -566,7 +555,6 @@ export function applySitTogetherOptimization(
       if (emptyAdjacent) {
         seatToGuest.delete(movingLoc.seat.id);
         seatToGuest.set(emptyAdjacent.id, movingGuest.id);
-        console.log(`  Cross-table direct move: ${movingGuest.name} to empty seat next to ${stayingGuest.name}`);
         continue;
       }
 
@@ -595,7 +583,6 @@ export function applySitTogetherOptimization(
         seatToGuest.set(adjSeat.id, movingGuest.id);
         seatToGuest.set(movingLoc.seat.id, adjGuestId);
 
-        console.log(`  Cross-table swap: ${movingGuest.name} <-> ${adjGuest.name} to satisfy sit-together`);
         break;
       }
 
@@ -615,7 +602,6 @@ export function applySitTogetherOptimization(
     if (emptyAdjacent) {
       seatToGuest.delete(movingLoc.seat.id);
       seatToGuest.set(emptyAdjacent.id, movingGuest.id);
-      console.log(`  Direct move: ${movingGuest.name} to sit next to ${stayingGuest.name}`);
       continue;
     }
 
@@ -643,7 +629,6 @@ export function applySitTogetherOptimization(
       seatToGuest.set(adjSeat.id, movingGuest.id);
       seatToGuest.set(movingLoc.seat.id, adjGuestId);
 
-      console.log(`  Swap: ${movingGuest.name} <-> ${adjGuest.name} to satisfy sit-together`);
       break;
     }
   }
